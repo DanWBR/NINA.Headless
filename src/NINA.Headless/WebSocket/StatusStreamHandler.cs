@@ -22,6 +22,7 @@ public static class StatusStreamHandler {
         var equip = context.RequestServices.GetRequiredService<EquipmentManager>();
         var liveStack = context.RequestServices.GetRequiredService<LiveStackingService>();
         var sequence = context.RequestServices.GetRequiredService<SequenceEngine>();
+        var phd2 = context.RequestServices.GetRequiredService<PHD2Client>();
         var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
 
         using var ws = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
@@ -40,11 +41,47 @@ public static class StatusStreamHandler {
             while (!cts.Token.IsCancellationRequested && ws.State == WebSocketState.Open) {
                 try {
                     var seqStatus = sequence.GetStatus();
+
+                    // Compact guider payload: last 60 samples for inline chart
+                    object? guiderPayload = null;
+                    if (phd2.IsConnected) {
+                        var steps = phd2.SnapshotSteps();
+                        var tail = steps.Skip(Math.Max(0, steps.Count - 60));
+                        guiderPayload = new {
+                            connected = true,
+                            host = phd2.Host,
+                            port = phd2.Port,
+                            appState = phd2.AppState,
+                            guiding = phd2.IsGuiding,
+                            calibrating = phd2.IsCalibrating,
+                            paused = phd2.IsPaused,
+                            looping = phd2.IsLooping,
+                            settling = phd2.IsSettling,
+                            pixelScale = phd2.PixelScale,
+                            rmsRA = phd2.RmsRA,
+                            rmsDec = phd2.RmsDec,
+                            rmsTotal = phd2.RmsTotal,
+                            peakRA = phd2.PeakRA,
+                            peakDec = phd2.PeakDec,
+                            stepCount = steps.Count,
+                            lastAlert = phd2.LastAlert,
+                            lastSettleStatus = phd2.LastSettleStatus,
+                            recentSteps = tail.Select(s => new {
+                                t = ((DateTimeOffset)s.Timestamp).ToUnixTimeMilliseconds(),
+                                ra = s.RaArcsec,
+                                dec = s.DecArcsec
+                            })
+                        };
+                    } else {
+                        guiderPayload = new { connected = false, appState = "Stopped" };
+                    }
+
                     var status = new {
                         type = "status",
                         timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                         equipment = equip.GetEquipmentStatus(),
                         liveStack = liveStack.GetStatus(),
+                        guider = guiderPayload,
                         sequence = new {
                             state = seqStatus.State,
                             currentItemIndex = seqStatus.CurrentItemIndex,

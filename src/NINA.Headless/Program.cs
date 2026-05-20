@@ -19,6 +19,7 @@ builder.Services.AddSingleton<SkyCatalogService>();
 builder.Services.AddSingleton<PlateSolveService>();
 builder.Services.AddSingleton<SlewCenterService>();
 builder.Services.AddSingleton<ProfileService>();
+builder.Services.AddSingleton<PHD2Client>();
 builder.Services.AddSingleton(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
@@ -43,6 +44,7 @@ app.MapRotatorEndpoints();
 app.MapFlatDeviceEndpoints();
 app.MapDomeEndpoints();
 app.MapWeatherEndpoints();
+app.MapGuiderEndpoints();
 app.MapSequenceEndpoints();
 app.MapSkyEndpoints();
 app.MapSystemEndpoints();

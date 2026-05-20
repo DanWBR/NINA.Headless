@@ -120,6 +120,27 @@ function ninaApp() {
             cloudCover: null, rainRate: null, skyQuality: null
         },
 
+        // Guider (PHD2)
+        guider: {
+            connected: false, host: 'localhost', port: 4400,
+            appState: 'Stopped', guiding: false, calibrating: false,
+            paused: false, looping: false, settling: false,
+            pixelScale: 0, rmsRA: 0, rmsDec: 0, rmsTotal: 0,
+            peakRA: 0, peakDec: 0, stepCount: 0,
+            lastAlert: null, lastSettleStatus: null,
+            recentSteps: []
+        },
+        guiderHost: 'localhost',
+        guiderPort: 4400,
+        guiderSettlePixels: 1.5,
+        guiderSettleTime: 10,
+        guiderSettleTimeout: 40,
+        guiderDitherPx: 5.0,
+        guiderDitherRaOnly: false,
+        guideChartW: 600,
+        guideChartH: 160,
+        guideChartScale: 2.0, // arcsec range each direction (auto-expands)
+
         // In-flight request tracking
         _pending: {},
         _previewFetching: false,
@@ -1124,6 +1145,100 @@ function ninaApp() {
             catch (e) { this.toast('Weather refresh failed', 'error'); }
         },
 
+        // --- Guider (PHD2) ---
+        async guiderConnect() {
+            try {
+                await this.apiPost('/api/guider/connect', { host: this.guiderHost, port: this.guiderPort });
+                this.guider.connected = true;
+                this.guider.host = this.guiderHost;
+                this.guider.port = this.guiderPort;
+                this.toast(`PHD2 connected at ${this.guiderHost}:${this.guiderPort}`, 'ok');
+            } catch (e) {
+                this.toast('PHD2 connect failed: ' + e.message, 'error');
+            }
+        },
+        async guiderDisconnect() {
+            try {
+                await this.apiPost('/api/guider/disconnect');
+                this.guider.connected = false;
+                this.guider.appState = 'Stopped';
+                this.guider.guiding = false;
+                this.guider.recentSteps = [];
+                this.toast('PHD2 disconnected', 'warn');
+            } catch (e) { this.toast('PHD2 disconnect failed', 'error'); }
+        },
+        async guiderStart() {
+            try {
+                await this.apiPost('/api/guider/guide', {
+                    settlePixels: this.guiderSettlePixels,
+                    settleTime: this.guiderSettleTime,
+                    settleTimeout: this.guiderSettleTimeout,
+                    recalibrate: false
+                });
+                this.toast('Guiding started', 'ok');
+            } catch (e) { this.toast('Start guide failed: ' + e.message, 'error'); }
+        },
+        async guiderStop() {
+            try { await this.apiPost('/api/guider/stop'); this.toast('Guiding stopped', 'warn'); }
+            catch (e) { this.toast('Stop failed', 'error'); }
+        },
+        async guiderLoop() {
+            try { await this.apiPost('/api/guider/loop'); this.toast('Looping exposures', 'ok'); }
+            catch (e) { this.toast('Loop failed', 'error'); }
+        },
+        async guiderPause() {
+            try { await this.apiPost('/api/guider/pause'); this.toast('Guiding paused', 'warn'); }
+            catch (e) { this.toast('Pause failed', 'error'); }
+        },
+        async guiderResume() {
+            try { await this.apiPost('/api/guider/resume'); this.toast('Guiding resumed', 'ok'); }
+            catch (e) { this.toast('Resume failed', 'error'); }
+        },
+        async guiderDither() {
+            try {
+                await this.apiPost('/api/guider/dither', {
+                    pixels: this.guiderDitherPx,
+                    raOnly: this.guiderDitherRaOnly,
+                    settlePixels: this.guiderSettlePixels,
+                    settleTime: this.guiderSettleTime,
+                    settleTimeout: this.guiderSettleTimeout
+                });
+                this.toast(`Dither ${this.guiderDitherPx}px requested`, 'ok');
+            } catch (e) { this.toast('Dither failed: ' + e.message, 'error'); }
+        },
+        async guiderFindStar() {
+            try { await this.apiPost('/api/guider/find-star'); this.toast('Auto-selecting star', 'ok'); }
+            catch (e) { this.toast('Find star failed', 'error'); }
+        },
+        async guiderClearHistory() {
+            try {
+                await this.apiPost('/api/guider/clear-history');
+                this.guider.recentSteps = [];
+                this.toast('Guide history cleared', 'ok');
+            } catch (e) { this.toast('Clear failed', 'error'); }
+        },
+
+        // Compute SVG polyline points string for the guider chart.
+        // axis: 'ra' or 'dec'. Maps RA/Dec arcsec → y-coordinate in chart space.
+        // Returns '' (empty polyline) when there's no data.
+        buildGuidePath(axis) {
+            const steps = this.guider.recentSteps || [];
+            if (steps.length === 0) return '';
+            const w = this.guideChartW, h = this.guideChartH;
+            const scale = Math.max(this.guideChartScale, 0.5);
+            const n = Math.max(steps.length, 1);
+            const pts = [];
+            for (let i = 0; i < steps.length; i++) {
+                const x = (i / Math.max(n - 1, 1)) * w;
+                const v = axis === 'ra' ? steps[i].ra : steps[i].dec;
+                // clamp and map: +scale → top (y=0), -scale → bottom (y=h)
+                const clamped = Math.max(-scale, Math.min(scale, v));
+                const y = (h / 2) - (clamped / scale) * (h / 2);
+                pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+            }
+            return pts.join(' ');
+        },
+
         async pollCameraInfo() {
             try {
                 const data = await this.apiGet('/api/camera/status');
@@ -1455,6 +1570,43 @@ function ninaApp() {
                     rainRate: eq.weather.rainRate,
                     skyQuality: eq.weather.skyQuality
                 };
+            }
+            if (msg.guider) {
+                const g = msg.guider;
+                if (!g.connected) {
+                    if (this.guider.connected) {
+                        // server-side disconnect (PHD2 crashed?)
+                        this.guider.connected = false;
+                        this.guider.appState = 'Stopped';
+                        this.guider.guiding = false;
+                        this.guider.recentSteps = [];
+                    }
+                } else {
+                    this.guider = {
+                        connected: true,
+                        host: g.host || this.guider.host,
+                        port: g.port || this.guider.port,
+                        appState: g.appState || 'Stopped',
+                        guiding: g.guiding || false,
+                        calibrating: g.calibrating || false,
+                        paused: g.paused || false,
+                        looping: g.looping || false,
+                        settling: g.settling || false,
+                        pixelScale: g.pixelScale || 0,
+                        rmsRA: g.rmsRA || 0,
+                        rmsDec: g.rmsDec || 0,
+                        rmsTotal: g.rmsTotal || 0,
+                        peakRA: g.peakRA || 0,
+                        peakDec: g.peakDec || 0,
+                        stepCount: g.stepCount || 0,
+                        lastAlert: g.lastAlert || null,
+                        lastSettleStatus: g.lastSettleStatus || null,
+                        recentSteps: g.recentSteps || []
+                    };
+                    // Auto-expand chart scale based on peak (with floor of 2")
+                    const need = Math.max(this.guider.peakRA, this.guider.peakDec, 1.0) * 1.2;
+                    if (need > this.guideChartScale) this.guideChartScale = Math.ceil(need);
+                }
             }
             if (msg.liveStack) {
                 this.liveStackEnabled = msg.liveStack.isRunning;

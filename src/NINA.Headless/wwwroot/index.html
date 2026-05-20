@@ -225,21 +225,80 @@
                 </div>
             </div>
 
-            <!-- GUIDER -->
+            <!-- GUIDER (PHD2) -->
             <div x-show="tab === 'guide'" class="tab-panel">
-                <div class="panel-header">Guider</div>
-                <div class="guide-info">
-                    <div class="info-row"><span>RMS RA:</span><strong>--</strong></div>
-                    <div class="info-row"><span>RMS Dec:</span><strong>--</strong></div>
-                    <div class="info-row"><span>Total RMS:</span><strong>--</strong></div>
+                <div class="panel-header">
+                    Guider (PHD2)
+                    <span class="status-indicator-sm" :class="guider.connected ? (guider.guiding ? 'ok' : 'warn') : 'error'"
+                          x-text="guider.connected ? guider.appState : 'Disconnected'"></span>
                 </div>
-                <div class="chart-placeholder">
-                    <p>Guiding graph will appear here when guiding is active</p>
+
+                <!-- Connection panel -->
+                <div x-show="!guider.connected" class="guide-connect-row">
+                    <label>Host<input type="text" x-model="guiderHost" class="input-md"></label>
+                    <label>Port<input type="number" x-model.number="guiderPort" class="input-sm"></label>
+                    <button class="btn btn-primary" @click="guiderConnect()">Connect</button>
                 </div>
-                <div class="control-row actions" style="margin-top: 1rem;">
-                    <button class="btn btn-primary">Start Guiding</button>
-                    <button class="btn">Calibrate</button>
-                    <button class="btn btn-danger">Stop</button>
+
+                <!-- Live metrics -->
+                <div x-show="guider.connected" class="guide-info">
+                    <div class="info-row"><span>State:</span><strong x-text="guider.appState"></strong></div>
+                    <div class="info-row"><span>Pixel Scale:</span><strong x-text="guider.pixelScale ? guider.pixelScale.toFixed(3) + '&quot;/px' : '--'"></strong></div>
+                    <div class="info-row"><span>RMS RA:</span><strong x-text="guider.rmsRA?.toFixed(2) + '&quot;'" :class="guider.rmsRA < 1 ? 'text-ok' : 'text-warn'"></strong></div>
+                    <div class="info-row"><span>RMS Dec:</span><strong x-text="guider.rmsDec?.toFixed(2) + '&quot;'" :class="guider.rmsDec < 1 ? 'text-ok' : 'text-warn'"></strong></div>
+                    <div class="info-row"><span>Total RMS:</span><strong x-text="guider.rmsTotal?.toFixed(2) + '&quot;'" :class="guider.rmsTotal < 1.5 ? 'text-ok' : 'text-warn'"></strong></div>
+                    <div class="info-row"><span>Peak RA:</span><strong x-text="guider.peakRA?.toFixed(2) + '&quot;'"></strong></div>
+                    <div class="info-row"><span>Peak Dec:</span><strong x-text="guider.peakDec?.toFixed(2) + '&quot;'"></strong></div>
+                    <div class="info-row" x-show="guider.settling"><span class="text-warn">Settling…</span></div>
+                    <div class="info-row" x-show="guider.lastSettleStatus === 'done'"><span class="text-ok">Settled</span></div>
+                    <div class="info-row" x-show="guider.lastSettleStatus === 'failed'"><span class="text-danger">Settle failed</span></div>
+                    <div class="info-row" x-show="guider.lastAlert"><span class="text-danger">Alert:</span><strong class="text-danger" x-text="guider.lastAlert"></strong></div>
+                </div>
+
+                <!-- Inline SVG error graph (Chart.js comes in Phase B1) -->
+                <div x-show="guider.connected" class="guide-chart">
+                    <svg :viewBox="`0 0 ${guideChartW} ${guideChartH}`" preserveAspectRatio="none">
+                        <!-- grid -->
+                        <line :x1="0" :x2="guideChartW" :y1="guideChartH/2" :y2="guideChartH/2" stroke="#444" stroke-width="0.5"/>
+                        <line :x1="0" :x2="guideChartW" :y1="guideChartH/4" :y2="guideChartH/4" stroke="#333" stroke-width="0.3" stroke-dasharray="2,2"/>
+                        <line :x1="0" :x2="guideChartW" :y1="3*guideChartH/4" :y2="3*guideChartH/4" stroke="#333" stroke-width="0.3" stroke-dasharray="2,2"/>
+                        <!-- RA path (red) -->
+                        <polyline :points="buildGuidePath('ra')" fill="none" stroke="#e57373" stroke-width="1.2"/>
+                        <!-- Dec path (blue) -->
+                        <polyline :points="buildGuidePath('dec')" fill="none" stroke="#64b5f6" stroke-width="1.2"/>
+                        <!-- axes labels -->
+                        <text x="4" y="12" fill="#888" font-size="9">+<tspan x-text="(guideChartScale).toFixed(1)"></tspan>&quot;</text>
+                        <text :x="4" :y="guideChartH-4" fill="#888" font-size="9">-<tspan x-text="(guideChartScale).toFixed(1)"></tspan>&quot;</text>
+                    </svg>
+                    <div class="guide-chart-legend">
+                        <span><span class="legend-dot" style="background:#e57373;"></span>RA</span>
+                        <span><span class="legend-dot" style="background:#64b5f6;"></span>Dec</span>
+                        <span class="text-muted" x-text="(guider.recentSteps?.length || 0) + ' samples'"></span>
+                    </div>
+                </div>
+
+                <!-- Settle parameters -->
+                <div x-show="guider.connected" class="guide-settle-row">
+                    <label>Settle px<input type="number" x-model.number="guiderSettlePixels" step="0.1" class="input-sm"></label>
+                    <label>Settle time (s)<input type="number" x-model.number="guiderSettleTime" step="1" class="input-sm"></label>
+                    <label>Timeout (s)<input type="number" x-model.number="guiderSettleTimeout" step="1" class="input-sm"></label>
+                </div>
+
+                <!-- Control buttons -->
+                <div x-show="guider.connected" class="control-row actions" style="margin-top: 1rem;">
+                    <button class="btn btn-primary" @click="guiderStart()" :disabled="guider.guiding || guider.calibrating">Start Guiding</button>
+                    <button class="btn" @click="guiderLoop()" :disabled="guider.looping">Loop</button>
+                    <button class="btn" @click="guiderFindStar()" :disabled="guider.guiding">Auto-select Star</button>
+                    <button class="btn" @click="guiderPause()" x-show="guider.guiding && !guider.paused">Pause</button>
+                    <button class="btn" @click="guiderResume()" x-show="guider.paused">Resume</button>
+                    <button class="btn btn-danger" @click="guiderStop()">Stop</button>
+                </div>
+                <div x-show="guider.connected" class="control-row actions">
+                    <label>Dither px<input type="number" x-model.number="guiderDitherPx" step="0.5" min="0.5" max="20" class="input-sm"></label>
+                    <label><input type="checkbox" x-model="guiderDitherRaOnly"> RA only</label>
+                    <button class="btn" @click="guiderDither()" :disabled="!guider.guiding">Dither</button>
+                    <button class="btn btn-sm" @click="guiderClearHistory()" style="margin-left: auto;">Clear History</button>
+                    <button class="btn btn-sm btn-danger" @click="guiderDisconnect()">Disconnect</button>
                 </div>
             </div>
 
@@ -604,15 +663,48 @@
                         </div>
                     </div>
 
-                    <!-- Guider (placeholder for PHD2) -->
-                    <div class="equip-card equip-card-placeholder">
+                    <!-- Guider (PHD2) -->
+                    <div class="equip-card">
                         <div class="equip-card-header">
                             <span class="equip-card-icon">&#x2B50;</span>
-                            <span class="equip-card-title">Guider</span>
-                            <span class="equip-status-dot disconnected"></span>
+                            <span class="equip-card-title">Guider (PHD2)</span>
+                            <span class="equip-status-dot" :class="guider.connected ? (guider.guiding ? 'connected' : 'warn') : 'disconnected'"></span>
                         </div>
                         <div class="equip-card-body">
-                            <p class="text-muted" style="font-size: 12px;">PHD2 integration coming soon (Phase A1)</p>
+                            <div class="equip-select-row" x-show="!guider.connected">
+                                <label class="equip-temp-label" style="flex:1;">
+                                    Host
+                                    <input type="text" x-model="guiderHost" class="input-md" style="width:auto;">
+                                </label>
+                                <label class="equip-temp-label">
+                                    Port
+                                    <input type="number" x-model.number="guiderPort" class="input-sm">
+                                </label>
+                                <button class="btn btn-sm btn-primary" @click="guiderConnect()">Connect</button>
+                            </div>
+                            <div class="equip-detail" x-show="guider.connected">
+                                <div class="equip-detail-name">
+                                    <span x-text="guider.host + ':' + guider.port"></span>
+                                    <span style="margin-left: 12px;"
+                                          :class="guider.guiding ? 'text-ok' : (guider.calibrating ? 'text-warn' : 'text-muted')"
+                                          x-text="guider.appState"></span>
+                                </div>
+                                <div class="equip-detail-props">
+                                    <span x-show="guider.pixelScale">Scale: <strong x-text="guider.pixelScale?.toFixed(3) + '&quot;/px'"></strong></span>
+                                    <span>RMS: <strong :class="guider.rmsTotal < 1.5 ? 'text-ok' : 'text-warn'"
+                                                       x-text="guider.rmsTotal?.toFixed(2) + '&quot;'"></strong></span>
+                                    <span x-show="guider.settling" class="text-warn">SETTLING</span>
+                                    <span x-show="guider.paused" class="text-warn">PAUSED</span>
+                                </div>
+                                <div class="equip-inline-controls">
+                                    <button class="btn btn-sm btn-primary" @click="guiderStart()"
+                                            :disabled="guider.guiding || guider.calibrating">Guide</button>
+                                    <button class="btn btn-sm" @click="guiderDither()"
+                                            :disabled="!guider.guiding">Dither</button>
+                                    <button class="btn btn-sm btn-danger" @click="guiderStop()">Stop</button>
+                                    <button class="btn btn-sm" @click="guiderDisconnect()" style="margin-left:auto;">Disconnect</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 

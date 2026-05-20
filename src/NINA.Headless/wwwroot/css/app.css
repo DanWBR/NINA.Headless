@@ -584,6 +584,66 @@ select.input-sm {
     min-height: 150px;
 }
 
+/* Guider PHD2 graph */
+.guide-connect-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    padding: 10px 14px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+}
+
+.guide-chart {
+    margin: 12px 14px;
+    background: #0d0d18;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.guide-chart svg {
+    width: 100%;
+    height: 160px;
+    display: block;
+}
+
+.guide-chart-legend {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 11px;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border);
+}
+
+.legend-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.guide-settle-row {
+    display: flex;
+    gap: 8px;
+    padding: 0 14px;
+    flex-wrap: wrap;
+}
+
+.guide-settle-row label {
+    display: flex;
+    flex-direction: column;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
 /* Sky Explorer */
 
 .sky-toolbar {

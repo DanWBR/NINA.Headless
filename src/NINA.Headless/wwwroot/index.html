@@ -81,9 +81,24 @@
             <div x-show="tab === 'live'" class="tab-panel">
                 <div class="preview-area">
                     <canvas id="liveCanvas" class="preview-canvas"></canvas>
+                    <canvas id="overlayCanvas" class="preview-overlay-canvas"></canvas>
                     <div class="preview-overlay" x-show="!liveActive">
                         <p x-text="selectedCamera ? 'Ready - ' + selectedCamera : 'No camera connected'"></p>
                         <p class="hint" x-show="!selectedCamera">Connect a camera in Settings to start imaging</p>
+                    </div>
+                    <div class="preview-overlay-controls">
+                        <button class="btn btn-sm" @click="toggleStarOverlay()"
+                                :class="showStarOverlay ? 'btn-active' : ''"
+                                title="Toggle star detection overlay">★</button>
+                        <button class="btn btn-sm" @click="showCrosshair = !showCrosshair; redrawOverlay()"
+                                :class="showCrosshair ? 'btn-active' : ''"
+                                title="Toggle crosshair">＋</button>
+                        <button class="btn btn-sm" @click="showGrid = !showGrid; redrawOverlay()"
+                                :class="showGrid ? 'btn-active' : ''"
+                                title="Toggle 3x3 grid">▦</button>
+                    </div>
+                    <div class="preview-overlay-info" x-show="hoverPixel">
+                        <span x-text="'x=' + hoverPixel?.x + ' y=' + hoverPixel?.y"></span>
                     </div>
                 </div>
                 <div class="quick-controls">

@@ -51,6 +51,28 @@ public static class ImageEndpoints {
             });
         });
 
+        group.MapGet("/latest/stars", (ImageRelayService relay, int? maxStars, double? sigma) => {
+            var image = relay.GetLatestImage();
+            if (image == null)
+                return Results.NotFound(new { error = "No image available" });
+
+            var det = new StarDetector {
+                MaxStars = Math.Clamp(maxStars ?? 200, 10, 2000),
+                SigmaThreshold = Math.Clamp(sigma ?? 5.0, 1.0, 20.0)
+            };
+            var pixels = image.PixelData.ToArray();
+            var stars = det.Detect(pixels, image.Width, image.Height);
+
+            return Results.Ok(new {
+                width = image.Width,
+                height = image.Height,
+                count = stars.Count,
+                stars = stars.Select(s => new {
+                    x = s.X, y = s.Y, hfr = s.HFR, flux = s.Flux, peak = s.Peak
+                })
+            });
+        });
+
         group.MapGet("/latest/histogram", (ImageRelayService relay, int? bins) => {
             var image = relay.GetLatestImage();
             if (image == null)

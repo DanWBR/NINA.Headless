@@ -156,6 +156,13 @@ function ninaApp() {
         fullStats: null,
         histogramData: null,
 
+        // Star annotation + visual overlays
+        showStarOverlay: false,
+        showCrosshair: true,
+        showGrid: false,
+        lastStars: null,        // { width, height, stars: [{x,y,hfr,...}] }
+        hoverPixel: null,       // { x, y } in image coords
+
         // Manual stretch controls
         stretchAuto: true,
         stretchBlack: 0.0,    // 0..1 normalised (0% = black point at min)
@@ -477,8 +484,8 @@ function ninaApp() {
 
                 URL.revokeObjectURL(url);
 
-                // Draw crosshair overlay
-                this._drawCrosshair(ctx, canvas.width, canvas.height);
+                // Repaint overlays after each render
+                this.redrawOverlay();
             };
             img.onerror = () => URL.revokeObjectURL(url);
             img.src = url;
@@ -671,6 +678,7 @@ function ninaApp() {
             gl.uniform1i(this._glLocs.bayer, bayerPattern | 0);
 
             gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            this.redrawOverlay();
             return true;
         },
 
@@ -759,7 +767,7 @@ function ninaApp() {
                 ctx.putImageData(imgData, 0, 0);
             }
 
-            this._drawCrosshair(ctx, canvas.width, canvas.height);
+            this.redrawOverlay();
         },
 
         // Fallback: fetch JPEG preview via REST endpoint
@@ -942,6 +950,83 @@ function ninaApp() {
                 overlay.add(A.polygon(corners));
                 this._aladinFovOverlay = overlay;
             } catch (e) { console.warn('FOV overlay failed', e); }
+        },
+
+        // ---- Visual overlays (stars, crosshair, grid, pixel readout) ----
+
+        async toggleStarOverlay() {
+            this.showStarOverlay = !this.showStarOverlay;
+            if (this.showStarOverlay) {
+                try {
+                    this.lastStars = await this.apiGet('/api/image/latest/stars?maxStars=300');
+                } catch (e) {
+                    this.toast('Star detection failed: ' + e.message, 'error');
+                    this.showStarOverlay = false;
+                    return;
+                }
+            }
+            this.redrawOverlay();
+        },
+
+        // Re-paint all overlays into the overlayCanvas, sized to match liveCanvas
+        redrawOverlay() {
+            const live = document.getElementById('liveCanvas');
+            const ovr = document.getElementById('overlayCanvas');
+            if (!live || !ovr) return;
+            if (ovr.width !== live.width || ovr.height !== live.height) {
+                ovr.width = live.width || 1;
+                ovr.height = live.height || 1;
+            }
+            const ctx = ovr.getContext('2d');
+            ctx.clearRect(0, 0, ovr.width, ovr.height);
+            if (this.showStarOverlay && this.lastStars) this._drawStarsOnOverlay(ctx, ovr.width, ovr.height);
+            if (this.showCrosshair) this._drawCrosshairOnOverlay(ctx, ovr.width, ovr.height);
+            if (this.showGrid) this._drawGridOnOverlay(ctx, ovr.width, ovr.height);
+        },
+
+        _drawStarsOnOverlay(ctx, w, h) {
+            if (!this.lastStars) return;
+            const sx = w / this.lastStars.width;
+            const sy = h / this.lastStars.height;
+            ctx.strokeStyle = 'rgba(255, 235, 59, 0.85)';
+            ctx.lineWidth = 1;
+            ctx.font = '10px sans-serif';
+            ctx.fillStyle = 'rgba(255, 235, 59, 0.85)';
+            for (const s of this.lastStars.stars) {
+                const cx = s.x * sx;
+                const cy = s.y * sy;
+                const r = Math.max(4, s.hfr * 1.4 * Math.min(sx, sy));
+                ctx.beginPath();
+                ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+                ctx.stroke();
+            }
+            // Annotate brightest 20 stars with HFR value
+            const top = (this.lastStars.stars || []).slice(0, 20);
+            for (const s of top) {
+                ctx.fillText(s.hfr.toFixed(2), s.x * sx + 6, s.y * sy - 6);
+            }
+        },
+
+        _drawCrosshairOnOverlay(ctx, w, h) {
+            const cx = w / 2, cy = h / 2;
+            const len = Math.min(w, h) * 0.04;
+            ctx.strokeStyle = 'rgba(255, 80, 80, 0.6)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(cx - len, cy); ctx.lineTo(cx + len, cy);
+            ctx.moveTo(cx, cy - len); ctx.lineTo(cx, cy + len);
+            ctx.stroke();
+        },
+
+        _drawGridOnOverlay(ctx, w, h) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+            ctx.lineWidth = 1;
+            for (let i = 1; i < 3; i++) {
+                ctx.beginPath();
+                ctx.moveTo(0, h * i / 3); ctx.lineTo(w, h * i / 3);
+                ctx.moveTo(w * i / 3, 0); ctx.lineTo(w * i / 3, h);
+                ctx.stroke();
+            }
         },
 
         // ---- Image history thumbnails ----

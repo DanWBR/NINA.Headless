@@ -1347,6 +1347,11 @@ select.input-sm {
     background: var(--text-muted);
 }
 
+.equip-status-dot.warn {
+    background: var(--warning, #ff9800);
+    box-shadow: 0 0 6px rgba(255, 152, 0, 0.5);
+}
+
 .equip-card-body {
     padding: 10px 12px;
     display: flex;

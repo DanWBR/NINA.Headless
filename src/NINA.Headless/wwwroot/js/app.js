@@ -93,8 +93,32 @@ function ninaApp() {
         equipMountChoice: '',
         equipFocuserChoice: '',
         equipFilterChoice: '',
+        equipRotatorChoice: '',
+        equipFlatChoice: '',
+        equipDomeChoice: '',
+        equipWeatherChoice: '',
         equipCoolerTarget: -10,
+        equipRotatorTarget: 0,
+        equipFlatBrightness: 128,
+        equipDomeTarget: 0,
         equipCameraInfo: { coolerOn: false, binX: 0, binY: 0, bitDepth: 0 },
+
+        // Rotator
+        rotator: { connected: false, name: '', position: null, moving: false, reversed: false },
+
+        // Flat Panel
+        flatDevice: { connected: false, name: '', lightOn: false, brightness: 0, coverOpen: false, coverMoving: false },
+
+        // Dome
+        dome: { connected: false, name: '', azimuth: null, moving: false, parked: false, slaved: false, shutter: 'Unknown' },
+
+        // Weather
+        weather: {
+            connected: false, name: '', safe: false,
+            temperature: null, humidity: null, dewPoint: null,
+            windSpeed: null, windGust: null, pressure: null,
+            cloudCover: null, rainRate: null, skyQuality: null
+        },
 
         // In-flight request tracking
         _pending: {},
@@ -927,6 +951,179 @@ function ninaApp() {
             }
         },
 
+        // --- Rotator ---
+        async equipConnectRotator() {
+            if (!this.equipRotatorChoice) return;
+            try {
+                await this.apiPost(`/api/rotator/select/${encodeURIComponent(this.equipRotatorChoice)}`);
+                await this.apiPost('/api/rotator/connect');
+                this.rotator.connected = true;
+                this.rotator.name = this.equipRotatorChoice;
+                this.toast('Rotator connected: ' + this.equipRotatorChoice, 'ok');
+            } catch (e) {
+                this.toast('Rotator connection failed: ' + e.message, 'error');
+            }
+        },
+        async equipDisconnectRotator() {
+            try {
+                await this.apiPost('/api/rotator/disconnect');
+                this.rotator = { connected: false, name: '', position: null, moving: false, reversed: false };
+                this.toast('Rotator disconnected', 'warn');
+            } catch (e) {
+                this.toast('Rotator disconnect failed: ' + e.message, 'error');
+            }
+        },
+        async rotatorMoveTo() {
+            try {
+                await this.apiPost('/api/rotator/move', { angle: this.equipRotatorTarget });
+                this.toast(`Rotator moving to ${this.equipRotatorTarget}°`, 'ok');
+            } catch (e) {
+                this.toast('Rotator move failed: ' + e.message, 'error');
+            }
+        },
+        async rotatorAbort() {
+            try {
+                await this.apiPost('/api/rotator/abort');
+                this.toast('Rotator stopped', 'warn');
+            } catch (e) { this.toast('Rotator abort failed', 'error'); }
+        },
+        async rotatorToggleReverse() {
+            try {
+                const newVal = !this.rotator.reversed;
+                await this.apiPost('/api/rotator/reverse', { reversed: newVal });
+                this.rotator.reversed = newVal;
+            } catch (e) { this.toast('Rotator reverse failed', 'error'); }
+        },
+
+        // --- Flat Panel ---
+        async equipConnectFlat() {
+            if (!this.equipFlatChoice) return;
+            try {
+                await this.apiPost(`/api/flatdevice/select/${encodeURIComponent(this.equipFlatChoice)}`);
+                await this.apiPost('/api/flatdevice/connect');
+                this.flatDevice.connected = true;
+                this.flatDevice.name = this.equipFlatChoice;
+                this.toast('Flat panel connected: ' + this.equipFlatChoice, 'ok');
+            } catch (e) {
+                this.toast('Flat panel connection failed: ' + e.message, 'error');
+            }
+        },
+        async equipDisconnectFlat() {
+            try {
+                await this.apiPost('/api/flatdevice/disconnect');
+                this.flatDevice = { connected: false, name: '', lightOn: false, brightness: 0, coverOpen: false, coverMoving: false };
+                this.toast('Flat panel disconnected', 'warn');
+            } catch (e) {
+                this.toast('Flat panel disconnect failed: ' + e.message, 'error');
+            }
+        },
+        async flatToggleLight() {
+            try {
+                const newVal = !this.flatDevice.lightOn;
+                await this.apiPost('/api/flatdevice/light', { on: newVal });
+                this.flatDevice.lightOn = newVal;
+            } catch (e) { this.toast('Flat light failed', 'error'); }
+        },
+        async flatSetBrightness() {
+            try {
+                await this.apiPost('/api/flatdevice/brightness', { brightness: this.equipFlatBrightness });
+                this.toast(`Brightness set to ${this.equipFlatBrightness}`, 'ok');
+            } catch (e) { this.toast('Brightness set failed', 'error'); }
+        },
+        async flatOpenCover() {
+            try {
+                await this.apiPost('/api/flatdevice/cover/open');
+                this.toast('Opening cover', 'ok');
+            } catch (e) { this.toast('Cover open failed', 'error'); }
+        },
+        async flatCloseCover() {
+            try {
+                await this.apiPost('/api/flatdevice/cover/close');
+                this.toast('Closing cover', 'ok');
+            } catch (e) { this.toast('Cover close failed', 'error'); }
+        },
+
+        // --- Dome ---
+        async equipConnectDome() {
+            if (!this.equipDomeChoice) return;
+            try {
+                await this.apiPost(`/api/dome/select/${encodeURIComponent(this.equipDomeChoice)}`);
+                await this.apiPost('/api/dome/connect');
+                this.dome.connected = true;
+                this.dome.name = this.equipDomeChoice;
+                this.toast('Dome connected: ' + this.equipDomeChoice, 'ok');
+            } catch (e) {
+                this.toast('Dome connection failed: ' + e.message, 'error');
+            }
+        },
+        async equipDisconnectDome() {
+            try {
+                await this.apiPost('/api/dome/disconnect');
+                this.dome = { connected: false, name: '', azimuth: null, moving: false, parked: false, slaved: false, shutter: 'Unknown' };
+                this.toast('Dome disconnected', 'warn');
+            } catch (e) {
+                this.toast('Dome disconnect failed: ' + e.message, 'error');
+            }
+        },
+        async domeSlew() {
+            try {
+                await this.apiPost('/api/dome/slew', { azimuth: this.equipDomeTarget });
+                this.toast(`Dome slewing to ${this.equipDomeTarget}°`, 'ok');
+            } catch (e) { this.toast('Dome slew failed', 'error'); }
+        },
+        async domeOpenShutter() {
+            try { await this.apiPost('/api/dome/shutter/open'); this.toast('Opening shutter', 'ok'); }
+            catch (e) { this.toast('Shutter open failed', 'error'); }
+        },
+        async domeCloseShutter() {
+            try { await this.apiPost('/api/dome/shutter/close'); this.toast('Closing shutter', 'ok'); }
+            catch (e) { this.toast('Shutter close failed', 'error'); }
+        },
+        async domePark() {
+            try { await this.apiPost('/api/dome/park'); this.toast('Dome parking', 'ok'); }
+            catch (e) { this.toast('Dome park failed', 'error'); }
+        },
+        async domeUnpark() {
+            try { await this.apiPost('/api/dome/unpark'); this.toast('Dome unparking', 'ok'); }
+            catch (e) { this.toast('Dome unpark failed', 'error'); }
+        },
+        async domeAbort() {
+            try { await this.apiPost('/api/dome/abort'); this.toast('Dome stopped', 'warn'); }
+            catch (e) { this.toast('Dome abort failed', 'error'); }
+        },
+
+        // --- Weather ---
+        async equipConnectWeather() {
+            if (!this.equipWeatherChoice) return;
+            try {
+                await this.apiPost(`/api/weather/select/${encodeURIComponent(this.equipWeatherChoice)}`);
+                await this.apiPost('/api/weather/connect');
+                this.weather.connected = true;
+                this.weather.name = this.equipWeatherChoice;
+                this.toast('Weather connected: ' + this.equipWeatherChoice, 'ok');
+            } catch (e) {
+                this.toast('Weather connection failed: ' + e.message, 'error');
+            }
+        },
+        async equipDisconnectWeather() {
+            try {
+                await this.apiPost('/api/weather/disconnect');
+                this.weather = {
+                    connected: false, name: '', safe: false,
+                    temperature: null, humidity: null, dewPoint: null,
+                    windSpeed: null, windGust: null, pressure: null,
+                    cloudCover: null, rainRate: null, skyQuality: null
+                };
+                this.toast('Weather disconnected', 'warn');
+            } catch (e) {
+                this.toast('Weather disconnect failed: ' + e.message, 'error');
+            }
+        },
+        async weatherRefresh() {
+            try { await this.apiPost('/api/weather/refresh'); this.toast('Weather refreshing', 'ok'); }
+            catch (e) { this.toast('Weather refresh failed', 'error'); }
+        },
+
         async pollCameraInfo() {
             try {
                 const data = await this.apiGet('/api/camera/status');
@@ -1212,6 +1409,52 @@ function ninaApp() {
                     moving: eq.filterWheel.moving
                 };
                 this.selectedFilterWheel = eq.filterWheel.name;
+            }
+            if (eq.rotator) {
+                this.rotator = {
+                    connected: eq.rotator.connected,
+                    name: eq.rotator.name,
+                    position: eq.rotator.position,
+                    moving: eq.rotator.moving,
+                    reversed: eq.rotator.reversed
+                };
+            }
+            if (eq.flatDevice) {
+                this.flatDevice = {
+                    connected: eq.flatDevice.connected,
+                    name: eq.flatDevice.name,
+                    lightOn: eq.flatDevice.lightOn,
+                    brightness: eq.flatDevice.brightness,
+                    coverOpen: eq.flatDevice.coverOpen,
+                    coverMoving: eq.flatDevice.coverMoving
+                };
+            }
+            if (eq.dome) {
+                this.dome = {
+                    connected: eq.dome.connected,
+                    name: eq.dome.name,
+                    azimuth: eq.dome.azimuth,
+                    moving: eq.dome.moving,
+                    parked: eq.dome.parked,
+                    slaved: eq.dome.slaved,
+                    shutter: eq.dome.shutter
+                };
+            }
+            if (eq.weather) {
+                this.weather = {
+                    connected: eq.weather.connected,
+                    name: eq.weather.name,
+                    safe: eq.weather.safe,
+                    temperature: eq.weather.temperature,
+                    humidity: eq.weather.humidity,
+                    dewPoint: eq.weather.dewPoint,
+                    windSpeed: eq.weather.windSpeed,
+                    windGust: eq.weather.windGust,
+                    pressure: eq.weather.pressure,
+                    cloudCover: eq.weather.cloudCover,
+                    rainRate: eq.weather.rainRate,
+                    skyQuality: eq.weather.skyQuality
+                };
             }
             if (msg.liveStack) {
                 this.liveStackEnabled = msg.liveStack.isRunning;

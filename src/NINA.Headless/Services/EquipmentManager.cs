@@ -11,6 +11,10 @@ public class EquipmentManager : IDisposable {
     public IndiTelescope? Telescope { get; private set; }
     public IndiFocuser? Focuser { get; private set; }
     public IndiFilterWheel? FilterWheel { get; private set; }
+    public IndiRotator? Rotator { get; private set; }
+    public IndiFlatDevice? FlatDevice { get; private set; }
+    public IndiDome? Dome { get; private set; }
+    public IndiWeather? Weather { get; private set; }
 
     public EquipmentManager(IndiClient indiClient, ILogger<EquipmentManager> logger) {
         _indiClient = indiClient;
@@ -42,6 +46,30 @@ public class EquipmentManager : IDisposable {
         FilterWheel = new IndiFilterWheel(_indiClient, deviceName);
         _logger.LogInformation("Filter wheel selected: {Name}", deviceName);
         return FilterWheel;
+    }
+
+    public IndiRotator SelectRotator(string deviceName) {
+        Rotator = new IndiRotator(_indiClient, deviceName);
+        _logger.LogInformation("Rotator selected: {Name}", deviceName);
+        return Rotator;
+    }
+
+    public IndiFlatDevice SelectFlatDevice(string deviceName) {
+        FlatDevice = new IndiFlatDevice(_indiClient, deviceName);
+        _logger.LogInformation("Flat device selected: {Name}", deviceName);
+        return FlatDevice;
+    }
+
+    public IndiDome SelectDome(string deviceName) {
+        Dome = new IndiDome(_indiClient, deviceName);
+        _logger.LogInformation("Dome selected: {Name}", deviceName);
+        return Dome;
+    }
+
+    public IndiWeather SelectWeather(string deviceName) {
+        Weather = new IndiWeather(_indiClient, deviceName);
+        _logger.LogInformation("Weather selected: {Name}", deviceName);
+        return Weather;
     }
 
     public Dictionary<string, object> GetEquipmentStatus() {
@@ -98,6 +126,56 @@ public class EquipmentManager : IDisposable {
                 currentFilter = FilterWheel.CurrentFilterName,
                 filters = FilterWheel.FilterNames,
                 moving = FilterWheel.IsMoving
+            };
+        }
+
+        if (Rotator != null) {
+            status["rotator"] = new {
+                name = Rotator.DeviceName,
+                connected = Rotator.IsConnected,
+                position = Safe(Rotator.Position),
+                moving = Rotator.IsMoving,
+                reversed = Rotator.IsReversed
+            };
+        }
+
+        if (FlatDevice != null) {
+            status["flatDevice"] = new {
+                name = FlatDevice.DeviceName,
+                connected = FlatDevice.IsConnected,
+                lightOn = FlatDevice.IsLightOn,
+                brightness = FlatDevice.Brightness,
+                coverOpen = FlatDevice.IsCoverOpen,
+                coverMoving = FlatDevice.IsCoverMoving
+            };
+        }
+
+        if (Dome != null) {
+            status["dome"] = new {
+                name = Dome.DeviceName,
+                connected = Dome.IsConnected,
+                azimuth = Safe(Dome.Azimuth),
+                moving = Dome.IsMoving,
+                parked = Dome.IsParked,
+                slaved = Dome.IsSlaved,
+                shutter = Dome.ShutterStatus.ToString()
+            };
+        }
+
+        if (Weather != null) {
+            status["weather"] = new {
+                name = Weather.DeviceName,
+                connected = Weather.IsConnected,
+                temperature = Safe(Weather.Temperature),
+                humidity = Safe(Weather.Humidity),
+                dewPoint = Safe(Weather.DewPoint),
+                windSpeed = Safe(Weather.WindSpeed),
+                windGust = Safe(Weather.WindGust),
+                pressure = Safe(Weather.Pressure),
+                cloudCover = Safe(Weather.CloudCover),
+                rainRate = Safe(Weather.RainRate),
+                skyQuality = Safe(Weather.SkyQuality),
+                safe = Weather.IsSafe
             };
         }
 

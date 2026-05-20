@@ -418,7 +418,193 @@
                         </div>
                     </div>
 
-                    <!-- Guider (placeholder) -->
+                    <!-- Rotator -->
+                    <div class="equip-card">
+                        <div class="equip-card-header">
+                            <span class="equip-card-icon">&#x1F500;</span>
+                            <span class="equip-card-title">Rotator</span>
+                            <span class="equip-status-dot" :class="rotator.connected ? 'connected' : 'disconnected'"></span>
+                        </div>
+                        <div class="equip-card-body">
+                            <div class="equip-select-row">
+                                <select class="equip-select" x-model="equipRotatorChoice">
+                                    <option value="">-- Select device --</option>
+                                    <template x-for="dev in devices" :key="'rot-'+dev.name">
+                                        <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
+                                    </template>
+                                </select>
+                                <button class="btn btn-sm btn-primary" @click="equipConnectRotator()"
+                                        :disabled="!equipRotatorChoice">Connect</button>
+                                <button class="btn btn-sm btn-danger" @click="equipDisconnectRotator()"
+                                        :disabled="!rotator.connected">Disconnect</button>
+                            </div>
+                            <div class="equip-detail" x-show="rotator.connected">
+                                <div class="equip-detail-name" x-text="rotator.name"></div>
+                                <div class="equip-detail-props">
+                                    <span>Angle: <strong x-text="(rotator.position?.toFixed(2) || '--') + '°'"></strong></span>
+                                    <span x-show="rotator.reversed" class="text-warn">REVERSED</span>
+                                    <span x-show="rotator.moving" class="text-warn">MOVING</span>
+                                </div>
+                                <div class="equip-inline-controls">
+                                    <label class="equip-temp-label">
+                                        Target
+                                        <input type="number" x-model.number="equipRotatorTarget" step="0.1" min="0" max="360" class="input-sm">
+                                        <span>°</span>
+                                    </label>
+                                    <button class="btn btn-sm" @click="rotatorMoveTo()">Move</button>
+                                    <button class="btn btn-sm" @click="rotatorAbort()" :disabled="!rotator.moving">Abort</button>
+                                    <button class="btn btn-sm" @click="rotatorToggleReverse()"
+                                            :class="rotator.reversed ? 'btn-active' : ''"
+                                            x-text="rotator.reversed ? 'Reversed' : 'Normal'"></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Flat Panel -->
+                    <div class="equip-card">
+                        <div class="equip-card-header">
+                            <span class="equip-card-icon">&#x1F4A1;</span>
+                            <span class="equip-card-title">Flat Panel</span>
+                            <span class="equip-status-dot" :class="flatDevice.connected ? 'connected' : 'disconnected'"></span>
+                        </div>
+                        <div class="equip-card-body">
+                            <div class="equip-select-row">
+                                <select class="equip-select" x-model="equipFlatChoice">
+                                    <option value="">-- Select device --</option>
+                                    <template x-for="dev in devices" :key="'flat-'+dev.name">
+                                        <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
+                                    </template>
+                                </select>
+                                <button class="btn btn-sm btn-primary" @click="equipConnectFlat()"
+                                        :disabled="!equipFlatChoice">Connect</button>
+                                <button class="btn btn-sm btn-danger" @click="equipDisconnectFlat()"
+                                        :disabled="!flatDevice.connected">Disconnect</button>
+                            </div>
+                            <div class="equip-detail" x-show="flatDevice.connected">
+                                <div class="equip-detail-name" x-text="flatDevice.name"></div>
+                                <div class="equip-detail-props">
+                                    <span>Light: <strong :class="flatDevice.lightOn ? 'text-ok' : 'text-muted'"
+                                                          x-text="flatDevice.lightOn ? 'ON' : 'OFF'"></strong></span>
+                                    <span>Brightness: <strong x-text="flatDevice.brightness"></strong></span>
+                                    <span>Cover: <strong :class="flatDevice.coverOpen ? 'text-ok' : 'text-warn'"
+                                                          x-text="flatDevice.coverOpen ? 'OPEN' : 'CLOSED'"></strong></span>
+                                    <span x-show="flatDevice.coverMoving" class="text-warn">MOVING</span>
+                                </div>
+                                <div class="equip-inline-controls">
+                                    <button class="btn btn-sm" @click="flatToggleLight()"
+                                            :class="flatDevice.lightOn ? 'btn-active' : ''"
+                                            x-text="flatDevice.lightOn ? 'Light ON' : 'Light OFF'"></button>
+                                    <label class="equip-temp-label">
+                                        Brightness
+                                        <input type="number" x-model.number="equipFlatBrightness" step="1" min="0" max="255" class="input-sm">
+                                    </label>
+                                    <button class="btn btn-sm" @click="flatSetBrightness()">Set</button>
+                                </div>
+                                <div class="equip-inline-controls">
+                                    <button class="btn btn-sm" @click="flatOpenCover()" :disabled="flatDevice.coverOpen">Open Cover</button>
+                                    <button class="btn btn-sm" @click="flatCloseCover()" :disabled="!flatDevice.coverOpen">Close Cover</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dome -->
+                    <div class="equip-card">
+                        <div class="equip-card-header">
+                            <span class="equip-card-icon">&#x1F3DB;&#xFE0F;</span>
+                            <span class="equip-card-title">Dome</span>
+                            <span class="equip-status-dot" :class="dome.connected ? 'connected' : 'disconnected'"></span>
+                        </div>
+                        <div class="equip-card-body">
+                            <div class="equip-select-row">
+                                <select class="equip-select" x-model="equipDomeChoice">
+                                    <option value="">-- Select device --</option>
+                                    <template x-for="dev in devices" :key="'dome-'+dev.name">
+                                        <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
+                                    </template>
+                                </select>
+                                <button class="btn btn-sm btn-primary" @click="equipConnectDome()"
+                                        :disabled="!equipDomeChoice">Connect</button>
+                                <button class="btn btn-sm btn-danger" @click="equipDisconnectDome()"
+                                        :disabled="!dome.connected">Disconnect</button>
+                            </div>
+                            <div class="equip-detail" x-show="dome.connected">
+                                <div class="equip-detail-name" x-text="dome.name"></div>
+                                <div class="equip-detail-props">
+                                    <span>Az: <strong x-text="(dome.azimuth?.toFixed(2) || '--') + '°'"></strong></span>
+                                    <span>Shutter: <strong :class="dome.shutter === 'Open' ? 'text-ok' : (dome.shutter === 'Closed' ? 'text-warn' : 'text-muted')"
+                                                            x-text="dome.shutter"></strong></span>
+                                    <span x-show="dome.parked" class="text-warn">PARKED</span>
+                                    <span x-show="dome.slaved" class="text-ok">SLAVED</span>
+                                    <span x-show="dome.moving" class="text-warn">MOVING</span>
+                                </div>
+                                <div class="equip-inline-controls">
+                                    <label class="equip-temp-label">
+                                        Slew Az
+                                        <input type="number" x-model.number="equipDomeTarget" step="0.5" min="0" max="360" class="input-sm">
+                                        <span>°</span>
+                                    </label>
+                                    <button class="btn btn-sm" @click="domeSlew()">Slew</button>
+                                    <button class="btn btn-sm" @click="domeAbort()" :disabled="!dome.moving">Abort</button>
+                                </div>
+                                <div class="equip-inline-controls">
+                                    <button class="btn btn-sm" @click="domeOpenShutter()" :disabled="dome.shutter === 'Open' || dome.shutter === 'Opening'">Open Shutter</button>
+                                    <button class="btn btn-sm" @click="domeCloseShutter()" :disabled="dome.shutter === 'Closed' || dome.shutter === 'Closing'">Close Shutter</button>
+                                    <button class="btn btn-sm" @click="domePark()" :disabled="dome.parked">Park</button>
+                                    <button class="btn btn-sm" @click="domeUnpark()" :disabled="!dome.parked">Unpark</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Weather -->
+                    <div class="equip-card">
+                        <div class="equip-card-header">
+                            <span class="equip-card-icon">&#x2601;&#xFE0F;</span>
+                            <span class="equip-card-title">Weather</span>
+                            <span class="equip-status-dot" :class="weather.connected ? (weather.safe ? 'connected' : 'warn') : 'disconnected'"></span>
+                        </div>
+                        <div class="equip-card-body">
+                            <div class="equip-select-row">
+                                <select class="equip-select" x-model="equipWeatherChoice">
+                                    <option value="">-- Select device --</option>
+                                    <template x-for="dev in devices" :key="'wx-'+dev.name">
+                                        <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
+                                    </template>
+                                </select>
+                                <button class="btn btn-sm btn-primary" @click="equipConnectWeather()"
+                                        :disabled="!equipWeatherChoice">Connect</button>
+                                <button class="btn btn-sm btn-danger" @click="equipDisconnectWeather()"
+                                        :disabled="!weather.connected">Disconnect</button>
+                            </div>
+                            <div class="equip-detail" x-show="weather.connected">
+                                <div class="equip-detail-name">
+                                    <span x-text="weather.name"></span>
+                                    <span :class="weather.safe ? 'text-ok' : 'text-danger'" style="margin-left: 12px;"
+                                          x-text="weather.safe ? '✓ SAFE' : '⚠ UNSAFE'"></span>
+                                </div>
+                                <div class="equip-detail-props">
+                                    <span x-show="weather.temperature !== null">Temp: <strong x-text="(weather.temperature?.toFixed(1) || '--') + '°C'"></strong></span>
+                                    <span x-show="weather.humidity !== null">Humidity: <strong x-text="(weather.humidity?.toFixed(0) || '--') + '%'"></strong></span>
+                                    <span x-show="weather.dewPoint !== null">Dew: <strong x-text="(weather.dewPoint?.toFixed(1) || '--') + '°C'"></strong></span>
+                                    <span x-show="weather.pressure !== null">Pressure: <strong x-text="(weather.pressure?.toFixed(0) || '--') + ' hPa'"></strong></span>
+                                </div>
+                                <div class="equip-detail-props">
+                                    <span x-show="weather.cloudCover !== null">Clouds: <strong x-text="(weather.cloudCover?.toFixed(0) || '--') + '%'"></strong></span>
+                                    <span x-show="weather.windSpeed !== null">Wind: <strong x-text="(weather.windSpeed?.toFixed(1) || '--') + ' kph'"></strong></span>
+                                    <span x-show="weather.windGust !== null">Gust: <strong x-text="(weather.windGust?.toFixed(1) || '--') + ' kph'"></strong></span>
+                                    <span x-show="weather.rainRate !== null && weather.rainRate > 0" class="text-danger">RAIN</span>
+                                    <span x-show="weather.skyQuality !== null">SQM: <strong x-text="(weather.skyQuality?.toFixed(2) || '--')"></strong></span>
+                                </div>
+                                <div class="equip-inline-controls">
+                                    <button class="btn btn-sm" @click="weatherRefresh()">Refresh</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Guider (placeholder for PHD2) -->
                     <div class="equip-card equip-card-placeholder">
                         <div class="equip-card-header">
                             <span class="equip-card-icon">&#x2B50;</span>
@@ -426,7 +612,7 @@
                             <span class="equip-status-dot disconnected"></span>
                         </div>
                         <div class="equip-card-body">
-                            <p class="text-muted" style="font-size: 12px;">PHD2 / INDI guider integration coming soon</p>
+                            <p class="text-muted" style="font-size: 12px;">PHD2 integration coming soon (Phase A1)</p>
                         </div>
                     </div>
 

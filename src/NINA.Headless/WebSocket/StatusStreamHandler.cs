@@ -24,6 +24,8 @@ public static class StatusStreamHandler {
         var sequence = context.RequestServices.GetRequiredService<SequenceEngine>();
         var phd2 = context.RequestServices.GetRequiredService<PHD2Client>();
         var autoFocus = context.RequestServices.GetRequiredService<AutoFocusService>();
+        var meridianFlip = context.RequestServices.GetRequiredService<MeridianFlipService>();
+        var profile = context.RequestServices.GetRequiredService<ProfileService>();
         var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
 
         using var ws = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
@@ -77,6 +79,33 @@ public static class StatusStreamHandler {
                         guiderPayload = new { connected = false, appState = "Stopped" };
                     }
 
+                    // Meridian flip live status (LST + time-to-meridian for the current mount RA)
+                    double? lstHours = null, hourAngleHours = null, timeToMeridianHours = null;
+                    if (equip.Telescope != null && equip.Telescope.IsConnected) {
+                        var raHours = equip.Telescope.RightAscension;
+                        if (!double.IsNaN(raHours)) {
+                            lstHours = MeridianFlipService.ComputeLstHours(DateTime.UtcNow, profile.Active.Longitude);
+                            var ha = lstHours.Value - raHours;
+                            while (ha > 12) ha -= 24;
+                            while (ha < -12) ha += 24;
+                            hourAngleHours = ha;
+                            timeToMeridianHours = MeridianFlipService.HoursUntilMeridian(
+                                raHours, DateTime.UtcNow, profile.Active.Longitude);
+                        }
+                    }
+
+                    var meridianPayload = new {
+                        state = meridianFlip.State.ToString().ToLowerInvariant(),
+                        settings = meridianFlip.Settings,
+                        flipsCompleted = meridianFlip.FlipsCompleted,
+                        lastFlipAt = meridianFlip.LastFlipAt,
+                        lastFlipError = meridianFlip.LastFlipError,
+                        lstHours,
+                        hourAngleHours,
+                        timeToMeridianHours,
+                        timeToMeridianMinutes = timeToMeridianHours * 60
+                    };
+
                     var autoFocusPayload = new {
                         state = autoFocus.State.ToString().ToLowerInvariant(),
                         currentSampleIndex = autoFocus.Progress.CurrentSampleIndex,
@@ -96,6 +125,7 @@ public static class StatusStreamHandler {
                         liveStack = liveStack.GetStatus(),
                         guider = guiderPayload,
                         autoFocus = autoFocusPayload,
+                        meridianFlip = meridianPayload,
                         sequence = new {
                             state = seqStatus.State,
                             currentItemIndex = seqStatus.CurrentItemIndex,

@@ -8,6 +8,7 @@ public class SequenceEngine {
     private readonly ImageRelayService _relay;
     private readonly LiveStackingService _liveStack;
     private readonly PHD2Client _phd2;
+    private readonly MeridianFlipService _meridianFlip;
     private readonly ILogger<SequenceEngine> _logger;
 
     private CancellationTokenSource? _cts;
@@ -32,11 +33,13 @@ public class SequenceEngine {
     public int DithersIssued { get; private set; }
 
     public SequenceEngine(EquipmentManager equip, ImageRelayService relay,
-        LiveStackingService liveStack, PHD2Client phd2, ILogger<SequenceEngine> logger) {
+        LiveStackingService liveStack, PHD2Client phd2, MeridianFlipService meridianFlip,
+        ILogger<SequenceEngine> logger) {
         _equip = equip;
         _relay = relay;
         _liveStack = liveStack;
         _phd2 = phd2;
+        _meridianFlip = meridianFlip;
         _logger = logger;
     }
 
@@ -184,6 +187,14 @@ public class SequenceEngine {
                     // Check pause gate
                     await _pauseGate.WaitAsync(ct);
                     _pauseGate.Release();
+
+                    // Meridian flip check (only if target has coordinates)
+                    if (item.Ra.HasValue && item.Dec.HasValue
+                        && _meridianFlip.Settings.Enabled
+                        && _meridianFlip.ShouldFlipNow(item.Ra.Value)) {
+                        _logger.LogInformation("Meridian flip due for target {Name} — executing", item.Name);
+                        await _meridianFlip.ExecuteFlipAsync(item.Ra.Value, item.Dec.Value, ct);
+                    }
 
                     CurrentFrameInItem = f;
 

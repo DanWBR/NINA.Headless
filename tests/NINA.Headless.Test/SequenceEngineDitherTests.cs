@@ -14,7 +14,15 @@ public class SequenceEngineDitherTests {
         var relay = new ImageRelayService(NullLogger<ImageRelayService>.Instance);
         var liveStack = new LiveStackingService(relay, NullLogger<LiveStackingService>.Instance);
         var phd2 = new PHD2Client(NullLogger<PHD2Client>.Instance);
-        return new SequenceEngine(equip, relay, liveStack, phd2, NullLogger<SequenceEngine>.Instance);
+        var autoFocus = new AutoFocusService(equip, NullLogger<AutoFocusService>.Instance);
+        var emptyConfig = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+        var plateSolve = new PlateSolveService(emptyConfig, NullLogger<PlateSolveService>.Instance);
+        var slewCenter = new SlewCenterService(equip, plateSolve, NullLogger<SlewCenterService>.Instance);
+        var profile = new ProfileService(emptyConfig, NullLogger<ProfileService>.Instance);
+        var meridianFlip = new MeridianFlipService(equip, phd2, slewCenter, autoFocus, profile,
+            NullLogger<MeridianFlipService>.Instance);
+        return new SequenceEngine(equip, relay, liveStack, phd2, meridianFlip,
+            NullLogger<SequenceEngine>.Instance);
     }
 
     [Test]

@@ -941,6 +941,71 @@
                     </template>
                 </div>
 
+                <!-- Meridian flip settings panel -->
+                <div class="seq-dither-panel">
+                    <div class="seq-dither-header" @click="seqMfExpanded = !seqMfExpanded">
+                        <span x-text="seqMfExpanded ? '▾' : '▸'"></span>
+                        <strong>Meridian Flip</strong>
+                        <label class="seq-dither-toggle" @click.stop>
+                            <input type="checkbox" x-model="mfSettings.enabled" @change="saveMfSettings()"
+                                   :disabled="seqState === 'running' && mfState !== 'idle'">
+                            <span :class="mfSettings.enabled ? 'text-ok' : 'text-muted'"
+                                  x-text="mfSettings.enabled ? 'ON' : 'OFF'"></span>
+                        </label>
+                        <span class="text-muted" style="font-size: 11px;" x-show="mfTimeToMeridianMinutes !== null">
+                            <span x-show="mfTimeToMeridianMinutes > 0 && mfTimeToMeridianMinutes < 6*60">
+                                Meridian in <strong x-text="formatMinutes(mfTimeToMeridianMinutes)"></strong>
+                            </span>
+                            <span x-show="mfState !== 'idle'" class="text-warn"
+                                  x-text="'FLIP: ' + mfState.toUpperCase()"></span>
+                        </span>
+                        <span class="text-muted" style="font-size: 11px;" x-show="mfFlipsCompleted > 0">
+                            (<span x-text="mfFlipsCompleted"></span> flipped)
+                        </span>
+                    </div>
+                    <div class="seq-dither-body" x-show="seqMfExpanded">
+                        <div class="seq-dither-row">
+                            <label>Min after meridian
+                                <input type="number" x-model.number="mfSettings.minutesAfterMeridian"
+                                       step="0.5" min="0" max="60" class="input-sm"
+                                       @change="saveMfSettings()" :disabled="mfState !== 'idle'">
+                            </label>
+                            <label>Settle after flip (s)
+                                <input type="number" x-model.number="mfSettings.settleSecondsAfterFlip"
+                                       step="1" min="0" max="120" class="input-sm"
+                                       @change="saveMfSettings()" :disabled="mfState !== 'idle'">
+                            </label>
+                            <label>Recenter tolerance (″)
+                                <input type="number" x-model.number="mfSettings.recenterToleranceArcsec"
+                                       step="5" min="5" max="300" class="input-sm"
+                                       @change="saveMfSettings()" :disabled="mfState !== 'idle'">
+                            </label>
+                        </div>
+                        <div class="seq-dither-row">
+                            <label class="seq-dither-checkbox">
+                                <input type="checkbox" x-model="mfSettings.recenterAfterFlip"
+                                       @change="saveMfSettings()" :disabled="mfState !== 'idle'">
+                                Plate-solve recenter
+                            </label>
+                            <label class="seq-dither-checkbox">
+                                <input type="checkbox" x-model="mfSettings.autoFocusAfterFlip"
+                                       @change="saveMfSettings()" :disabled="mfState !== 'idle'">
+                                Auto-focus after flip
+                            </label>
+                            <button class="btn btn-sm" @click="abortMeridianFlip()"
+                                    :disabled="mfState === 'idle'"
+                                    style="margin-left: auto;">Abort flip</button>
+                        </div>
+                        <p class="seq-dither-hint text-muted" x-show="!mount.connected">
+                            ⚠ Mount not connected — meridian time unavailable.
+                        </p>
+                        <p class="seq-dither-hint text-muted"
+                           x-show="mount.connected && Math.abs(settings.longitude || 0) < 0.01">
+                            ⚠ Observatory longitude is 0 — set it in Settings for correct LST.
+                        </p>
+                    </div>
+                </div>
+
                 <!-- Dither settings panel -->
                 <div class="seq-dither-panel">
                     <div class="seq-dither-header" @click="seqDitherExpanded = !seqDitherExpanded">

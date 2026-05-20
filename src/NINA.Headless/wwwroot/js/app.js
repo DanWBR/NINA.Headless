@@ -176,6 +176,25 @@ function ninaApp() {
         seqDitherExpanded: false,
         _ditherSaveTimer: null,
 
+        // Meridian flip
+        mfSettings: {
+            enabled: false,
+            minutesAfterMeridian: 5,
+            pauseBeforeMeridianMinutes: 0,
+            recenterAfterFlip: true,
+            recenterToleranceArcsec: 30,
+            settleSecondsAfterFlip: 5,
+            autoFocusAfterFlip: false
+        },
+        mfState: 'idle',
+        mfFlipsCompleted: 0,
+        mfLastFlipError: null,
+        mfTimeToMeridianMinutes: null,
+        mfHourAngleHours: null,
+        mfLstHours: null,
+        seqMfExpanded: false,
+        _mfSaveTimer: null,
+
         // In-flight request tracking
         _pending: {},
         _previewFetching: false,
@@ -206,6 +225,7 @@ function ninaApp() {
             this.connectImageWs();
             this.loadSettingsFromServer();
             this.loadDitherSettings();
+            this.loadMfSettings();
         },
 
         // --- Network helpers ---
@@ -602,6 +622,54 @@ function ninaApp() {
                     this.updateFov();
                 }
             } catch (e) { }
+        },
+
+        async loadMfSettings() {
+            try {
+                const data = await this.apiGet('/api/meridianflip/settings');
+                if (data) {
+                    this.mfSettings = {
+                        enabled: !!data.enabled,
+                        minutesAfterMeridian: data.minutesAfterMeridian ?? 5,
+                        pauseBeforeMeridianMinutes: data.pauseBeforeMeridianMinutes ?? 0,
+                        recenterAfterFlip: data.recenterAfterFlip !== false,
+                        recenterToleranceArcsec: data.recenterToleranceArcsec ?? 30,
+                        settleSecondsAfterFlip: data.settleSecondsAfterFlip ?? 5,
+                        autoFocusAfterFlip: !!data.autoFocusAfterFlip
+                    };
+                }
+            } catch (e) { }
+        },
+
+        saveMfSettings() {
+            if (this._mfSaveTimer) clearTimeout(this._mfSaveTimer);
+            this._mfSaveTimer = setTimeout(async () => {
+                try {
+                    await this.apiPost('/api/meridianflip/settings', null, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.mfSettings)
+                    });
+                } catch (e) {
+                    this.toast('Failed to save meridian flip settings', 'error');
+                }
+            }, 400);
+        },
+
+        async abortMeridianFlip() {
+            try {
+                await this.apiPost('/api/meridianflip/abort');
+                this.toast('Meridian flip aborted', 'warn');
+            } catch (e) { this.toast('Abort failed', 'error'); }
+        },
+
+        formatMinutes(min) {
+            if (min === null || min === undefined) return '--';
+            if (min < 0) min = 0;
+            const h = Math.floor(min / 60);
+            const m = Math.floor(min % 60);
+            if (h > 0) return `${h}h ${m}m`;
+            return `${m}m`;
         },
 
         async loadDitherSettings() {
@@ -1722,6 +1790,20 @@ function ninaApp() {
                     rainRate: eq.weather.rainRate,
                     skyQuality: eq.weather.skyQuality
                 };
+            }
+            if (msg.meridianFlip) {
+                const mf = msg.meridianFlip;
+                this.mfState = mf.state || 'idle';
+                this.mfFlipsCompleted = mf.flipsCompleted || 0;
+                this.mfLastFlipError = mf.lastFlipError || null;
+                this.mfLstHours = mf.lstHours;
+                this.mfHourAngleHours = mf.hourAngleHours;
+                this.mfTimeToMeridianMinutes = mf.timeToMeridianMinutes;
+                // Sync server-side settings back (in case another client edited)
+                if (mf.settings) {
+                    this.mfSettings.enabled = !!mf.settings.enabled;
+                    // Don't overwrite other fields the user might be editing right now
+                }
             }
             if (msg.autoFocus) {
                 const af = msg.autoFocus;

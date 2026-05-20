@@ -7,11 +7,15 @@ public class SequenceEngine {
     private readonly EquipmentManager _equip;
     private readonly ImageRelayService _relay;
     private readonly LiveStackingService _liveStack;
+    private readonly PHD2Client _phd2;
     private readonly ILogger<SequenceEngine> _logger;
 
     private CancellationTokenSource? _cts;
     private readonly SemaphoreSlim _pauseGate = new(1, 1);
     private Task? _runTask;
+
+    /// <summary>Counter of frames captured since last dither (across all items).</summary>
+    private int _framesSinceDither;
 
     public List<SequenceItem> Items { get; private set; } = [];
     public SequenceState State { get; private set; } = SequenceState.Idle;
@@ -21,11 +25,18 @@ public class SequenceEngine {
     public string? LastError { get; private set; }
     public DateTime? StartedAt { get; private set; }
 
+    /// <summary>Dither configuration. Default: disabled.</summary>
+    public DitherSettings Dither { get; set; } = new();
+
+    /// <summary>How many dithers were issued in the current run (diagnostic).</summary>
+    public int DithersIssued { get; private set; }
+
     public SequenceEngine(EquipmentManager equip, ImageRelayService relay,
-        LiveStackingService liveStack, ILogger<SequenceEngine> logger) {
+        LiveStackingService liveStack, PHD2Client phd2, ILogger<SequenceEngine> logger) {
         _equip = equip;
         _relay = relay;
         _liveStack = liveStack;
+        _phd2 = phd2;
         _logger = logger;
     }
 
@@ -55,12 +66,15 @@ public class SequenceEngine {
         State = SequenceState.Running;
         StartedAt = DateTime.UtcNow;
         LastError = null;
+        _framesSinceDither = 0;
+        DithersIssued = 0;
 
         if (_pauseGate.CurrentCount == 0)
             _pauseGate.Release();
 
         _runTask = Task.Run(() => RunAsync(_cts.Token));
-        _logger.LogInformation("Sequence started");
+        _logger.LogInformation("Sequence started (dither: {Enabled}, every {N} frames, {Px}px)",
+            Dither.Enabled, Dither.EveryNFrames, Dither.Pixels);
     }
 
     public void Pause() {
@@ -122,7 +136,10 @@ public class SequenceEngine {
             TotalFramesCompleted = TotalFramesCompleted,
             ElapsedSeconds = elapsed.TotalSeconds,
             EstimatedRemainingSeconds = estimatedRemainingSeconds,
-            LastError = LastError
+            LastError = LastError,
+            DithersIssued = DithersIssued,
+            FramesSinceDither = _framesSinceDither,
+            Dither = Dither
         };
     }
 
@@ -180,6 +197,7 @@ public class SequenceEngine {
                     _logger.LogDebug("Capturing frame {Frame}/{Total} for {Name}",
                         f + 1, item.Count, item.Name);
 
+                    bool frameOk = false;
                     try {
                         var imageData = await _equip.Camera.CaptureAsync(item.Exposure, ct);
 
@@ -191,6 +209,7 @@ public class SequenceEngine {
 
                         CurrentFrameInItem = f + 1;
                         TotalFramesCompleted++;
+                        frameOk = true;
                     } catch (OperationCanceledException) { throw; }
                     catch (Exception ex) {
                         _logger.LogWarning(ex, "Frame {Frame} capture failed for {Name}, retrying once",
@@ -208,10 +227,21 @@ public class SequenceEngine {
 
                             CurrentFrameInItem = f + 1;
                             TotalFramesCompleted++;
+                            frameOk = true;
                         } catch (OperationCanceledException) { throw; }
                         catch (Exception retryEx) {
                             _logger.LogError(retryEx, "Retry also failed for frame {Frame}, skipping", f + 1);
                             LastError = $"Frame {f + 1} of {item.Name} failed: {retryEx.Message}";
+                        }
+                    }
+
+                    // Dither between frames (only after a successful capture and only if
+                    // this isn't the very last frame of the very last item).
+                    if (frameOk) {
+                        _framesSinceDither++;
+                        bool moreFramesComing = (f + 1 < item.Count) || (i + 1 < Items.Count);
+                        if (moreFramesComing) {
+                            await MaybeDitherAsync(ct);
                         }
                     }
                 }
@@ -243,6 +273,72 @@ public class SequenceEngine {
         }
         _logger.LogWarning("Slew did not complete within 5 minutes");
     }
+
+    /// <summary>
+    /// Issue a dither command via PHD2 if all preconditions are met and we've
+    /// hit the configured frame cadence. Waits for SettleDone before returning.
+    /// Silently skips when conditions aren't met — never aborts the sequence.
+    /// </summary>
+    private async Task MaybeDitherAsync(CancellationToken ct) {
+        if (!Dither.Enabled) return;
+        if (Dither.EveryNFrames <= 0) return;
+        if (_framesSinceDither < Dither.EveryNFrames) return;
+
+        if (!_phd2.IsConnected) {
+            _logger.LogDebug("Dither skipped: PHD2 not connected");
+            _framesSinceDither = 0;
+            return;
+        }
+
+        if (!_phd2.IsGuiding) {
+            _logger.LogDebug("Dither skipped: PHD2 not guiding (state={State})", _phd2.AppState);
+            _framesSinceDither = 0;
+            return;
+        }
+
+        _logger.LogInformation("Dithering {Px}px (after {N} frames, raOnly={RaOnly})",
+            Dither.Pixels, _framesSinceDither, Dither.RaOnly);
+
+        // Hook up SettleDone before we issue the dither to avoid race
+        var settled = new TaskCompletionSource<SettleResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnSettled(SettleResult r) => settled.TrySetResult(r);
+        _phd2.Settled += OnSettled;
+
+        try {
+            await _phd2.DitherAsync(
+                pixels: Dither.Pixels,
+                raOnly: Dither.RaOnly,
+                settlePixels: Dither.SettlePixels,
+                settleTime: Dither.SettleTime,
+                settleTimeout: Dither.SettleTimeout);
+
+            DithersIssued++;
+
+            // Wait for SettleDone with a hard ceiling = configured timeout + 5s grace
+            var maxWait = TimeSpan.FromSeconds(Dither.SettleTimeout + 5);
+            using var settleCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            settleCts.CancelAfter(maxWait);
+
+            try {
+                var result = await settled.Task.WaitAsync(settleCts.Token);
+                if (result.Status == 0) {
+                    _logger.LogInformation("Dither settled OK ({Total} frames, {Dropped} dropped)",
+                        result.TotalFrames, result.DroppedFrames);
+                } else {
+                    _logger.LogWarning("Dither settle returned status {Status}: {Error}",
+                        result.Status, result.Error);
+                }
+            } catch (OperationCanceledException) when (!ct.IsCancellationRequested) {
+                _logger.LogWarning("Dither settle timed out after {Sec}s — continuing sequence anyway",
+                    Dither.SettleTimeout);
+            }
+        } catch (Exception ex) {
+            _logger.LogWarning(ex, "Dither command failed — continuing sequence without dither");
+        } finally {
+            _phd2.Settled -= OnSettled;
+            _framesSinceDither = 0;
+        }
+    }
 }
 
 public enum SequenceState { Idle, Running, Paused }
@@ -268,6 +364,9 @@ public class SequenceStatus {
     public double ElapsedSeconds { get; set; }
     public double EstimatedRemainingSeconds { get; set; }
     public string? LastError { get; set; }
+    public int DithersIssued { get; set; }
+    public int FramesSinceDither { get; set; }
+    public DitherSettings? Dither { get; set; }
 }
 
 public class SequenceItemStatus {
@@ -276,4 +375,25 @@ public class SequenceItemStatus {
     public int Count { get; set; }
     public int Completed { get; set; }
     public bool IsActive { get; set; }
+}
+
+/// <summary>
+/// Dithering configuration for a sequence run. The engine asks PHD2 to dither
+/// after every <see cref="EveryNFrames"/> successfully-captured frames, and
+/// waits for SettleDone before continuing.
+/// </summary>
+public class DitherSettings {
+    public bool Enabled { get; set; }
+    /// <summary>Random pixel offset (passed to PHD2 'dither' as amount).</summary>
+    public double Pixels { get; set; } = 5.0;
+    /// <summary>Trigger a dither after every N successfully-captured frames.</summary>
+    public int EveryNFrames { get; set; } = 1;
+    /// <summary>Only dither in RA (useful for mounts with sloppy Dec backlash).</summary>
+    public bool RaOnly { get; set; }
+    /// <summary>Settle distance tolerance in pixels.</summary>
+    public double SettlePixels { get; set; } = 1.5;
+    /// <summary>Minimum settled time in seconds.</summary>
+    public int SettleTime { get; set; } = 10;
+    /// <summary>Hard timeout for settling, in seconds.</summary>
+    public int SettleTimeout { get; set; } = 40;
 }

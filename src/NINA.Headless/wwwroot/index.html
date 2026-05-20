@@ -866,6 +866,72 @@
                     </template>
                 </div>
 
+                <!-- Dither settings panel -->
+                <div class="seq-dither-panel">
+                    <div class="seq-dither-header" @click="seqDitherExpanded = !seqDitherExpanded">
+                        <span x-text="seqDitherExpanded ? '▾' : '▸'"></span>
+                        <strong>Dithering</strong>
+                        <label class="seq-dither-toggle" @click.stop>
+                            <input type="checkbox" x-model="ditherSettings.enabled" @change="saveDitherSettings()"
+                                   :disabled="seqState === 'running'">
+                            <span :class="ditherSettings.enabled ? 'text-ok' : 'text-muted'"
+                                  x-text="ditherSettings.enabled ? 'ON' : 'OFF'"></span>
+                        </label>
+                        <span class="text-muted" style="font-size: 11px;" x-show="seqStatus?.dithersIssued >= 0">
+                            <span x-text="seqStatus?.dithersIssued || 0"></span> dithered · next in
+                            <span x-text="Math.max(0, (ditherSettings.everyNFrames || 1) - (seqStatus?.framesSinceDither || 0))"></span>
+                        </span>
+                    </div>
+                    <div class="seq-dither-body" x-show="seqDitherExpanded">
+                        <div class="seq-dither-row">
+                            <label>Pixels
+                                <input type="number" x-model.number="ditherSettings.pixels"
+                                       step="0.5" min="0.5" max="50" class="input-sm"
+                                       @change="saveDitherSettings()"
+                                       :disabled="seqState === 'running'">
+                            </label>
+                            <label>Every N frames
+                                <input type="number" x-model.number="ditherSettings.everyNFrames"
+                                       step="1" min="1" max="100" class="input-sm"
+                                       @change="saveDitherSettings()"
+                                       :disabled="seqState === 'running'">
+                            </label>
+                            <label class="seq-dither-checkbox">
+                                <input type="checkbox" x-model="ditherSettings.raOnly"
+                                       @change="saveDitherSettings()"
+                                       :disabled="seqState === 'running'">
+                                RA only
+                            </label>
+                        </div>
+                        <div class="seq-dither-row">
+                            <label>Settle px
+                                <input type="number" x-model.number="ditherSettings.settlePixels"
+                                       step="0.1" min="0.1" max="20" class="input-sm"
+                                       @change="saveDitherSettings()"
+                                       :disabled="seqState === 'running'">
+                            </label>
+                            <label>Settle time (s)
+                                <input type="number" x-model.number="ditherSettings.settleTime"
+                                       step="1" min="0" max="300" class="input-sm"
+                                       @change="saveDitherSettings()"
+                                       :disabled="seqState === 'running'">
+                            </label>
+                            <label>Timeout (s)
+                                <input type="number" x-model.number="ditherSettings.settleTimeout"
+                                       step="5" min="5" max="600" class="input-sm"
+                                       @change="saveDitherSettings()"
+                                       :disabled="seqState === 'running'">
+                            </label>
+                        </div>
+                        <p class="seq-dither-hint text-muted" x-show="ditherSettings.enabled && !guider.connected">
+                            ⚠ PHD2 not connected — dither will be silently skipped during the run.
+                        </p>
+                        <p class="seq-dither-hint text-muted" x-show="ditherSettings.enabled && guider.connected && !guider.guiding">
+                            ⚠ PHD2 connected but not guiding — start guiding before launching the sequence.
+                        </p>
+                    </div>
+                </div>
+
                 <!-- Controls -->
                 <div class="control-row actions" style="margin-top: 1rem;">
                     <button class="btn" @click="addSequenceItem()" :disabled="seqState === 'running'">+ Add</button>

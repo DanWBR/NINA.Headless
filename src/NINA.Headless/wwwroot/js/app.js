@@ -141,6 +141,19 @@ function ninaApp() {
         guideChartH: 160,
         guideChartScale: 2.0, // arcsec range each direction (auto-expands)
 
+        // Dither settings (mirrors server-side DitherSettings)
+        ditherSettings: {
+            enabled: false,
+            pixels: 5.0,
+            everyNFrames: 1,
+            raOnly: false,
+            settlePixels: 1.5,
+            settleTime: 10,
+            settleTimeout: 40
+        },
+        seqDitherExpanded: false,
+        _ditherSaveTimer: null,
+
         // In-flight request tracking
         _pending: {},
         _previewFetching: false,
@@ -170,6 +183,7 @@ function ninaApp() {
             this.connectStatusWs();
             this.connectImageWs();
             this.loadSettingsFromServer();
+            this.loadDitherSettings();
         },
 
         // --- Network helpers ---
@@ -566,6 +580,39 @@ function ninaApp() {
                     this.updateFov();
                 }
             } catch (e) { }
+        },
+
+        async loadDitherSettings() {
+            try {
+                const data = await this.apiGet('/api/sequence/dither');
+                if (data) {
+                    this.ditherSettings = {
+                        enabled: !!data.enabled,
+                        pixels: data.pixels ?? 5.0,
+                        everyNFrames: data.everyNFrames ?? 1,
+                        raOnly: !!data.raOnly,
+                        settlePixels: data.settlePixels ?? 1.5,
+                        settleTime: data.settleTime ?? 10,
+                        settleTimeout: data.settleTimeout ?? 40
+                    };
+                }
+            } catch (e) { /* server may not be reachable yet */ }
+        },
+
+        // Debounced PUT — fires 400ms after the last edit
+        saveDitherSettings() {
+            if (this._ditherSaveTimer) clearTimeout(this._ditherSaveTimer);
+            this._ditherSaveTimer = setTimeout(async () => {
+                try {
+                    await this.apiPost('/api/sequence/dither', null, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.ditherSettings)
+                    });
+                } catch (e) {
+                    this.toast('Failed to save dither settings', 'error');
+                }
+            }, 400);
         },
 
         async saveSettingsToServer() {

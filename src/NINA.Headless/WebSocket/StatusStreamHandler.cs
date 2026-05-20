@@ -91,7 +91,10 @@ public static class StatusStreamHandler {
                             elapsedSeconds = seqStatus.ElapsedSeconds,
                             estimatedRemainingSeconds = seqStatus.EstimatedRemainingSeconds,
                             lastError = seqStatus.LastError,
-                            items = seqStatus.Items
+                            items = seqStatus.Items,
+                            dithersIssued = seqStatus.DithersIssued,
+                            framesSinceDither = seqStatus.FramesSinceDither,
+                            dither = seqStatus.Dither
                         }
                     };
 

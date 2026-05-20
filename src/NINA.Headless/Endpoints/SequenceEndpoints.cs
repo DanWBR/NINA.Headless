@@ -67,5 +67,22 @@ public static class SequenceEndpoints {
             engine.Items.RemoveAt(index);
             return Results.Ok(new { message = "Item removed", itemCount = engine.Items.Count });
         });
+
+        // --- Dither settings ---
+
+        group.MapGet("/dither", (SequenceEngine engine) => {
+            return Results.Ok(engine.Dither);
+        });
+
+        group.MapPut("/dither", (DitherSettings settings, SequenceEngine engine) => {
+            // Defensive normalisation
+            if (settings.EveryNFrames < 1) settings.EveryNFrames = 1;
+            if (settings.Pixels < 0) settings.Pixels = 0;
+            if (settings.SettlePixels < 0) settings.SettlePixels = 0;
+            if (settings.SettleTime < 0) settings.SettleTime = 0;
+            if (settings.SettleTimeout < 1) settings.SettleTimeout = 1;
+            engine.Dither = settings;
+            return Results.Ok(engine.Dither);
+        });
     }
 }

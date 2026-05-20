@@ -152,12 +152,16 @@ function ninaApp() {
         imageViewerOpen: false,
         _osdViewer: null,
 
+        // Full image statistics + histogram
+        fullStats: null,
+        histogramData: null,
+
         // Temperature history (sensor temp samples for chart)
         tempHistory: [],     // [{t: msEpoch, temp: °C, power: %}]
         _tempLastSample: 0,
 
         // Chart.js instances (created lazily when canvas is visible)
-        _charts: { guide: null, af: null, hfr: null, temp: null },
+        _charts: { guide: null, af: null, hfr: null, temp: null, hist: null },
 
         // Auto-Focus
         autoFocus: {
@@ -909,6 +913,55 @@ function ninaApp() {
                 overlay.add(A.polygon(corners));
                 this._aladinFovOverlay = overlay;
             } catch (e) { console.warn('FOV overlay failed', e); }
+        },
+
+        // ---- Image statistics + histogram ----
+
+        async loadFullStats(withStars = false) {
+            try {
+                const url = '/api/image/latest/stats' + (withStars ? '?withStars=true' : '');
+                const [stats, hist] = await Promise.all([
+                    this.apiGet(url),
+                    this.apiGet('/api/image/latest/histogram?bins=256').catch(() => null)
+                ]);
+                this.fullStats = stats;
+                this.histogramData = hist;
+                this.$nextTick(() => this.updateHistChart());
+            } catch (e) {
+                this.toast('Failed to load image stats: ' + e.message, 'error');
+            }
+        },
+
+        updateHistChart() {
+            if (!this.histogramData) return;
+            const c = this._ensureChart('histChart', 'hist', 'bar', () => ({
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'pixels',
+                        data: [],
+                        backgroundColor: '#64b5f6',
+                        borderColor: '#64b5f6',
+                        borderWidth: 0,
+                        barPercentage: 1.0,
+                        categoryPercentage: 1.0
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { display: false },
+                        y: { type: 'logarithmic', display: false, beginAtZero: true }
+                    }
+                }
+            }));
+            if (!c) return;
+            const values = this.histogramData.values || [];
+            c.data.labels = values.map((_, i) => i);
+            c.data.datasets[0].data = values.map(v => Math.max(1, v));
+            c.update('none');
         },
 
         // ---- OpenSeadragon image viewer ----

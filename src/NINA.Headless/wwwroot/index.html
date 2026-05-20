@@ -123,6 +123,33 @@
                     <span x-show="filterWheel.connected" class="text-ok" x-text="filterWheel.currentFilter"></span>
                     <span>Frames: <strong x-text="sessionCaptures"></strong></span>
                     <span x-text="currentTime"></span>
+                    <button class="btn btn-sm" @click="loadFullStats()" style="margin-left:auto;"
+                            :disabled="!selectedCamera">Detailed stats</button>
+                </div>
+
+                <!-- Expanded stats panel -->
+                <div class="full-stats-panel" x-show="fullStats">
+                    <div class="full-stats-grid">
+                        <div><span>Width</span><strong x-text="fullStats?.width"></strong></div>
+                        <div><span>Height</span><strong x-text="fullStats?.height"></strong></div>
+                        <div><span>Bit depth</span><strong x-text="fullStats?.bitDepth"></strong></div>
+                        <div><span>Bayer</span><strong x-text="fullStats?.bayerPattern"></strong></div>
+                        <div><span>Mean</span><strong x-text="fullStats?.mean?.toFixed(1)"></strong></div>
+                        <div><span>Median</span><strong x-text="fullStats?.median"></strong></div>
+                        <div><span>Std Dev</span><strong x-text="fullStats?.stddev?.toFixed(1)"></strong></div>
+                        <div><span>MAD</span><strong x-text="fullStats?.mad"></strong></div>
+                        <div><span>Min</span><strong x-text="fullStats?.min"></strong></div>
+                        <div><span>Max</span><strong x-text="fullStats?.max"></strong></div>
+                        <div x-show="fullStats?.stars?.count > 0"><span>Stars</span><strong x-text="fullStats?.stars?.count"></strong></div>
+                        <div x-show="fullStats?.stars?.medianHfr > 0"><span>Median HFR</span><strong x-text="fullStats?.stars?.medianHfr?.toFixed(2)"></strong></div>
+                    </div>
+                    <div class="chart-container chart-container-sm" x-show="histogramData">
+                        <canvas x-ref="histChart" id="histChart"></canvas>
+                    </div>
+                    <div class="control-row actions">
+                        <button class="btn btn-sm" @click="loadFullStats(true)">Reload (with stars)</button>
+                        <button class="btn btn-sm" @click="fullStats = null; histogramData = null;">Hide</button>
+                    </div>
                 </div>
 
                 <!-- Image History (collapsible) -->

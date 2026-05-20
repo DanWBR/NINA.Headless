@@ -7,6 +7,21 @@ public static class ImageEndpoints {
     public static void MapImageEndpoints(this WebApplication app) {
         var group = app.MapGroup("/api/image");
 
+        group.MapGet("/stream/clients", (ImageRelayService relay) => {
+            return Results.Ok(new {
+                clientCount = relay.ClientCount,
+                adaptiveEnabled = relay.AdaptiveEnabled,
+                downgradeThresholdMs = (int)relay.AdaptiveDowngradeLatency.TotalMilliseconds,
+                upgradeThresholdMs = (int)relay.AdaptiveUpgradeLatency.TotalMilliseconds,
+                clients = relay.GetClientStats()
+            });
+        });
+
+        group.MapPost("/stream/adaptive", (AdaptiveToggle req, ImageRelayService relay) => {
+            relay.AdaptiveEnabled = req.Enabled;
+            return Results.Ok(new { adaptiveEnabled = relay.AdaptiveEnabled });
+        });
+
         group.MapGet("/latest/preview", (ImageRelayService relay, int? quality) => {
             var jpeg = relay.GetLatestJpeg(quality ?? 85);
             if (jpeg == null)
@@ -94,6 +109,8 @@ public static class ImageEndpoints {
             });
         });
     }
+
+    public record AdaptiveToggle(bool Enabled);
 
     private static (double mean, double median, int min, int max, double stddev, double mad)
         ComputeFullStats(ushort[] data, int bitDepth) {

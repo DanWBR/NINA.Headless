@@ -14,6 +14,17 @@ public class ImageRelayService : IDisposable {
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(10);
     private const int MaxConsecutiveFailures = 3;
 
+    /// <summary>Send latency above this triggers raw → JPEG downgrade.</summary>
+    public TimeSpan AdaptiveDowngradeLatency { get; set; } = TimeSpan.FromSeconds(3);
+    /// <summary>Number of consecutive slow frames before downgrading.</summary>
+    public int AdaptiveDowngradeStreak { get; set; } = 2;
+    /// <summary>Send latency below this for N frames allows JPEG → raw upgrade
+    /// (only for clients we previously downgraded).</summary>
+    public TimeSpan AdaptiveUpgradeLatency { get; set; } = TimeSpan.FromMilliseconds(600);
+    public int AdaptiveUpgradeStreak { get; set; } = 5;
+    /// <summary>Master switch — set false to pin clients to whatever mode they requested.</summary>
+    public bool AdaptiveEnabled { get; set; } = true;
+
     public ImageRelayService(ILogger<ImageRelayService> logger) {
         _logger = logger;
     }
@@ -98,9 +109,13 @@ public class ImageRelayService : IDisposable {
             try {
                 using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 sendCts.CancelAfter(SendTimeout);
+                var sendStart = DateTime.UtcNow;
                 await entry.Ws.SendAsync(frame, WebSocketMessageType.Binary, true, sendCts.Token);
+                entry.LastSendDuration = DateTime.UtcNow - sendStart;
                 entry.ConsecutiveFailures = 0;
                 entry.SkippedFrames = 0;
+
+                if (AdaptiveEnabled) ApplyAdaptiveLogic(id, entry);
             } catch (OperationCanceledException) when (!ct.IsCancellationRequested) {
                 entry.ConsecutiveFailures++;
                 _logger.LogWarning("Send to client {Id} timed out (failure {N}/{Max})",
@@ -153,13 +168,84 @@ public class ImageRelayService : IDisposable {
         public int SkippedFrames { get; set; }
         public StreamMode Mode { get; set; } = StreamMode.Jpeg; // Default to JPEG (works everywhere)
 
+        /// <summary>The mode the client originally asked for — never overwritten by adaptive logic.</summary>
+        public StreamMode RequestedMode { get; set; } = StreamMode.Jpeg;
+        /// <summary>True when adaptive logic forced us off the requested mode.</summary>
+        public bool AdaptiveDowngraded { get; set; }
+        /// <summary>Rolling counters used by the adaptive bandwidth heuristic.</summary>
+        public int SlowFrameStreak { get; set; }
+        public int FastFrameStreak { get; set; }
+        public TimeSpan LastSendDuration { get; set; }
+
         public ClientEntry(System.Net.WebSockets.WebSocket ws) => Ws = ws;
     }
 
     public void SetClientMode(string id, StreamMode mode) {
         if (_clients.TryGetValue(id, out var entry)) {
             entry.Mode = mode;
-            _logger.LogInformation("Client {Id} switched to {Mode} stream mode", id, mode);
+            entry.RequestedMode = mode;
+            entry.AdaptiveDowngraded = false;
+            entry.SlowFrameStreak = 0;
+            entry.FastFrameStreak = 0;
+            _logger.LogInformation("Client {Id} requested {Mode} stream mode", id, mode);
         }
+    }
+
+    private void ApplyAdaptiveLogic(string id, ClientEntry entry) {
+        // Only adapt raw clients down to JPEG. Pure JPEG clients have no
+        // cheaper fallback, so do nothing for them.
+        if (entry.RequestedMode != StreamMode.Raw && !entry.AdaptiveDowngraded) {
+            entry.SlowFrameStreak = 0;
+            entry.FastFrameStreak = 0;
+            return;
+        }
+
+        var lat = entry.LastSendDuration;
+
+        if (entry.Mode == StreamMode.Raw && lat >= AdaptiveDowngradeLatency) {
+            entry.SlowFrameStreak++;
+            entry.FastFrameStreak = 0;
+            if (entry.SlowFrameStreak >= AdaptiveDowngradeStreak) {
+                entry.Mode = StreamMode.Jpeg;
+                entry.AdaptiveDowngraded = true;
+                entry.SlowFrameStreak = 0;
+                _logger.LogWarning(
+                    "Adaptive bandwidth: client {Id} raw→JPEG (last send {Ms}ms >= {Threshold}ms x{Streak})",
+                    id, lat.TotalMilliseconds, AdaptiveDowngradeLatency.TotalMilliseconds,
+                    AdaptiveDowngradeStreak);
+            }
+        } else if (entry.Mode == StreamMode.Jpeg && entry.AdaptiveDowngraded
+                   && lat <= AdaptiveUpgradeLatency) {
+            entry.FastFrameStreak++;
+            entry.SlowFrameStreak = 0;
+            if (entry.FastFrameStreak >= AdaptiveUpgradeStreak) {
+                entry.Mode = StreamMode.Raw;
+                entry.AdaptiveDowngraded = false;
+                entry.FastFrameStreak = 0;
+                _logger.LogInformation(
+                    "Adaptive bandwidth: client {Id} restored to raw (last send {Ms}ms <= {Threshold}ms x{Streak})",
+                    id, lat.TotalMilliseconds, AdaptiveUpgradeLatency.TotalMilliseconds,
+                    AdaptiveUpgradeStreak);
+            }
+        } else {
+            // Latency in the middle band — reset both streaks
+            if (entry.Mode == StreamMode.Raw) entry.SlowFrameStreak = 0;
+            if (entry.Mode == StreamMode.Jpeg) entry.FastFrameStreak = 0;
+        }
+    }
+
+    /// <summary>Diagnostics endpoint for the adaptive logic.</summary>
+    public IEnumerable<object> GetClientStats() {
+        return _clients.Select(kv => new {
+            id = kv.Key,
+            requestedMode = kv.Value.RequestedMode.ToString(),
+            currentMode = kv.Value.Mode.ToString(),
+            adaptiveDowngraded = kv.Value.AdaptiveDowngraded,
+            lastSendMs = (int)kv.Value.LastSendDuration.TotalMilliseconds,
+            slowStreak = kv.Value.SlowFrameStreak,
+            fastStreak = kv.Value.FastFrameStreak,
+            skipped = kv.Value.SkippedFrames,
+            failures = kv.Value.ConsecutiveFailures
+        });
     }
 }

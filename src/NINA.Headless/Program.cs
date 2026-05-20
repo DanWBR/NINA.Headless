@@ -26,6 +26,7 @@ builder.Services.AddSingleton<MeridianFlipService>();
 builder.Services.AddSingleton<FlatWizardService>();
 builder.Services.AddSingleton<NINA.Headless.Services.Alpaca.AlpacaDiscovery>();
 builder.Services.AddSingleton<StellariumClient>();
+builder.Services.AddSingleton<AltitudeService>();
 builder.Services.AddHostedService<MdnsService>();
 builder.Services.AddSingleton(sp =>
 {

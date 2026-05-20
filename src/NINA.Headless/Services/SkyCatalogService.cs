@@ -28,6 +28,40 @@ public class SkyCatalogService {
             .ToList();
     }
 
+    /// <summary>
+    /// Filtered query for the Sky Atlas. All parameters are optional; null /
+    /// empty values are ignored. Results sorted by magnitude (brightest first).
+    /// </summary>
+    public List<CatalogObject> Filter(CatalogFilter filter, int maxResults = 50) {
+        IEnumerable<CatalogObject> q = _catalog;
+
+        if (!string.IsNullOrWhiteSpace(filter.Query)) {
+            var qn = filter.Query.Replace(" ", "").ToUpperInvariant();
+            q = q.Where(o => Matches(o, qn, filter.Query));
+        }
+        if (!string.IsNullOrWhiteSpace(filter.Type)) {
+            q = q.Where(o => o.Type.Equals(filter.Type, StringComparison.OrdinalIgnoreCase));
+        }
+        if (filter.MinMagnitude.HasValue) {
+            q = q.Where(o => o.Magnitude >= filter.MinMagnitude.Value);
+        }
+        if (filter.MaxMagnitude.HasValue) {
+            q = q.Where(o => o.Magnitude <= filter.MaxMagnitude.Value);
+        }
+        if (filter.MinDec.HasValue) {
+            q = q.Where(o => o.Dec >= filter.MinDec.Value);
+        }
+        if (filter.MaxDec.HasValue) {
+            q = q.Where(o => o.Dec <= filter.MaxDec.Value);
+        }
+
+        return q.OrderBy(o => o.Magnitude).Take(maxResults).ToList();
+    }
+
+    /// <summary>Distinct object types present in the catalog (for filter dropdowns).</summary>
+    public List<string> GetObjectTypes() =>
+        _catalog.Select(o => o.Type).Distinct().OrderBy(t => t).ToList();
+
     public CatalogObject? GetByName(string name) {
         return _catalog.FirstOrDefault(o =>
             o.Name.Equals(name, StringComparison.OrdinalIgnoreCase) ||
@@ -247,6 +281,15 @@ public class SkyCatalogService {
             Aliases = aliases
         });
     }
+}
+
+public class CatalogFilter {
+    public string? Query { get; set; }
+    public string? Type { get; set; }
+    public double? MinMagnitude { get; set; }
+    public double? MaxMagnitude { get; set; }
+    public double? MinDec { get; set; }
+    public double? MaxDec { get; set; }
 }
 
 public class CatalogObject {

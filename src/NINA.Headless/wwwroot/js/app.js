@@ -143,6 +143,13 @@ function ninaApp() {
         guideChartH: 160,
         guideChartScale: 2.0, // arcsec range each direction (auto-expands)
 
+        // Sky Atlas filters + altitude chart
+        showAtlasFilters: false,
+        atlasFilter: { type: '', minMag: null, maxMag: null, minDec: null, maxDec: null },
+        atlasResults: [],
+        atlasTypes: [],
+        altitudeData: null,
+
         // Aladin Lite (Sky Explorer)
         aladinInstance: null,
         aladinFov: 2.0,
@@ -179,7 +186,7 @@ function ninaApp() {
         _tempLastSample: 0,
 
         // Chart.js instances (created lazily when canvas is visible)
-        _charts: { guide: null, af: null, hfr: null, temp: null, hist: null },
+        _charts: { guide: null, af: null, hfr: null, temp: null, hist: null, alt: null },
 
         // Auto-Focus
         autoFocus: {
@@ -266,6 +273,7 @@ function ninaApp() {
             this.loadSettingsFromServer();
             this.loadDitherSettings();
             this.loadMfSettings();
+            this.loadAtlasTypes();
         },
 
         // --- Network helpers ---
@@ -2276,6 +2284,83 @@ function ninaApp() {
         },
 
         // --- Sky ---
+
+        // ---- Sky Atlas filters ----
+
+        async loadAtlasTypes() {
+            try {
+                this.atlasTypes = await this.apiGet('/api/sky/catalog/types');
+            } catch (e) { }
+        },
+
+        async atlasSearch() {
+            const params = new URLSearchParams();
+            if (this.atlasFilter.type) params.set('type', this.atlasFilter.type);
+            if (this.atlasFilter.minMag != null) params.set('minMag', this.atlasFilter.minMag);
+            if (this.atlasFilter.maxMag != null) params.set('maxMag', this.atlasFilter.maxMag);
+            if (this.atlasFilter.minDec != null) params.set('minDec', this.atlasFilter.minDec);
+            if (this.atlasFilter.maxDec != null) params.set('maxDec', this.atlasFilter.maxDec);
+            try {
+                const data = await this.apiGet('/api/sky/catalog/filter?' + params.toString());
+                this.atlasResults = data.results || [];
+            } catch (e) {
+                this.toast('Atlas search failed: ' + e.message, 'error');
+            }
+        },
+
+        resetAtlasFilters() {
+            this.atlasFilter = { type: '', minMag: null, maxMag: null, minDec: null, maxDec: null };
+            this.atlasResults = [];
+        },
+
+        // ---- Altitude chart ----
+
+        async loadAltitudeChart() {
+            if (!this.skyTarget) return;
+            try {
+                this.altitudeData = await this.apiGet(
+                    `/api/sky/altitude?ra=${this.skyTarget.ra}&dec=${this.skyTarget.dec}&stepMinutes=15`);
+                this.$nextTick(() => this.updateAltChart());
+            } catch (e) {
+                this.toast('Altitude calc failed: ' + e.message, 'error');
+            }
+        },
+
+        updateAltChart() {
+            if (!this.altitudeData) return;
+            const t = this._chartTheme();
+            // Build twilight band annotation rectangles via dataset background?
+            // Simpler: shade the whole panel via a second dataset that fills to 0.
+            const c = this._ensureChart('altChart', 'alt', 'line', () => ({
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: 'Altitude', data: [], borderColor: '#64b5f6',
+                          backgroundColor: 'transparent', tension: 0.25,
+                          pointRadius: 0, borderWidth: 1.5 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: t.tick, font: { size: 9 } }, grid: { color: t.grid } },
+                        y: { min: -10, max: 90, ticks: { color: t.tick, font: { size: 10 } },
+                             grid: { color: t.grid },
+                             title: { display: true, text: 'Altitude (°)', color: t.tick, font: { size: 10 } } }
+                    }
+                }
+            }));
+            if (!c) return;
+            const samples = this.altitudeData.samples || [];
+            c.data.labels = samples.map(s => {
+                const d = new Date(s.utc);
+                return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+            });
+            c.data.datasets[0].data = samples.map(s => s.altitudeDeg);
+            c.update('none');
+        },
 
         async getFromStellarium() {
             const host = this.settings.stellariumHost || 'localhost';

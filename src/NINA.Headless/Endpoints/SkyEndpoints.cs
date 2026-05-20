@@ -108,6 +108,71 @@ public static class SkyEndpoints {
                 path = solver.SolverPath
             });
         });
+
+        // ---- Catalog filters (Sky Atlas) ----
+
+        group.MapGet("/catalog/types", (SkyCatalogService catalog) => {
+            return Results.Ok(catalog.GetObjectTypes());
+        });
+
+        group.MapGet("/catalog/filter", (string? query, string? type,
+            double? minMag, double? maxMag, double? minDec, double? maxDec,
+            int? limit, SkyCatalogService catalog) => {
+            var results = catalog.Filter(new CatalogFilter {
+                Query = query, Type = type,
+                MinMagnitude = minMag, MaxMagnitude = maxMag,
+                MinDec = minDec, MaxDec = maxDec
+            }, Math.Clamp(limit ?? 50, 1, 500));
+
+            return Results.Ok(new {
+                count = results.Count,
+                results = results.Select(o => new {
+                    name = o.Name, ra = o.Ra, dec = o.Dec,
+                    raFormatted = o.RaFormatted, decFormatted = o.DecFormatted,
+                    magnitude = o.Magnitude, type = o.Type,
+                    commonName = o.CommonName, aliases = o.Aliases
+                })
+            });
+        });
+
+        // ---- Altitude chart + night window ----
+
+        group.MapGet("/altitude", (double ra, double dec, int? stepMinutes,
+            AltitudeService alt, ProfileService profile) => {
+            // Default window: current night (sunset to sunrise) at the
+            // observer's longitude. If no profile lat/lon yet, fall back to
+            // ±6h around now so the chart still draws something useful.
+            var window = alt.ComputeNightWindow();
+            DateTime from, to;
+            if (Math.Abs(profile.Active.Latitude) > 0.01 || Math.Abs(profile.Active.Longitude) > 0.01) {
+                from = window.Sunset;
+                to = window.Sunrise;
+            } else {
+                from = DateTime.UtcNow.AddHours(-6);
+                to = DateTime.UtcNow.AddHours(6);
+            }
+
+            var step = Math.Clamp(stepMinutes ?? 15, 1, 120);
+            var track = alt.ComputeTrack(ra, dec, from, to, step);
+
+            return Results.Ok(new {
+                target = new { ra, dec },
+                fromUtc = from,
+                toUtc = to,
+                stepMinutes = step,
+                samples = track,
+                twilight = new {
+                    sunset = window.Sunset,
+                    civilDusk = window.CivilDuskUtc,
+                    nauticalDusk = window.NauticalDuskUtc,
+                    astronomicalDusk = window.AstronomicalDuskUtc,
+                    astronomicalDawn = window.AstronomicalDawnUtc,
+                    nauticalDawn = window.NauticalDawnUtc,
+                    civilDawn = window.CivilDawnUtc,
+                    sunrise = window.Sunrise
+                }
+            });
+        });
     }
 
     public record SlewAndCenterRequest(double Ra, double Dec, double ToleranceArcsec = 30.0);

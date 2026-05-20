@@ -890,8 +890,50 @@
                     <input type="text" class="search-input" placeholder="Search object (M31, NGC 7000, Orion...)"
                            x-model="skySearch" @keyup.enter="searchSky()" @input="skyShowResults = false">
                     <button class="btn btn-sm" @click="searchSky()">Search</button>
+                    <button class="btn btn-sm" @click="showAtlasFilters = !showAtlasFilters"
+                            :class="showAtlasFilters ? 'btn-active' : ''">Filters</button>
                     <button class="btn btn-sm" @click="getFromStellarium()"
                             title="Use currently-selected object in Stellarium as target">🔭 Stellarium</button>
+                </div>
+
+                <!-- Sky Atlas filters -->
+                <div class="sky-survey-row" x-show="showAtlasFilters" x-cloak>
+                    <label>Type
+                        <select x-model="atlasFilter.type" class="input-sm" @change="atlasSearch()">
+                            <option value="">Any</option>
+                            <template x-for="t in atlasTypes" :key="t">
+                                <option :value="t" x-text="t"></option>
+                            </template>
+                        </select>
+                    </label>
+                    <label>Min mag
+                        <input type="number" x-model.number="atlasFilter.minMag" step="0.5" class="input-sm" @change="atlasSearch()">
+                    </label>
+                    <label>Max mag
+                        <input type="number" x-model.number="atlasFilter.maxMag" step="0.5" class="input-sm" @change="atlasSearch()">
+                    </label>
+                    <label>Min Dec (°)
+                        <input type="number" x-model.number="atlasFilter.minDec" step="5" class="input-sm" @change="atlasSearch()">
+                    </label>
+                    <label>Max Dec (°)
+                        <input type="number" x-model.number="atlasFilter.maxDec" step="5" class="input-sm" @change="atlasSearch()">
+                    </label>
+                    <button class="btn btn-sm" @click="atlasSearch()">Apply</button>
+                    <button class="btn btn-sm" @click="resetAtlasFilters()">Reset</button>
+                </div>
+
+                <!-- Atlas filtered results -->
+                <div class="sky-results" x-show="showAtlasFilters && atlasResults.length > 0" x-cloak>
+                    <div class="text-muted" style="padding: 4px 12px; font-size: 11px;"
+                         x-text="atlasResults.length + ' objects'"></div>
+                    <template x-for="obj in atlasResults" :key="obj.name">
+                        <div class="sky-result-item" @click="selectSkyTarget(obj)">
+                            <strong x-text="obj.name"></strong>
+                            <span class="sky-result-type" x-text="obj.type"></span>
+                            <span class="sky-result-common" x-show="obj.commonName" x-text="obj.commonName"></span>
+                            <span class="sky-result-mag">mag <span x-text="obj.magnitude"></span></span>
+                        </div>
+                    </template>
                 </div>
 
                 <!-- Search results dropdown -->
@@ -966,6 +1008,11 @@
                         <button class="btn" @click="slewTo(skyTarget?.ra, skyTarget?.dec)"
                                 :disabled="!skyTarget || !mount.connected">Slew Only</button>
                         <button class="btn" @click="addToSequence()" :disabled="!skyTarget">Add to Sequence</button>
+                        <button class="btn" @click="loadAltitudeChart()" :disabled="!skyTarget">Tonight's altitude</button>
+                    </div>
+
+                    <div class="chart-container chart-container-sm" x-show="altitudeData">
+                        <canvas x-ref="altChart" id="altChart"></canvas>
                     </div>
                 </div>
 

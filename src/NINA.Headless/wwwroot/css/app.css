@@ -1223,19 +1223,16 @@ select.input-sm {
     flex-direction: column;
     gap: 3px;
 }
-/* The Sky-mode dropdown needs to fit its widest option ("Equatorial"
-   or "Live (now)") without truncating. ~110 px is enough for both
-   without forcing the row to wrap on narrow widths. */
-.sky-survey-row select.input-sm {
-    min-width: 110px;
+/* Let select/number inputs in the sky toolbar size to their natural
+   content — no fixed widths. Just strip the browser's number-input
+   spinner arrows (they look noisy at small sizes). */
+.sky-survey-row select.input-sm,
+.sky-survey-row input[type="number"].input-sm {
     width: auto;
 }
-/* Strip the browser's number-input spinner arrows on the FOV input — they
-   look out of place at this size and the user can type / wheel anyway. */
 .sky-survey-row input[type="number"].input-sm {
     -moz-appearance: textfield;
     appearance: textfield;
-    min-width: 64px;
 }
 .sky-survey-row input[type="number"].input-sm::-webkit-outer-spin-button,
 .sky-survey-row input[type="number"].input-sm::-webkit-inner-spin-button {

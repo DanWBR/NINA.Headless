@@ -1187,13 +1187,13 @@ function ninaApp() {
                         // mount user to relate the live sky to RA/Dec coords.
                         equatorial: { show: true, stroke: '#aaffaa', width: 1, opacity: 0.35 },
                         ecliptic:   { show: true, stroke: '#ffcc66', width: 1, opacity: 0.4 },
-                        horizon:    { show: true, stroke: '#ff5566', width: 1.5, dash: [4, 4], opacity: 0.5 },
+                        horizon:    { show: true, stroke: '#cccccc', width: 5.0, opacity: 0.7 },
                         galactic:   { show: false }
                     },
-                    // Filled below-horizon region (the "ground"). Opacity 0.5 so
-                    // the sky underneath stays partly visible (you can still see
-                    // which constellations are below the horizon, just dimmed).
-                    horizon: { show: true, stroke: '#ff5566', fill: '#0a0a14', opacity: 0.5 },
+                    // Horizon marker — shown when location is set and the map
+                    // is an all-sky projection. Thick light-grey line with the
+                    // below-horizon area filled solid black at 0.7 opacity.
+                    horizon: { show: true, stroke: '#cccccc', width: 5.0, fill: '#000000', opacity: 0.7 },
                     // Daylight overlay disabled — d3-celestial's built-in
                     // daytime sky tint is a bright blue that washes out the
                     // stars + constellation lines. For an astrophotography

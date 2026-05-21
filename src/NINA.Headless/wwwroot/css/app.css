@@ -1189,20 +1189,24 @@ select.input-sm {
     position: relative !important;
     overflow: hidden !important;
 }
-/* The SVG d3-celestial injects sizes to width × width (the projection is
-   circular). Pulling it OUT of normal flow with absolute positioning is
-   the only reliable way to keep the parent's height bounded — otherwise
-   the SVG's intrinsic height inflates the flex item and overflow:hidden
-   has nothing to clip. The translate centres the circle vertically so
-   the cropped halves sit equally above and below the visible band. */
-.sky-viewer svg {
+/* d3-celestial renders into BOTH a <canvas> (the raster sky map — stars,
+   constellation lines, milky way) AND an <svg> overlay (graticule labels,
+   text, FOV box). Both are sized to width × width (circular projection)
+   and we need to centre BOTH with the same transform, otherwise the
+   canvas drifts down and the projection centre ends up below the
+   visible viewport (which is what celestial.css's default
+   `position:relative` does to the canvas). */
+.sky-viewer svg,
+.sky-viewer canvas,
+#celestial-map.sky-viewer > svg,
+#celestial-map.sky-viewer > canvas {
     position: absolute !important;
     left: 50% !important;
     top: 50% !important;
     transform: translate(-50%, -50%);
     width: 100% !important;
     height: auto !important;
-    display: block;
+    display: block !important;
 }
 
 .sky-survey-row {

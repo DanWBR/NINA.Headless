@@ -1278,6 +1278,16 @@
                     <label>Sensor Height (mm)<input type="number" x-model.number="settings.sensorHeight" step="0.1" class="input-sm"></label>
                     <label>Focal Length (mm)<input type="number" x-model.number="settings.focalLength" step="1" class="input-sm"></label>
                 </div>
+
+                <div class="settings-section">
+                    <h3>Image Output</h3>
+                    <label>Format
+                        <select class="input-sm" x-model="settings.imageFormat" @change="saveSettingsToServer()">
+                            <option value="fits">FITS</option>
+                            <option value="xisf">XISF (PixInsight, LZ4-compressed)</option>
+                        </select>
+                    </label>
+                </div>
             </div>
 
         </main>

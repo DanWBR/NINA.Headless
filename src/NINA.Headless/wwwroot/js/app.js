@@ -66,6 +66,7 @@ function ninaApp() {
             indiPort: 7624,
             latitude: 0, longitude: 0, altitude: 0,
             sensorWidth: 23.5, sensorHeight: 15.7, focalLength: 478,
+            imageFormat: 'fits',
             stellariumHost: 'localhost',
             stellariumPort: 8090
         },
@@ -867,6 +868,7 @@ function ninaApp() {
                     this.settings.sensorWidth = data.sensorWidthMm || 23.5;
                     this.settings.sensorHeight = data.sensorHeightMm || 15.7;
                     this.settings.focalLength = data.focalLengthMm || 478;
+                    this.settings.imageFormat = data.imageFormat || 'fits';
                     this.updateFov();
                     this._maybeShowLocationSetup();
                 }

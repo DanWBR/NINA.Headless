@@ -1,5 +1,6 @@
 using System.Globalization;
 using NINA.Image.FileFormat.FITS;
+using NINA.Image.FileFormat.XISF;
 using NINA.Image.ImageData;
 using NINA.Image.Interfaces;
 
@@ -57,10 +58,16 @@ public class ImageWriterService {
             EnrichMetadata(imageData, profile, targetName, imageType, gain);
             _sessionFrameNumber++;
 
+            var format = (profile.ImageFormat ?? "fits").Trim().ToLowerInvariant();
+            var extension = format switch {
+                "xisf" => ".xisf",
+                _      => ".fits"
+            };
+
             var pattern = string.IsNullOrWhiteSpace(profile.ImageNamePattern)
                 ? "{target}_{filter}_{exposure}s_{date}_{seq}"
                 : profile.ImageNamePattern;
-            var fileName = SubstitutePattern(pattern, imageData, _sessionFrameNumber) + ".fits";
+            var fileName = SubstitutePattern(pattern, imageData, _sessionFrameNumber) + extension;
             // Sanitise illegal filename characters
             foreach (var c in Path.GetInvalidFileNameChars()) fileName = fileName.Replace(c, '_');
 
@@ -70,7 +77,7 @@ public class ImageWriterService {
             int copy = 1;
             while (File.Exists(fullPath)) {
                 var name = Path.GetFileNameWithoutExtension(fileName);
-                fullPath = Path.Combine(dir, $"{name}_{copy++}.fits");
+                fullPath = Path.Combine(dir, $"{name}_{copy++}{extension}");
             }
 
             RotatorMetaData? rotMeta = null;
@@ -82,9 +89,14 @@ public class ImageWriterService {
                 };
             }
 
-            FITSWriter.Write(imageData, fullPath, rotator: rotMeta);
+            if (format == "xisf") {
+                XISFWriter.Write(imageData, fullPath, rotator: rotMeta);
+                _logger.LogInformation("Saved XISF: {Path}", fullPath);
+            } else {
+                FITSWriter.Write(imageData, fullPath, rotator: rotMeta);
+                _logger.LogInformation("Saved FITS: {Path}", fullPath);
+            }
             _lastWrittenPath = fullPath;
-            _logger.LogInformation("Saved FITS: {Path}", fullPath);
             return fullPath;
         } catch (Exception ex) {
             _logger.LogError(ex, "Failed to save FITS to {Dir}", dir);

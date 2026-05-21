@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="CosineKitty.AstronomyEngine" Version="2.1.19" />
     <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.*" />
   </ItemGroup>
 

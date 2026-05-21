@@ -68,6 +68,12 @@ public class SkyCatalogService {
             o.Aliases.Any(a => a.Equals(name, StringComparison.OrdinalIgnoreCase)));
     }
 
+    /// <summary>
+    /// All catalog objects — used by services that need to walk the full
+    /// list (e.g. TonightsBestService ranking visible DSOs).
+    /// </summary>
+    public IReadOnlyList<CatalogObject> AllObjects => _catalog;
+
     private static bool Matches(CatalogObject obj, string normalized, string original) {
         var nameNorm = obj.Name.Replace(" ", "").ToUpperInvariant();
         if (nameNorm.Contains(normalized)) return true;

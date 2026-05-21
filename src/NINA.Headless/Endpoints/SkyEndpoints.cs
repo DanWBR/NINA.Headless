@@ -200,6 +200,15 @@ public static class SkyEndpoints {
             var img = await svc.GetImageAsync(name, ct);
             return Results.Ok(img);
         });
+
+        // Ranked list of objects best positioned for observation tonight
+        // from the active profile's location. Includes DSOs (from the
+        // local catalog) + Moon + visible planets.
+        group.MapGet("/tonights-best", (int? limit, TonightsBestService svc) => {
+            var n = Math.Clamp(limit ?? 30, 1, 100);
+            var result = svc.Compute(n);
+            return Results.Ok(result);
+        });
     }
 
     public record SlewAndCenterRequest(double Ra, double Dec, double ToleranceArcsec = 30.0);

@@ -41,6 +41,7 @@ builder.Services.AddSingleton<AltitudeService>();
 builder.Services.AddSingleton<GeocodingService>();
 builder.Services.AddSingleton<WeatherForecastService>();
 builder.Services.AddSingleton<CelestialImageService>();
+builder.Services.AddSingleton<TonightsBestService>();
 builder.Services.AddHostedService<MdnsService>();
 builder.Services.AddSingleton<RelayClient>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RelayClient>());

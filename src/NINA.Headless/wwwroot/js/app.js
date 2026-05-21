@@ -159,6 +159,8 @@ function ninaApp() {
         phd2DecMode: 'Auto',
         phd2EquipmentConnected: false,
         phd2Process: { executableConfigured: false, executablePath: '', running: false, weStartedIt: false },
+        phd2Install: null,      // /install-info response: { installed, resolvedPath, downloadUrl, os, ... }
+        phd2AutoStart: false,   // bound to checkbox, posted to /api/guider/auto-start/{bool}
 
         // Sky Atlas filters + altitude chart
         showAtlasFilters: false,
@@ -301,6 +303,7 @@ function ninaApp() {
             this.loadAtlasTypes();
             this.loadRigs();
             this.fetchPhd2ProcessStatus();
+            this.fetchPhd2InstallInfo();
         },
 
         // --- Network helpers ---
@@ -2483,6 +2486,24 @@ function ninaApp() {
                 const s = await this.apiGet('/api/guider/process/status');
                 this.phd2Process = s;
             } catch (e) { /* ignore */ }
+        },
+
+        async fetchPhd2InstallInfo() {
+            try {
+                const info = await this.apiGet('/api/guider/install-info');
+                this.phd2Install = info;
+                this.phd2AutoStart = !!info.autoStart;
+            } catch (e) { /* ignore */ }
+        },
+
+        async setPhd2AutoStart(enabled) {
+            try {
+                await this.apiPost('/api/guider/auto-start/' + (enabled ? 'true' : 'false'));
+                this.toast(enabled ? 'PHD2 will auto-start on next boot' : 'PHD2 auto-start disabled', 'ok');
+            } catch (e) {
+                this.toast('Could not save auto-start preference: ' + e.message, 'error');
+                this.phd2AutoStart = !enabled; // revert
+            }
         },
 
         async launchPhd2() {

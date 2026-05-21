@@ -249,6 +249,38 @@ public static class GuiderEndpoints {
             weStartedIt = pm.WeStartedIt
         }));
 
+        // Detected install info — the UI uses this on startup to either show
+        // "PHD2 detected at <path>" or "PHD2 not installed — download here".
+        group.MapGet("/install-info", (PHD2ProcessManager pm, IConfiguration config) => {
+            var configured = config.GetValue<string?>("PHD2:ExecutablePath");
+            var resolved = pm.ExecutablePath;
+            var installed = pm.ExecutableConfigured;
+            var os = OperatingSystem.IsWindows() ? "windows"
+                  : OperatingSystem.IsMacOS() ? "macos"
+                  : "linux";
+            return Results.Ok(new {
+                installed,
+                resolvedPath = resolved,
+                configuredPath = configured,
+                autoStart = config.GetValue("PHD2:AutoStart", false),
+                host = pm.DefaultHost,
+                port = pm.DefaultPort,
+                instanceNumber = pm.InstanceNumber,
+                downloadUrl = PHD2ProcessManager.GetDownloadUrl(),
+                os,
+                searchedPaths = PHD2ProcessManager.EnumerateCandidatePaths().ToArray()
+            });
+        });
+
+        // Toggle PHD2:AutoStart at runtime. Persisted via ProfileService so
+        // the choice survives restarts. Takes effect on next app start (and
+        // the user can /process/launch right now for the current session).
+        group.MapPost("/auto-start/{enabled:bool}", (bool enabled, ProfileService profiles) => {
+            profiles.Active.PHD2AutoStart = enabled;
+            profiles.Save();
+            return Results.Ok(new { autoStart = enabled });
+        });
+
         group.MapPost("/process/launch", async (PHD2ProcessManager pm) => {
             try {
                 var ok = await pm.LaunchAsync();

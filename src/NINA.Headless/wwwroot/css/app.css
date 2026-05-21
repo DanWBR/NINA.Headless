@@ -1403,6 +1403,28 @@ select.input-sm {
     }
 }
 
+/* Inline warning banner (e.g. PHD2 not installed) */
+.warn-banner {
+    background: rgba(245, 158, 11, 0.15);
+    border-left: 3px solid #f59e0b;
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.45;
+}
+.warn-banner a {
+    color: var(--accent);
+    text-decoration: underline;
+    margin: 0 2px;
+}
+.warn-banner code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
 /* Connection lost banner */
 .connection-banner {
     position: fixed;

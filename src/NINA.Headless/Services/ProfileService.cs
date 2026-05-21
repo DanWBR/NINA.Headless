@@ -285,6 +285,11 @@ public class UserProfile {
     public string ImageOutputDir { get; set; } = "";
     public string ImageNamePattern { get; set; } = "{target}_{filter}_{exposure}s_{date}_{seq}";
     public string ImageFormat { get; set; } = "fits";
+
+    // PHD2 lifecycle preferences (app-global, not per-rig). When true the
+    // PHD2AutoStartService launches PHD2 (and connects the JSON-RPC client)
+    // as soon as the Headless app starts.
+    public bool PHD2AutoStart { get; set; } = false;
 }
 
 /// <summary>

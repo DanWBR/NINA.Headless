@@ -147,13 +147,60 @@ public class PHD2ProcessManager : IDisposable {
         return !await IsRunningAsync();
     }
 
-    private static string GetDefaultPath() {
+    /// <summary>
+    /// Best-effort auto-detection of where PHD2 is installed on this machine.
+    /// Walks a list of well-known install paths per OS. First hit wins.
+    /// On Linux/macOS also falls back to <c>which phd2</c>.
+    /// </summary>
+    public static string GetDefaultPath() {
+        foreach (var p in EnumerateCandidatePaths()) {
+            if (File.Exists(p)) return p;
+        }
+        return "";
+    }
+
+    /// <summary>
+    /// Public so the UI/install-info endpoint can show "we looked here" hints.
+    /// </summary>
+    public static IEnumerable<string> EnumerateCandidatePaths() {
         if (OperatingSystem.IsWindows()) {
             var p86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-            var candidate = Path.Combine(p86, "PHDGuiding2", "phd2.exe");
-            if (File.Exists(candidate)) return candidate;
+            var p64 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            yield return Path.Combine(p86, "PHDGuiding2", "phd2.exe");
+            yield return Path.Combine(p64, "PHDGuiding2", "phd2.exe");
+            yield return Path.Combine(p86, "PHD2", "phd2.exe");
+            yield return Path.Combine(p64, "PHD2", "phd2.exe");
+            yield return Path.Combine(localApp, "Programs", "PHDGuiding2", "phd2.exe");
+        } else if (OperatingSystem.IsMacOS()) {
+            yield return "/Applications/PHD2.app/Contents/MacOS/PHD2";
+            yield return "/Applications/phd2.app/Contents/MacOS/phd2";
+        } else {
+            // Linux + BSD
+            yield return "/usr/bin/phd2";
+            yield return "/usr/local/bin/phd2";
+            yield return "/opt/phd2/bin/phd2";
+            yield return "/snap/bin/phd2";
+            // PATH lookup as a fallback
+            var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (var dir in path.Split(Path.PathSeparator)) {
+                if (string.IsNullOrWhiteSpace(dir)) continue;
+                yield return Path.Combine(dir, "phd2");
+            }
         }
-        return OperatingSystem.IsWindows() ? "" : "/usr/bin/phd2";
+    }
+
+    /// <summary>
+    /// Returns a curated download URL for PHD2 binaries matching the host OS.
+    /// Used by the UI to nudge the user when PHD2 is not detected.
+    /// </summary>
+    public static string GetDownloadUrl() {
+        if (OperatingSystem.IsWindows())
+            return "https://openphdguiding.org/downloads/";
+        if (OperatingSystem.IsMacOS())
+            return "https://openphdguiding.org/downloads/";
+        return "https://openphdguiding.org/getting-started/";
     }
 
     public void Dispose() {

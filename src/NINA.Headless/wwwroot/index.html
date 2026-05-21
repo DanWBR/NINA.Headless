@@ -406,6 +406,15 @@
                           x-text="guider.connected ? guider.appState : 'Disconnected'"></span>
                 </div>
 
+                <!-- "PHD2 not installed" banner -->
+                <div x-show="!guider.connected && phd2Install && !phd2Install.installed"
+                     class="warn-banner" style="margin-bottom:0.5rem">
+                    PHD2 not detected on this machine.
+                    <a :href="phd2Install.downloadUrl" target="_blank" rel="noopener">Download PHD2</a>
+                    then restart the Headless server (or set <code>PHD2:ExecutablePath</code>
+                    in appsettings.json to a custom location).
+                </div>
+
                 <!-- Connection panel -->
                 <div x-show="!guider.connected" class="guide-connect-row">
                     <label>Host<input type="text" x-model="guiderHost" class="input-md"></label>
@@ -415,6 +424,10 @@
                             :title="phd2Process.executableConfigured ? 'Launch PHD2 then connect' : 'Set PHD2:ExecutablePath in appsettings'">
                         ▶ Launch PHD2
                     </button>
+                    <label class="checkbox-label" title="Auto-launch PHD2 and connect when the Headless server starts">
+                        <input type="checkbox" x-model="phd2AutoStart" @change="setPhd2AutoStart($event.target.checked)">
+                        Auto-start on boot
+                    </label>
                 </div>
 
                 <!-- PHD2 management panel (visible only when connected) -->

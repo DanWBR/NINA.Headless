@@ -31,7 +31,7 @@ public class CelestialImageService {
     // Bump when the lookup pipeline materially changes (e.g. relevance
     // filter added). Cached entries with an older version are ignored
     // and re-fetched, so users don't keep getting stale irrelevant hits.
-    private const int CacheSchemaVersion = 2;
+    private const int CacheSchemaVersion = 3;
 
     private readonly ILogger<CelestialImageService> _logger;
     private readonly string _cacheDir;
@@ -270,15 +270,36 @@ public class CelestialImageService {
         return CelestialImage.NotAvailable("NASA no astronomy match");
     }
 
+    // Words whose presence in a NASA item's title strongly suggest it's
+    // a science chart, schematic or data-product visualisation rather
+    // than a photograph of the target. Reject these even if the
+    // astronomy-keyword filter would otherwise let them through —
+    // a "Mars Albedo and Water Vapour Signature" diagram is not what
+    // an astrophotographer wants to see as a thumbnail of Mars.
+    private static readonly string[] NonPhotoTitleHints = new[] {
+        "diagram", "schematic", "chart", "plot", " graph", "spectrum",
+        "spectra", "signature", "infographic", "data product", "map of",
+        "concept art", "artist's concept", "artist concept", "artist impression"
+    };
+
     private static bool IsAstronomyRelated(string? title, string? description, string queryName) {
         var hay = ((title ?? "") + " " + (description ?? "")).ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(hay)) return false;
+
+        // Hard reject: clearly a diagram / chart / data product.
+        var titleLow = (title ?? "").ToLowerInvariant();
+        foreach (var bad in NonPhotoTitleHints) {
+            if (titleLow.Contains(bad)) return false;
+        }
+
         // Quick win: the query itself appears in the title. NASA-titled
         // press images about a target nearly always mention the target by
         // name. Trim whitespace from both sides to handle "M 31" vs "M31".
         var q = queryName.Trim().ToLowerInvariant();
-        if (q.Length > 2 && hay.Contains(q)) return true;
-        // Otherwise insist on at least one astronomy keyword hit.
+        if (q.Length > 2 && titleLow.Contains(q)) return true;
+        // Otherwise insist on at least one astronomy keyword hit AND the
+        // query name somewhere (title OR description).
+        if (q.Length > 2 && !hay.Contains(q)) return false;
         foreach (var kw in AstroKeywords) {
             if (hay.Contains(kw)) return true;
         }
@@ -313,20 +334,35 @@ public class CelestialImageService {
     }
 
     private static IEnumerable<string> WikipediaVariants(string name) {
-        yield return name;
         var trimmed = name.Trim();
-        if (trimmed.StartsWith("M", StringComparison.OrdinalIgnoreCase) && trimmed.Length > 1
-            && int.TryParse(trimmed.AsSpan(1), out var m)) {
-            yield return $"Messier_{m}";
+        // For Messier catalogue codes try the unambiguous "Messier_N"
+        // article BEFORE "M N" — Wikipedia's bare "M 22" / "M22" entries
+        // are disambig pages or unrelated (M-22 road, M22 grenade, etc.).
+        if (System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^M(essier)?\s*\d+$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase)) {
+            var num = System.Text.RegularExpressions.Regex.Match(trimmed, @"\d+").Value;
+            if (!string.IsNullOrEmpty(num)) {
+                yield return $"Messier_{num}";
+            }
         }
+        // NGC: prefer underscored form (matches actual article slug).
         if (trimmed.StartsWith("NGC", StringComparison.OrdinalIgnoreCase)) {
             var num = trimmed.AsSpan(3).Trim().ToString();
             if (int.TryParse(num, out _)) yield return $"NGC_{num}";
         }
-        if (trimmed.StartsWith("IC", StringComparison.OrdinalIgnoreCase)) {
+        // IC: same idea.
+        if (trimmed.StartsWith("IC", StringComparison.OrdinalIgnoreCase) && trimmed.Length > 2) {
             var num = trimmed.AsSpan(2).Trim().ToString();
             if (int.TryParse(num, out _)) yield return $"IC_{num}";
         }
+        // Caldwell: "Caldwell N" — Wikipedia uses that exact title.
+        if (System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^C(aldwell)?\s*\d+$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase)) {
+            var num = System.Text.RegularExpressions.Regex.Match(trimmed, @"\d+").Value;
+            if (!string.IsNullOrEmpty(num)) yield return $"Caldwell_{num}";
+        }
+        // Always fall back to the raw name as the last resort.
+        yield return name;
     }
 
     private static bool IsExpired(CelestialImage img) {

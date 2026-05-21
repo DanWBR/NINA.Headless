@@ -188,6 +188,18 @@ public static class SkyEndpoints {
                 }
             });
         });
+
+        // Resolve a celestial object name to a thumbnail image URL (NASA
+        // Image Library, falling back to Wikipedia). Caches per-name on
+        // disk for 30 days. Returns { available: false } when neither
+        // provider has anything — never 500s.
+        group.MapGet("/image", async (string name, CelestialImageService svc, CancellationToken ct) => {
+            if (string.IsNullOrWhiteSpace(name)) {
+                return Results.BadRequest(new { error = "name is required" });
+            }
+            var img = await svc.GetImageAsync(name, ct);
+            return Results.Ok(img);
+        });
     }
 
     public record SlewAndCenterRequest(double Ra, double Dec, double ToleranceArcsec = 30.0);

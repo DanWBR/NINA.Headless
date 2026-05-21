@@ -1092,6 +1092,8 @@
                                 :disabled="!skyTarget || !mount.connected">Slew Only</button>
                         <button class="btn" @click="addToSequence()" :disabled="!skyTarget">Add to Sequence</button>
                         <button class="btn" @click="loadAltitudeChart()" :disabled="!skyTarget">Tonight's altitude</button>
+                        <button class="btn" @click="openMosaicPlanner()" :disabled="!skyTarget"
+                                title="Build a mosaic grid around this target and export to the Advanced Sequencer">🧩 Plan mosaic</button>
                     </div>
 
                     <div class="chart-container chart-container-sm" x-show="altitudeData">
@@ -1509,6 +1511,85 @@
     <!-- Connection lost banner -->
     <div class="connection-banner" x-show="!serverReachable" x-transition>
         <span>Connection to server lost. Reconnecting...</span>
+    </div>
+
+    <!-- Mosaic planner modal -->
+    <div class="location-setup-modal" x-show="mosaicOpen" x-cloak
+         @keydown.escape.window="mosaicOpen = false">
+        <div class="location-setup-frame" style="max-width:680px">
+            <h2>🧩 Mosaic planner — <span x-text="mosaic.req.targetName"></span></h2>
+            <p class="text-muted" style="font-size:13px;margin-bottom:14px">
+                Grid is centred on the selected target. Per-panel FOV is auto-filled
+                from the active rig's sensor + focal length — adjust if needed.
+            </p>
+
+            <div class="field-row" style="display:flex;gap:12px">
+                <div class="field" style="flex:1">
+                    <label>Columns</label>
+                    <input type="number" min="1" max="20" x-model.number="mosaic.req.cols"
+                           @input="updateMosaicPreview()">
+                </div>
+                <div class="field" style="flex:1">
+                    <label>Rows</label>
+                    <input type="number" min="1" max="20" x-model.number="mosaic.req.rows"
+                           @input="updateMosaicPreview()">
+                </div>
+                <div class="field" style="flex:1">
+                    <label>Overlap %</label>
+                    <input type="number" min="0" max="80" step="5" x-model.number="mosaic.req.overlapPercent"
+                           @input="updateMosaicPreview()">
+                </div>
+            </div>
+            <div class="field-row" style="display:flex;gap:12px">
+                <div class="field" style="flex:1">
+                    <label>Panel FOV width (°)</label>
+                    <input type="number" min="0.01" step="0.05" x-model.number="mosaic.req.panelFovWidthDeg"
+                           @input="updateMosaicPreview()">
+                </div>
+                <div class="field" style="flex:1">
+                    <label>Panel FOV height (°)</label>
+                    <input type="number" min="0.01" step="0.05" x-model.number="mosaic.req.panelFovHeightDeg"
+                           @input="updateMosaicPreview()">
+                </div>
+                <div class="field" style="flex:1">
+                    <label class="checkbox-label" style="margin-top:18px">
+                        <input type="checkbox" x-model="mosaic.req.serpentine" @change="updateMosaicPreview()">
+                        Serpentine order
+                    </label>
+                </div>
+            </div>
+            <div class="field-row" style="display:flex;gap:12px">
+                <div class="field" style="flex:1">
+                    <label>Exposure (s)</label>
+                    <input type="number" min="0.1" step="1" x-model.number="mosaic.req.exposureSeconds">
+                </div>
+                <div class="field" style="flex:1">
+                    <label>Frames per panel</label>
+                    <input type="number" min="1" x-model.number="mosaic.req.exposureCount">
+                </div>
+                <div class="field" style="flex:1">
+                    <label>Filter (optional)</label>
+                    <input type="text" x-model="mosaic.filterName" placeholder="L / R / G / B…">
+                </div>
+            </div>
+
+            <div x-show="mosaic.plan" class="warn-banner" style="margin:10px 0">
+                <strong x-text="(mosaic.plan?.panels?.length || 0) + ' panels'"></strong>
+                — estimated session time:
+                <strong x-text="mosaicTimeFormat(mosaic.plan?.estimatedTotalSeconds || 0)"></strong>
+                (slew + plate-solve + exposures, per-rig defaults assumed)
+            </div>
+
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+                <button class="btn" @click="mosaicOpen = false">Cancel</button>
+                <button class="btn" @click="exportMosaicToSequencer(false)" :disabled="!mosaic.plan">
+                    Export to Advanced Sequencer
+                </button>
+                <button class="btn btn-primary" @click="exportMosaicToSequencer(true)" :disabled="!mosaic.plan">
+                    Export &amp; load now
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- First-run location setup modal -->

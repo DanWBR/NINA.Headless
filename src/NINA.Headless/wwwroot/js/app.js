@@ -173,6 +173,21 @@ function ninaApp() {
         },
         advSeqDirty: false,
 
+        // Mosaic planner
+        mosaicOpen: false,
+        mosaic: {
+            req: {
+                targetName: 'Target', centreRaHours: 0, centreDecDeg: 0,
+                cols: 2, rows: 2,
+                panelFovWidthDeg: 1.0, panelFovHeightDeg: 1.0,
+                overlapPercent: 20, serpentine: true,
+                exposureSeconds: 60, exposureCount: 10,
+                slewOverheadSeconds: 30, plateSolveSeconds: 20, perFrameOverheadSeconds: 5
+            },
+            filterName: '',
+            plan: null
+        },
+
         // Sky Atlas filters + altitude chart
         showAtlasFilters: false,
         atlasFilter: { type: '', minMag: null, maxMag: null, minDec: null, maxDec: null },
@@ -3564,6 +3579,99 @@ function ninaApp() {
                 await this.loadAdvSeq();
             } catch (e) { this.toast(e.message, 'error'); }
             ev.target.value = '';
+        },
+
+        // ============================================================
+        //                       Mosaic planner
+        // ============================================================
+        openMosaicPlanner() {
+            if (!this.skyTarget) { this.toast('Select a target first', 'warn'); return; }
+            this.mosaic.req.targetName = this.skyTarget.name || 'Target';
+            this.mosaic.req.centreRaHours = this.skyTarget.ra ?? this.skyTarget.raHours ?? 0;
+            this.mosaic.req.centreDecDeg  = this.skyTarget.dec ?? this.skyTarget.decDeg  ?? 0;
+            // Auto-fill per-panel FOV from the active rig's FOV calculation (already on this.fov)
+            this.mosaic.req.panelFovWidthDeg  = +(this.fov?.width  || 1).toFixed(3);
+            this.mosaic.req.panelFovHeightDeg = +(this.fov?.height || 1).toFixed(3);
+            this.mosaic.plan = null;
+            this.mosaicOpen = true;
+            this.updateMosaicPreview();
+        },
+
+        async updateMosaicPreview() {
+            try {
+                const plan = await this.apiPost('/api/mosaic/plan', this.mosaic.req);
+                this.mosaic.plan = plan;
+                // Draw an overlay on Aladin: clear previous, then add each panel as a rectangle
+                this._mosaicDrawOverlay(plan);
+            } catch (e) { /* keep last plan on transient errors */ }
+        },
+
+        _mosaicDrawOverlay(plan) {
+            if (typeof window.aladin === 'undefined' || !window.aladin) return;
+            try {
+                // Remove our previous mosaic overlay if any
+                if (this._mosaicOverlay && window.aladin.removeOverlay)
+                    window.aladin.removeOverlay(this._mosaicOverlay);
+                const A = window.A;
+                if (!A) return;
+                const ov = A.graphicOverlay({color: '#fbbf24', lineWidth: 2});
+                window.aladin.addOverlay(ov);
+                this._mosaicOverlay = ov;
+                for (const p of plan.panels) {
+                    const halfW = plan.panelFovWidthDeg  / 2;
+                    const halfH = plan.panelFovHeightDeg / 2;
+                    const raDeg = p.raHours * 15;
+                    const decDeg = p.decDeg;
+                    const cosDec = Math.cos(decDeg * Math.PI / 180) || 1e-6;
+                    // Four corners; cos(dec) correction on RA
+                    const corners = [
+                        [raDeg - halfW/cosDec, decDeg - halfH],
+                        [raDeg + halfW/cosDec, decDeg - halfH],
+                        [raDeg + halfW/cosDec, decDeg + halfH],
+                        [raDeg - halfW/cosDec, decDeg + halfH],
+                        [raDeg - halfW/cosDec, decDeg - halfH]
+                    ];
+                    ov.add(A.polyline(corners));
+                }
+            } catch (e) { console.warn('Mosaic overlay draw failed', e); }
+        },
+
+        mosaicTimeFormat(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        },
+
+        async exportMosaicToSequencer(loadIntoEngine) {
+            try {
+                const r = await this.apiPost('/api/mosaic/to-sequence', {
+                    mosaic: this.mosaic.req,
+                    exposureSeconds: this.mosaic.req.exposureSeconds,
+                    exposureCount: this.mosaic.req.exposureCount,
+                    filterName: this.mosaic.filterName || null,
+                    gain: null,
+                    binning: 1,
+                    loadIntoEngine: !!loadIntoEngine
+                });
+                this.toast(loadIntoEngine
+                    ? `Loaded ${r.plan.panels.length}-panel mosaic into Advanced Sequencer`
+                    : `Built ${r.plan.panels.length}-panel mosaic JSON (download below)`,
+                    'ok');
+                if (!loadIntoEngine) {
+                    // Trigger a download for the JSON
+                    const blob = new Blob([JSON.stringify(r.document, null, 2)], {type: 'application/json'});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = (r.document.name || 'mosaic') + '.json';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } else {
+                    // Hop into the Adv Sequencer tab so the user can see what landed
+                    this.mosaicOpen = false;
+                    this.tab = 'seqadv';
+                    await this.loadAdvSeq();
+                }
+            } catch (e) { this.toast('Mosaic export failed: ' + e.message, 'error'); }
         }
     };
 }

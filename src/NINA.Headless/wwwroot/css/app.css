@@ -1588,6 +1588,16 @@ select.input-sm {
     color: var(--text-muted, #94a3b8);
     letter-spacing: 1px;
 }
+.home-clock-sep {
+    margin: 0 6px;
+    opacity: 0.5;
+}
+/* Location uses the body font (not mono) — "São Paulo, Brazil" reads much
+   better in a humanist face than in tabular monospace. */
+.home-clock-loc {
+    font-family: inherit;
+    letter-spacing: 0.2px;
+}
 
 .home-status {
     display: grid;

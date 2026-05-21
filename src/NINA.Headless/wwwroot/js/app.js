@@ -216,6 +216,8 @@ function ninaApp() {
         _fovLayerId: null,
         _skyTicker: null,                // setInterval handle for datetime refresh
         skyClock: '',                    // displayed in the toolbar (HH:MM:SS UTC)
+        locationLabel: '',               // "City, Country" if reverse-geocoded, else "5.18°S 37.36°W"
+        _locationLastKey: '',            // memoise so we only reverse-geocode once per coord pair
         aladinFov: 90,                  // initial FOV in degrees (wide field)
         aladinShowFov: true,             // toggle camera-FOV overlay
 
@@ -933,6 +935,11 @@ function ninaApp() {
                     this.settings.latitude = data.latitude || 0;
                     this.settings.longitude = data.longitude || 0;
                     this.settings.altitude = data.altitude || 0;
+                    // Refresh the home-dashboard location label whenever the
+                    // profile loads / changes. Synchronous formatted-coords
+                    // fallback first, then an async best-effort reverse-geocode
+                    // upgrades it to "City, Country" if we can reach Nominatim.
+                    this._refreshLocationLabel();
                     this.settings.sensorWidth = data.sensorWidthMm || 23.5;
                     this.settings.sensorHeight = data.sensorHeightMm || 15.7;
                     this.settings.focalLength = data.focalLengthMm || 478;
@@ -1394,6 +1401,59 @@ function ninaApp() {
 
         _stopSkyTicker() {
             if (this._skyTicker) { clearInterval(this._skyTicker); this._skyTicker = null; }
+        },
+
+        // Format lat/lng in N/S E/W form (more readable than negative numbers).
+        // Examples: 5.18°S 37.36°W, 40.71°N 74.01°W.
+        _formatCoords(lat, lng) {
+            const ns = lat >= 0 ? 'N' : 'S';
+            const ew = lng >= 0 ? 'E' : 'W';
+            return `${Math.abs(lat).toFixed(2)}°${ns} ${Math.abs(lng).toFixed(2)}°${ew}`;
+        },
+
+        // Refresh the location label shown on the Home dashboard. Always sets
+        // a synchronous formatted-coords fallback so something appears
+        // immediately even if we're offline; kicks off an async Nominatim
+        // reverse-geocode in the background to upgrade to "City, Country"
+        // when we can reach the network. Memoised by lat/lng key so we don't
+        // re-query for the same coords on every settings refresh.
+        async _refreshLocationLabel() {
+            const lat = this.settings.latitude;
+            const lng = this.settings.longitude;
+            if (lat == null || lng == null
+                || (Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01)) {
+                this.locationLabel = '';
+                this._locationLastKey = '';
+                return;
+            }
+            // Synchronous fallback first.
+            this.locationLabel = this._formatCoords(lat, lng);
+            const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+            if (key === this._locationLastKey) return;
+            this._locationLastKey = key;
+            // Best-effort reverse geocode. Nominatim is free, no API key, but
+            // requires a custom User-Agent (browser sets one automatically)
+            // and rate-limits to 1 req/sec — fine for one-off lookups on
+            // settings changes.
+            try {
+                const url = `https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${lat}&lon=${lng}`;
+                const r = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+                if (!r.ok) return;
+                const j = await r.json();
+                const a = j.address || {};
+                const city = a.city || a.town || a.village || a.hamlet
+                            || a.municipality || a.county || a.state_district || a.state;
+                const country = a.country;
+                if (city && country) {
+                    this.locationLabel = `${city}, ${country}`;
+                } else if (country) {
+                    // Fall back to country + coords if no locality matched.
+                    this.locationLabel = `${country} · ${this._formatCoords(lat, lng)}`;
+                }
+                // Otherwise leave the coords-only fallback in place.
+            } catch (e) {
+                // Offline or blocked — silent fallback to coords.
+            }
         },
 
         _updateSkyClock() {

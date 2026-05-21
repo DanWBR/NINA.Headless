@@ -138,7 +138,11 @@
                         <p class="home-lede" x-show="indiConnected">
                             Equipment is up. Plan a target, queue a sequence, or jump into the live view.
                         </p>
-                        <div class="home-clock" x-text="skyClock ? (skyClock + ' UTC') : ''"></div>
+                        <div class="home-clock">
+                            <span x-text="skyClock ? (skyClock + ' UTC') : ''"></span>
+                            <span class="home-clock-sep" x-show="locationLabel">·</span>
+                            <span class="home-clock-loc" x-text="locationLabel"></span>
+                        </div>
                     </div>
                 </div>
 

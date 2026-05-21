@@ -1108,7 +1108,7 @@ function ninaApp() {
                 // display() is racy and silently fails near the celestial
                 // poles, so we set centre up-front and avoid the exact
                 // pole singularity by clamping to ±89.5°.
-                const initialCentre = this._computeInitialCentre(lat, lng);
+                const initialCentre = this._computeInitialCentre(lat, lng, isLive);
 
                 Celestial.display({
                     container: 'celestial-map',
@@ -1118,7 +1118,13 @@ function ninaApp() {
                     // what changes is the *frame* (equatorial vs horizontal)
                     // and the centre.
                     projection: 'stereographic',
-                    transform: isLive ? 'equatorial' : 'equatorial',
+                    // Live mode uses the 'horizontal' frame so the natural
+                    // rotation axis is the local zenith (panning rotates the
+                    // sky around the overhead point, which matches user
+                    // intuition for a real-time sky view). Equatorial mode
+                    // keeps the celestial pole as the axis, which makes sense
+                    // for an objective "star chart" view.
+                    transform: isLive ? 'horizontal' : 'equatorial',
                     follow: 'center',
                     center: initialCentre,
                     // In horizontal mode we centre on the zenith for that lat/lng
@@ -1235,20 +1241,61 @@ function ninaApp() {
         },
 
         // Returns the [lonDeg, latDeg, orientationDeg] tuple to use as the
-        // projection centre on initial load. If a mount is connected and
-        // reporting coords, follow it; otherwise point at the celestial
-        // pole appropriate for the observer's hemisphere (clamped to
-        // ±89.5° to avoid d3.geo's pole singularity, which would otherwise
-        // cause rotate() to silently no-op and leave the view stuck at
-        // wherever the projection initialised).
-        _computeInitialCentre(lat, lng) {
+        // projection centre on initial load. Semantics depend on the
+        // transform frame:
+        //   - Live (horizontal) → [azimuth, altitude, orientation]
+        //     centre on zenith by default, or on the mount's current Az/Alt
+        //     (converted from its RA/Dec) when a mount is connected.
+        //   - Equatorial → [RA_deg, Dec_deg, orientation]
+        //     centre on the celestial pole appropriate for the observer's
+        //     hemisphere by default, or on the mount's RA/Dec when one is
+        //     connected. Both Dec and Alt are clamped to ±89.5° because
+        //     d3.geo's stereographic rotate hits a singularity at exactly
+        //     ±90° and silently no-ops.
+        _computeInitialCentre(lat, lng, isLive) {
             const mountRa = this.mount?.ra;
             const mountDec = this.mount?.dec;
-            if (this.mount?.connected && mountRa != null && mountDec != null) {
+            const mountConnected = this.mount?.connected && mountRa != null && mountDec != null;
+
+            if (isLive) {
+                if (mountConnected) {
+                    const [az, alt] = this._equatorialToHorizontal(mountRa, mountDec, lat, lng, new Date());
+                    return [az, Math.max(-89.5, Math.min(89.5, alt)), 0];
+                }
+                // Zenith. Azimuth doesn't matter when alt=89.5 (almost overhead)
+                // but using 0 (north) gives a sensible compass orientation.
+                return [0, 89.5, 0];
+            }
+
+            if (mountConnected) {
                 return [mountRa * 15, mountDec, 0];
             }
             const poleDec = lat >= 0 ? 89.5 : -89.5;
             return [0, poleDec, 0];
+        },
+
+        // Convert equatorial (RA in hours, Dec in degrees) to horizontal
+        // (azimuth measured east of north, altitude above horizon) for the
+        // given observer location and UTC instant. Uses the standard
+        // spherical astronomy formulas from Meeus, ch. 13.
+        _equatorialToHorizontal(raHours, decDeg, latDeg, lngDeg, when) {
+            const lstHours = this._localSiderealTime(when, lngDeg);
+            const haDeg = ((lstHours - raHours) * 15 + 360) % 360;
+            const haRad = haDeg * Math.PI / 180;
+            const decRad = decDeg * Math.PI / 180;
+            const latRad = latDeg * Math.PI / 180;
+            const sinAlt = Math.sin(decRad) * Math.sin(latRad)
+                         + Math.cos(decRad) * Math.cos(latRad) * Math.cos(haRad);
+            const alt = Math.asin(Math.max(-1, Math.min(1, sinAlt)));
+            const cosAlt = Math.cos(alt);
+            // Handle the alt≈90° degenerate case (right at zenith → azimuth
+            // undefined; pick north).
+            if (Math.abs(cosAlt) < 1e-9) return [0, alt * 180 / Math.PI];
+            const sinA = -Math.cos(decRad) * Math.sin(haRad) / cosAlt;
+            const cosA = (Math.sin(decRad) - Math.sin(latRad) * sinAlt)
+                       / (Math.cos(latRad) * cosAlt);
+            const az = Math.atan2(sinA, cosA);
+            return [((az * 180 / Math.PI) + 360) % 360, alt * 180 / Math.PI];
         },
 
         // Meeus low-precision LST (good to a few seconds — fine for orientation).
@@ -1279,7 +1326,14 @@ function ninaApp() {
                 const mountRa = this.mount?.ra;
                 const mountDec = this.mount?.dec;
                 if (this.mount?.connected && mountRa != null && mountDec != null) {
-                    try { Celestial.rotate({ center: [mountRa * 15, mountDec, 0] }); } catch {}
+                    // In live (horizontal) mode the centre is [az, alt], so
+                    // convert from the mount's equatorial coords on the fly.
+                    // This also tracks the mount across the sky as time
+                    // advances (alt/az of a fixed RA/Dec drift with sidereal
+                    // time).
+                    const [az, alt] = this._equatorialToHorizontal(mountRa, mountDec, lat, lng, now);
+                    const altClamped = Math.max(-89.5, Math.min(89.5, alt));
+                    try { Celestial.rotate({ center: [az, altClamped, 0] }); } catch {}
                 }
                 this._updateSkyClock();
             }, 30_000);
@@ -1313,8 +1367,17 @@ function ninaApp() {
             if (!this._celestialReady) return;
             const ra  = this.mount?.ra  ?? (this.skyTarget?.ra)  ?? 0;
             const dec = this.mount?.dec ?? (this.skyTarget?.dec) ?? 0;
+            const isLive = this.skyMode === 'horizontal';
             try {
-                Celestial.rotate({ center: [ra * 15, dec, 0] });
+                if (isLive) {
+                    const lat = this.settings.latitude  || 0;
+                    const lng = this.settings.longitude || 0;
+                    const [az, alt] = this._equatorialToHorizontal(ra, dec, lat, lng, new Date());
+                    const altClamped = Math.max(-89.5, Math.min(89.5, alt));
+                    Celestial.rotate({ center: [az, altClamped, 0] });
+                } else {
+                    Celestial.rotate({ center: [ra * 15, dec, 0] });
+                }
             } catch {}
         },
 

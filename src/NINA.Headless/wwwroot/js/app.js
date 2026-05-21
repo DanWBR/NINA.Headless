@@ -1826,43 +1826,71 @@ function ninaApp() {
         // Lazy-load thumbnails one at a time so we don't fire 30 parallel
         // /api/sky/image requests on tab open. Sequential is plenty fast
         // for a list of this size and is much kinder to NASA / Wikipedia.
+        //
+        // Alpine 3 reactivity tracks property assignments on tracked
+        // objects but doesn't reliably pick up additions of brand-new
+        // keys to a plain {}. To force a render, we reassign the whole
+        // `thumbs` object after each update so the template re-evaluates.
         async _kickTonightThumbs() {
             for (const item of this.tonight.items) {
-                if (this.tonight.thumbs[item.name]) continue;
-                this.tonight.thumbs[item.name] = { url: null, missing: false };
+                if (this.tonight.thumbs[item.name]?.url || this.tonight.thumbs[item.name]?.missing) continue;
                 try {
                     const r = await this.apiGet(`/api/sky/image?name=${encodeURIComponent(item.name)}`);
-                    this.tonight.thumbs[item.name] = {
-                        url:     r.available ? r.thumbnailUrl : null,
-                        title:   r.title,
-                        credit:  r.credit,
-                        missing: !r.available
+                    this.tonight.thumbs = {
+                        ...this.tonight.thumbs,
+                        [item.name]: {
+                            url:     r.available ? r.thumbnailUrl : null,
+                            title:   r.title,
+                            credit:  r.credit,
+                            missing: !r.available
+                        }
                     };
                 } catch {
-                    this.tonight.thumbs[item.name] = { url: null, missing: true };
+                    this.tonight.thumbs = {
+                        ...this.tonight.thumbs,
+                        [item.name]: { url: null, missing: true }
+                    };
                 }
             }
         },
 
-        // Mini per-card altitude chart (~12 h window). Reuses the
-        // _ensureChart() helper so charts get destroyed cleanly on
-        // refresh.
+        // Mini per-card altitude chart (~12 h window). Can't use
+        // _ensureChart() — it looks up canvases via $refs which only
+        // works for static templates, not the dynamic x-for loop here.
+        // Instead resolve the canvas by id and keep instances in a
+        // separate dict so refresh can destroy them.
         async _renderTonightChart(item) {
-            const key = 'tonight_' + this.tonightSafeKey(item);
-            const canvasId = 'tonightChart_' + this.tonightSafeKey(item);
+            const safe = this.tonightSafeKey(item);
+            const canvasId = 'tonightChart_' + safe;
             const canvas = document.getElementById(canvasId);
             if (!canvas) return;
+            if (typeof Chart === 'undefined') return;
+            // If a previous chart instance exists for this card (e.g. on
+            // refresh), tear it down before creating a new one — leaving
+            // it leaks GPU contexts.
+            this._tonightCharts ??= {};
+            if (this._tonightCharts[safe]) {
+                try { this._tonightCharts[safe].destroy(); } catch {}
+                delete this._tonightCharts[safe];
+            }
             try {
                 const data = await this.apiGet(
                     `/api/sky/altitude?ra=${item.raHours}&dec=${item.decDeg}&stepMinutes=30`);
                 const t = this._chartTheme();
-                const chart = this._ensureChart(canvasId, key, 'line', () => ({
+                const samples = data.samples || [];
+                this._tonightCharts[safe] = new Chart(canvas, {
                     type: 'line',
-                    data: { labels: [], datasets: [
-                        { label: 'Altitude', data: [],
-                          borderColor: '#4fc3f7', backgroundColor: 'rgba(79,195,247,0.12)',
-                          tension: 0.25, pointRadius: 0, borderWidth: 1.5, fill: true }
-                    ] },
+                    data: {
+                        labels: samples.map(s => new Date(s.utc).toLocaleTimeString([],
+                            { hour: '2-digit', minute: '2-digit' })),
+                        datasets: [
+                            { label: 'Altitude',
+                              data: samples.map(s => Math.max(0, s.altitudeDeg)),
+                              borderColor: '#4fc3f7',
+                              backgroundColor: 'rgba(79,195,247,0.12)',
+                              tension: 0.25, pointRadius: 0, borderWidth: 1.5, fill: true }
+                        ]
+                    },
                     options: {
                         responsive: true, maintainAspectRatio: false, animation: false,
                         plugins: { legend: { display: false }, tooltip: { enabled: false } },
@@ -1871,12 +1899,7 @@ function ninaApp() {
                             y: { min: 0, max: 90, ticks: { display: false }, grid: { color: t.grid } }
                         }
                     }
-                }));
-                if (!chart) return;
-                const samples = data.samples || [];
-                chart.data.labels = samples.map(s => new Date(s.utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-                chart.data.datasets[0].data = samples.map(s => Math.max(0, s.altitudeDeg));
-                chart.update('none');
+                });
             } catch { /* leave canvas blank */ }
         },
 

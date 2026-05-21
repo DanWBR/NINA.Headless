@@ -1511,16 +1511,25 @@ function ninaApp() {
 
         // Pick a weather emoji that summarises a single slot. Precipitation
         // trumps everything; otherwise we map the cloudcover bucket to a
-        // sun-and-clouds icon. We always use the "sun" variants (even for
-        // night slots) because they're the universally recognised weather
-        // glyphs — astrophotographers read these as cloud-cover indicators,
-        // not literal sun-up/sun-down state.
-        _weatherIconFor(cloud, prec) {
+        // sun-and-clouds icon during the day, and to a moon variant at
+        // night. Precipitation glyphs are intentionally not day/night-
+        // sensitive — rain looks like rain regardless of the sun's position.
+        _weatherIconFor(cloud, prec, isNight = false) {
             const p = (prec || 'none').toLowerCase();
             if (p === 'snow')                       return '🌨️';
             if (p === 'icep' || p === 'frzr')       return '🧊';
             if (p === 'rain' && cloud >= 8)         return '⛈️';
             if (p === 'rain')                       return '🌧️';
+            if (isNight) {
+                // Unicode doesn't ship "moon-behind-cloud" glyphs in a
+                // reliable cross-platform set, so we collapse the partial
+                // and mostly-cloudy night buckets into ☁️ — at night the
+                // actually-useful signal for astrophotography is "is the
+                // sky clear or not". Crescent moon stays for ≤ 50% cloud.
+                if (cloud <= 2) return '🌙';
+                if (cloud <= 4) return '🌙';
+                return '☁️';
+            }
             if (cloud <= 2)  return '☀️';   // 0–13% cloud
             if (cloud <= 4)  return '🌤️';   // 13–50%
             if (cloud <= 6)  return '⛅';    // 50–81%
@@ -1580,6 +1589,18 @@ function ninaApp() {
                 const localKey = utc.toLocaleDateString();
                 if (!buckets.has(localKey)) buckets.set(localKey, []);
                 const slotDate = utc;
+                // Day/night classification — use slot midpoint (slot start
+                // + 1.5h) so a slot that straddles sunset isn't mis-tagged.
+                // SunCalc gives us sunrise/sunset for the slot's local date.
+                let isNight = false;
+                if (typeof SunCalc !== 'undefined') {
+                    const midUtc = new Date(utc.getTime() + 90 * 60 * 1000);
+                    const localDay = new Date(midUtc); localDay.setHours(12, 0, 0, 0);
+                    const dayTimes = SunCalc.getTimes(localDay, lat, lng);
+                    if (dayTimes.sunrise && dayTimes.sunset) {
+                        isNight = midUtc < dayTimes.sunrise || midUtc > dayTimes.sunset;
+                    }
+                }
                 buckets.get(localKey).push({
                     raw,
                     utcMs:      utc.getTime(),
@@ -1587,7 +1608,8 @@ function ninaApp() {
                     score:      raw.observationScore,
                     scoreClass: this._scoreClass(raw.observationScore),
                     cloudLabel: this._cloudPercent(raw.cloudCover) + '%',
-                    icon:       this._weatherIconFor(raw.cloudCover, raw.precType),
+                    icon:       this._weatherIconFor(raw.cloudCover, raw.precType, isNight),
+                    isNight,
                     tooltip:    `${this._fmtLocalTime(slotDate)}  · score ${raw.observationScore}\n`
                               + `Cloud ${this._cloudPercent(raw.cloudCover)}%`
                               + `  · Seeing ${raw.seeing}/8  · Transp ${raw.transparency}/8\n`

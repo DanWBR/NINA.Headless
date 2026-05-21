@@ -1132,14 +1132,15 @@ function ninaApp() {
                     // what changes is the *frame* (equatorial vs horizontal)
                     // and the centre.
                     projection: 'stereographic',
-                    // Always use the 'horizontal' frame so drag rotation
-                    // pivots around the local zenith — the celestial-pole
-                    // axis (the d3-celestial default) makes drag feel
-                    // wildly off-axis everywhere except near the pole
-                    // itself. The "Equatorial" toggle no longer changes
-                    // the rotation axis; it just changes which graticule
-                    // is emphasised and whether the live time ticker runs.
-                    transform: 'horizontal',
+                    // d3-celestial only ships an 'equatorial' transform
+                    // (and a useless 'supergalactic'); there is NO
+                    // 'horizontal' transform. Setting it silently fell
+                    // back to equatorial. We instead express the zenith
+                    // in equatorial coords [LST*15, lat] and put THAT at
+                    // the projection centre — then d3.geo.zoom's drag
+                    // naturally rotates around the zenith because it's
+                    // the centred point.
+                    transform: 'equatorial',
                     follow: 'center',
                     center: initialCentre,
                     // In horizontal mode we centre on the zenith for that lat/lng
@@ -1219,12 +1220,10 @@ function ninaApp() {
                         const rect = svg.getBoundingClientRect();
                         const coords = Celestial.mapProjection.invert([e.clientX - rect.left, e.clientY - rect.top]);
                         if (!coords || isNaN(coords[0])) return;
-                        // Projection is in 'horizontal' frame, so invert returns
-                        // [azimuth, altitude]. Convert back to RA/Dec so the
-                        // user's pick becomes a real celestial target the rest
-                        // of the app can slew to / store / sequence on.
-                        const [raHours, decDeg] = this._horizontalToEquatorial(
-                            coords[0], coords[1], lat, lng, new Date());
+                        // invert returns [RA°, Dec°] (projection is equatorial).
+                        let raHours = coords[0] / 15;
+                        if (raHours < 0) raHours += 24;
+                        const decDeg = coords[1];
                         this.skyTarget = {
                             name: `RA ${raHours.toFixed(3)}h Dec ${decDeg.toFixed(2)}°`,
                             ra: raHours, dec: decDeg, type: 'click', magnitude: ''
@@ -1253,27 +1252,26 @@ function ninaApp() {
             try { Celestial.rotate({ center: [raDeg, lat, 0] }); } catch {}
         },
 
-        // Returns the [azimuthDeg, altitudeDeg, orientationDeg] tuple to use
-        // as the projection centre on initial load. Both modes use the
-        // 'horizontal' transform now, so the centre is always horizontal
-        // coords:
-        //   - mount connected → mount's current Az/Alt (RA/Dec converted)
-        //   - no mount → local zenith
-        // Altitude is clamped to ±89.5° because d3.geo's stereographic
-        // rotate hits a singularity at exactly ±90° and silently no-ops.
-        _computeInitialCentre(lat, lng /*, isLive */) {
+        // Returns the [RA_deg, Dec_deg, orientation_deg] tuple to use as
+        // the projection centre on initial load. The transform is
+        // equatorial (the only one d3-celestial actually supports), so
+        // these are RA/Dec degrees. To centre on the *local zenith* we
+        // express it in equatorial coords: at the observer's location
+        // the zenith has RA = LST and Dec = latitude. Dec is clamped to
+        // ±89.5° to dodge d3.geo's stereographic pole singularity.
+        _computeInitialCentre(lat, lng) {
             const mountRa = this.mount?.ra;
             const mountDec = this.mount?.dec;
             const mountConnected = this.mount?.connected && mountRa != null && mountDec != null;
 
             if (mountConnected) {
-                const [az, alt] = this._equatorialToHorizontal(mountRa, mountDec, lat, lng, new Date());
-                return [az, Math.max(-89.5, Math.min(89.5, alt)), 0];
+                return [mountRa * 15, Math.max(-89.5, Math.min(89.5, mountDec)), 0];
             }
-            // Default to the zenith. Azimuth is somewhat arbitrary right
-            // at the pole-of-projection, but 0 (north) gives a sensible
-            // compass orientation.
-            return [0, 89.5, 0];
+            // Zenith in equatorial coords.
+            const lstHours = this._localSiderealTime(new Date(), lng);
+            const raDeg = (lstHours * 15) % 360;
+            const decDeg = Math.max(-89.5, Math.min(89.5, lat));
+            return [raDeg, decDeg, 0];
         },
 
         // Convert equatorial (RA in hours, Dec in degrees) to horizontal
@@ -1360,16 +1358,9 @@ function ninaApp() {
                     // This also tracks the mount across the sky as time
                     // advances (alt/az of a fixed RA/Dec drift with sidereal
                     // time).
-                    const [az, alt] = this._equatorialToHorizontal(mountRa, mountDec, lat, lng, now);
-                    const altClamped = Math.max(-89.5, Math.min(89.5, alt));
-                    try { Celestial.rotate({ center: [az, altClamped, 0] }); } catch {}
+                    const decClamped = Math.max(-89.5, Math.min(89.5, mountDec));
+                    try { Celestial.rotate({ center: [mountRa * 15, decClamped, 0] }); } catch {}
                 }
-                // Recompute the FOV box — its corner Az/Alt drift with
-                // sidereal time (parallactic-angle rotation), so the green
-                // rectangle slowly rotates on screen as the night
-                // progresses, matching how the actual camera frame would
-                // appear on the sky for an equatorial mount.
-                if (this.aladinShowFov && this.skyTarget) this.updateSkyCameraFov();
                 this._updateSkyClock();
             }, 30_000);
             this._updateSkyClock();
@@ -1402,13 +1393,8 @@ function ninaApp() {
             if (!this._celestialReady) return;
             const ra  = this.mount?.ra  ?? (this.skyTarget?.ra)  ?? 0;
             const dec = this.mount?.dec ?? (this.skyTarget?.dec) ?? 0;
-            const lat = this.settings.latitude  || 0;
-            const lng = this.settings.longitude || 0;
-            try {
-                const [az, alt] = this._equatorialToHorizontal(ra, dec, lat, lng, new Date());
-                const altClamped = Math.max(-89.5, Math.min(89.5, alt));
-                Celestial.rotate({ center: [az, altClamped, 0] });
-            } catch {}
+            const decClamped = Math.max(-89.5, Math.min(89.5, dec));
+            try { Celestial.rotate({ center: [ra * 15, decClamped, 0] }); } catch {}
         },
 
         updateSkyCameraFov() {
@@ -1425,31 +1411,20 @@ function ninaApp() {
             const dec = this.skyTarget.dec ?? this.skyTarget.decDeg;
             if (ra == null || dec == null) return;
 
-            // Build the FOV rectangle as 4 corner offsets in RA/Dec from the
-            // target, then convert each corner to horizontal (Az/Alt) coords
-            // for the current observer/time. Because the map is in horizontal
-            // projection, this naturally bakes in the *parallactic angle* —
-            // the rectangle's tilt on screen reflects how an equatorial-mount
-            // camera frame actually projects onto the sky for a given target,
-            // which is the same behaviour ASIAIR shows.
+            // FOV rectangle in equatorial coords. The corners are offset
+            // from the target by ±w in RA (corrected by cos(dec) for the
+            // RA-axis squish near the poles) and ±h in Dec.
             const w = this.fov.width / 2;
             const h = this.fov.height / 2;
             const cosDec = Math.cos(dec * Math.PI / 180) || 1e-6;
-            const lat = this.settings.latitude  || 0;
-            const lng = this.settings.longitude || 0;
-            const now = new Date();
-            // RA in hours for the conversion helper.
-            const cornersEq = [
-                [ra - (w / cosDec) / 15, dec - h],
-                [ra + (w / cosDec) / 15, dec - h],
-                [ra + (w / cosDec) / 15, dec + h],
-                [ra - (w / cosDec) / 15, dec + h],
-                [ra - (w / cosDec) / 15, dec - h]
+            const raDeg = ra * 15;
+            const ring = [
+                [raDeg - w / cosDec, dec - h],
+                [raDeg + w / cosDec, dec - h],
+                [raDeg + w / cosDec, dec + h],
+                [raDeg - w / cosDec, dec + h],
+                [raDeg - w / cosDec, dec - h]
             ];
-            const ring = cornersEq.map(([rh, dd]) => {
-                const [az, alt] = this._equatorialToHorizontal(rh, dd, lat, lng, now);
-                return [az, alt];
-            });
             const geo = {
                 type: 'FeatureCollection',
                 features: [{ type: 'Feature', properties: { name: 'FOV' },

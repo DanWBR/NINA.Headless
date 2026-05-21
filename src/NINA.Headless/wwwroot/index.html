@@ -1986,22 +1986,6 @@
                 </div>
 
                 <div class="settings-section">
-                    <h3>Optics</h3>
-                    <p class="text-muted" style="font-size: 12px;">
-                        Sensor dimensions are read automatically from the connected camera
-                        (currently
-                        <strong x-text="settings.sensorWidth?.toFixed(2) + ' × ' + settings.sensorHeight?.toFixed(2) + ' mm'"></strong>).
-                        <br>
-                        Focal length is a per-rig setting — manage it in the
-                        <a href="#" @click.prevent="tab='equip'; setTimeout(() => rigModalOpen = true, 100)">
-                            Equipment → Manage rigs
-                        </a>
-                        modal. Active rig's main scope is currently
-                        <strong x-text="settings.focalLength + ' mm'"></strong>.
-                    </p>
-                </div>
-
-                <div class="settings-section">
                     <h3>Image Output</h3>
                     <label>Format
                         <select class="input-sm" x-model="settings.imageFormat" @change="saveSettingsToServer()">

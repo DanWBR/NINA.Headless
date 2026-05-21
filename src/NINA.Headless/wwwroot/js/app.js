@@ -1849,13 +1849,14 @@ function ninaApp() {
         // keys to a plain {}. To force a render, we reassign the whole
         // `thumbs` object after each update so the template re-evaluates.
         async _kickTonightThumbs() {
-            console.log(`[tonight] thumbnails: fetching for ${this.tonight.items.length} items`);
-            let hits = 0, misses = 0;
             for (const item of this.tonight.items) {
                 if (this.tonight.thumbs[item.name]?.url || this.tonight.thumbs[item.name]?.missing) continue;
 
                 const tryNames = [];
                 if (item.commonName) tryNames.push(item.commonName);
+                // Backend routes catalogue codes (M / NGC / IC / Sh2 / Caldwell)
+                // straight to Wikipedia where they hit a reliable per-object
+                // article. The bare item.name covers that path.
                 tryNames.push(item.name);
 
                 let found = null;
@@ -1863,9 +1864,7 @@ function ninaApp() {
                     try {
                         const r = await this.apiGet(`/api/sky/image?name=${encodeURIComponent(q)}`);
                         if (r?.available) { found = r; break; }
-                    } catch (e) {
-                        console.warn(`[tonight] image fetch error for "${q}":`, e);
-                    }
+                    } catch { /* keep trying remaining variants */ }
                 }
 
                 this.tonight.thumbs = {
@@ -1877,9 +1876,7 @@ function ninaApp() {
                         missing: false
                     } : { url: null, missing: true }
                 };
-                if (found) { hits++; } else { misses++; }
             }
-            console.log(`[tonight] thumbnails done: ${hits} hits, ${misses} misses`);
         },
 
         // Mini per-card altitude chart (~12 h window). Can't use

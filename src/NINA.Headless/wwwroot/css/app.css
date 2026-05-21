@@ -195,6 +195,33 @@ html, body {
     padding: 6px 0;
     gap: 2px;
     overflow-y: auto;
+    /* Firefox: thin, semi-transparent scrollbar. */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+/* WebKit/Blink (Chrome, Edge, Safari): make the scrollbar 4 px wide
+   so it doesn't eat into our already-cramped 64 px column. Track
+   stays invisible, thumb is a subtle translucent pill that brightens
+   on hover. */
+.sidebar::-webkit-scrollbar {
+    width: 4px;
+}
+.sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+.sidebar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.14);
+    border-radius: 2px;
+}
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+/* Hide the up / down scroll arrows that some browsers/OS combos
+   inject by default — they take vertical space and look out of place
+   in an icon column. */
+.sidebar::-webkit-scrollbar-button {
+    display: none;
+    height: 0;
 }
 
 .nav-btn {

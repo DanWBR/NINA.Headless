@@ -1157,26 +1157,28 @@ select.input-sm {
 }
 
 .sky-viewer {
-    flex: 1;
-    min-height: 400px;
-    /* Cap height so d3-celestial's circular projection can't grow taller than
-       the available viewport. Without this the SVG inflates to match width
-       and pushes everything below it off-screen. */
-    max-height: calc(100vh - 220px);
-    height: calc(100vh - 220px);
+    /* Fill the full width of the sky tab. Height matches width (the celestial
+       projection is circular) — the tab itself scrolls vertically when the
+       circle is bigger than the viewport. */
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    /* Sanity cap so the circle doesn't blow up to 3000 px on ultrawide
+       monitors. Pick whichever is smaller. */
+    max-width: 1200px;
     background: #000;
     position: relative;
     overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
-/* Force the SVG d3-celestial injects to never exceed its container —
-   d3-celestial sets width inline; height comes from its viewBox. */
 .sky-viewer svg {
-    max-width: 100%;
-    max-height: 100%;
+    width: 100% !important;
+    height: 100% !important;
     display: block;
+}
+
+/* Make the sky tab itself the scroll container so the controls (FOV row +
+   action buttons) stay below the map rather than overlapping it. */
+.tab-panel-sky {
+    overflow-y: auto;
 }
 
 .sky-survey-row {

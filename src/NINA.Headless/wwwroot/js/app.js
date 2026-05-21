@@ -1067,7 +1067,9 @@ function ninaApp() {
                 return;
             }
             if (this._celestialReady) {
-                const size = Math.max(300, Math.min(el.clientWidth, el.clientHeight));
+                // Container is now square (CSS aspect-ratio 1/1) with a max-width cap,
+// so width == height. Use the rendered width as the render size.
+const size = Math.max(300, el.clientWidth);
                 try { Celestial.resize({ width: size }); } catch {}
                 return;
             }
@@ -1094,11 +1096,10 @@ function ninaApp() {
                 const lat = this.settings.latitude  || 0;
                 const lng = this.settings.longitude || 0;
 
-                // d3-celestial draws a roughly circular projection — width
-                // equals height. If we passed el.clientWidth on a wide pane
-                // the SVG would inflate vertically and burst out of the
-                // container. Clamp to the smaller dimension so it fits.
-                const renderSize = Math.max(300, Math.min(el.clientWidth, el.clientHeight));
+                // The .sky-viewer container is square (CSS aspect-ratio 1/1)
+                // capped at max-width 1200px, so width == height. Pass the
+                // rendered width and let the circular SVG fill the box.
+                const renderSize = Math.max(300, el.clientWidth);
 
                 Celestial.display({
                     container: 'celestial-map',
@@ -1187,7 +1188,9 @@ function ninaApp() {
                 }
 
                 window.addEventListener('resize', () => {
-                    const size = Math.max(300, Math.min(el.clientWidth, el.clientHeight));
+                    // Container is now square (CSS aspect-ratio 1/1) with a max-width cap,
+// so width == height. Use the rendered width as the render size.
+const size = Math.max(300, el.clientWidth);
                     try { Celestial.resize({ width: size }); } catch {}
                 });
 

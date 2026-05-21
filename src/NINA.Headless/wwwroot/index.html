@@ -483,6 +483,20 @@
                           x-text="indiConnected ? 'INDI (' + devices.length + ' devices)' : 'INDI Off'"></span>
                 </div>
 
+                <!-- Rig (equipment profile) selector -->
+                <div class="rig-bar">
+                    <span class="rig-bar-label">Rig:</span>
+                    <select class="input-md" x-model="activeRigId" @change="switchRig($event.target.value)">
+                        <template x-for="r in rigs" :key="r.id">
+                            <option :value="r.id" x-text="r.name"></option>
+                        </template>
+                    </select>
+                    <button class="btn btn-sm" @click="rigModalOpen = true">Manage rigs…</button>
+                    <button class="btn btn-sm" @click="saveCurrentSelectionsToRig()"
+                            :disabled="!indiConnected"
+                            title="Save current device selections into this rig">💾 Save selections</button>
+                </div>
+
                 <!-- INDI not connected prompt -->
                 <div class="equip-connect-prompt" x-show="!indiConnected">
                     <p>Connect to INDI server to discover devices</p>
@@ -1391,6 +1405,57 @@
                 <button class="btn btn-sm btn-danger" @click="closeImageViewer()">✕</button>
             </div>
             <div id="osd-viewer" class="image-viewer-canvas"></div>
+        </div>
+    </div>
+
+    <!-- Rig manager modal -->
+    <div class="location-setup-modal" x-show="rigModalOpen" x-cloak
+         @click.self="rigModalOpen = false"
+         @keydown.escape.window="rigModalOpen = false">
+        <div class="location-setup-frame" style="max-width: 700px;">
+            <h2>🔭 Equipment rigs</h2>
+            <p class="text-muted" style="font-size: 12px;">
+                A rig is a saved set of equipment selections + per-rig defaults
+                (cooler temp, gain, focuser step, focal length, PHD2 endpoint).
+                Switch rigs in one click instead of re-selecting every device.
+            </p>
+
+            <div class="rig-list">
+                <template x-for="r in rigs" :key="r.id">
+                    <div class="rig-row" :class="r.id === activeRigId ? 'active' : ''">
+                        <div class="rig-row-main">
+                            <input type="text" x-model="r.name"
+                                   @change="renameRig(r.id, r.name)"
+                                   class="input-md">
+                            <span class="text-muted" style="font-size: 11px;">
+                                <span x-show="r.camera">📷 <span x-text="r.camera"></span></span>
+                                <span x-show="r.telescope" style="margin-left: 6px;">🔭 <span x-text="r.telescope"></span></span>
+                                <span x-show="r.focalLengthMm" style="margin-left: 6px;">
+                                    fl=<span x-text="r.focalLengthMm"></span>mm
+                                </span>
+                            </span>
+                        </div>
+                        <div class="rig-row-actions">
+                            <button class="btn btn-sm btn-primary"
+                                    x-show="r.id !== activeRigId"
+                                    @click="switchRig(r.id)">Activate</button>
+                            <span class="text-ok" style="font-size: 11px;" x-show="r.id === activeRigId">● ACTIVE</span>
+                            <button class="btn btn-sm btn-danger"
+                                    @click="deleteRig(r.id)"
+                                    :disabled="rigs.length <= 1">✕</button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <div class="control-row actions" style="margin-top: 10px;">
+                <input type="text" x-model="newRigName" placeholder="New rig name"
+                       class="input-md" @keyup.enter="createNewRig()">
+                <button class="btn btn-primary" @click="createNewRig()"
+                        :disabled="!newRigName">+ New empty rig</button>
+                <button class="btn" @click="cloneActiveRig()">Duplicate active</button>
+                <button class="btn btn-sm" @click="rigModalOpen = false" style="margin-left: auto;">Close</button>
+            </div>
         </div>
     </div>
 

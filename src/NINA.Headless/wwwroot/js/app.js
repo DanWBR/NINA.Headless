@@ -91,6 +91,12 @@ function ninaApp() {
         toasts: [],
         _toastId: 0,
 
+        // Equipment rigs (multi-rig profile support)
+        rigs: [],
+        activeRigId: null,
+        rigModalOpen: false,
+        newRigName: '',
+
         // Equipment tab state
         equipCameraChoice: '',
         equipMountChoice: '',
@@ -284,6 +290,7 @@ function ninaApp() {
             this.loadDitherSettings();
             this.loadMfSettings();
             this.loadAtlasTypes();
+            this.loadRigs();
         },
 
         // --- Network helpers ---
@@ -1583,6 +1590,126 @@ function ninaApp() {
             c.data.datasets[0].data = samples.map(s => s.temp);
             c.data.datasets[1].data = samples.map(s => s.power);
             c.update('none');
+        },
+
+        // ---- Equipment rigs ----
+
+        async loadRigs() {
+            try {
+                const data = await this.apiGet('/api/equipment/rigs');
+                this.rigs = data.rigs || [];
+                this.activeRigId = data.activeId;
+                // Pre-fill the device choice dropdowns with the active rig's
+                // selections so the user doesn't have to re-select.
+                const active = this.rigs.find(r => r.id === this.activeRigId);
+                if (active) this._applyRigToChoices(active);
+            } catch (e) { /* server may be unreachable on first load */ }
+        },
+
+        _applyRigToChoices(rig) {
+            this.equipCameraChoice = rig.camera || '';
+            this.equipMountChoice = rig.telescope || '';
+            this.equipFocuserChoice = rig.focuser || '';
+            this.equipFilterChoice = rig.filterWheel || '';
+            this.equipRotatorChoice = rig.rotator || '';
+            this.equipFlatChoice = rig.flatDevice || '';
+            this.equipDomeChoice = rig.dome || '';
+            this.equipWeatherChoice = rig.weather || '';
+            if (rig.coolerTargetTemperature != null) this.equipCoolerTarget = rig.coolerTargetTemperature;
+            if (rig.focuserStepSize) this.focusStep = rig.focuserStepSize;
+            if (rig.focalLengthMm) this.settings.focalLength = rig.focalLengthMm;
+            if (rig.phd2Host) this.guiderHost = rig.phd2Host;
+            if (rig.phd2Port) this.guiderPort = rig.phd2Port;
+        },
+
+        async switchRig(id) {
+            try {
+                await this.apiPost(`/api/equipment/rigs/${id}/activate`);
+                this.activeRigId = id;
+                const r = this.rigs.find(x => x.id === id);
+                if (r) {
+                    this._applyRigToChoices(r);
+                    this.toast(`Switched to rig: ${r.name}`, 'ok');
+                }
+            } catch (e) {
+                this.toast('Switch rig failed: ' + e.message, 'error');
+            }
+        },
+
+        async createNewRig() {
+            if (!this.newRigName) return;
+            try {
+                const rig = await this.apiPost('/api/equipment/rigs', { name: this.newRigName });
+                this.rigs.push(rig);
+                this.newRigName = '';
+                this.toast(`Created rig: ${rig.name}`, 'ok');
+            } catch (e) { this.toast('Create failed', 'error'); }
+        },
+
+        async cloneActiveRig() {
+            const name = prompt('Name for the new rig (copy of active):');
+            if (!name) return;
+            try {
+                const rig = await this.apiPost('/api/equipment/rigs/clone', { newName: name });
+                this.rigs.push(rig);
+                this.toast(`Cloned to: ${rig.name}`, 'ok');
+            } catch (e) { this.toast('Clone failed', 'error'); }
+        },
+
+        async renameRig(id, newName) {
+            const rig = this.rigs.find(r => r.id === id);
+            if (!rig) return;
+            try {
+                await this.apiPost(`/api/equipment/rigs/${id}`, rig, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...rig, name: newName })
+                });
+            } catch (e) { this.toast('Rename failed', 'error'); }
+        },
+
+        async deleteRig(id) {
+            if (this.rigs.length <= 1) {
+                this.toast('Cannot delete the last rig', 'warn');
+                return;
+            }
+            if (!confirm('Delete this rig? This cannot be undone.')) return;
+            try {
+                await this.apiPost(`/api/equipment/rigs/${id}`, null, { method: 'DELETE' });
+                this.rigs = this.rigs.filter(r => r.id !== id);
+                if (this.activeRigId === id) this.activeRigId = this.rigs[0]?.id;
+                this.toast('Rig deleted', 'warn');
+            } catch (e) { this.toast('Delete failed', 'error'); }
+        },
+
+        async saveCurrentSelectionsToRig() {
+            const rig = this.rigs.find(r => r.id === this.activeRigId);
+            if (!rig) return;
+            const updated = {
+                ...rig,
+                camera: this.equipCameraChoice || rig.camera,
+                telescope: this.equipMountChoice || rig.telescope,
+                focuser: this.equipFocuserChoice || rig.focuser,
+                filterWheel: this.equipFilterChoice || rig.filterWheel,
+                rotator: this.equipRotatorChoice || rig.rotator,
+                flatDevice: this.equipFlatChoice || rig.flatDevice,
+                dome: this.equipDomeChoice || rig.dome,
+                weather: this.equipWeatherChoice || rig.weather,
+                coolerTargetTemperature: this.equipCoolerTarget,
+                focuserStepSize: this.focusStep,
+                focalLengthMm: this.settings.focalLength,
+                phd2Host: this.guiderHost,
+                phd2Port: this.guiderPort
+            };
+            try {
+                await this.apiPost(`/api/equipment/rigs/${rig.id}`, null, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updated)
+                });
+                Object.assign(rig, updated);
+                this.toast(`Saved selections to "${rig.name}"`, 'ok');
+            } catch (e) { this.toast('Save failed: ' + e.message, 'error'); }
         },
 
         async loadDitherSettings() {

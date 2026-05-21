@@ -707,6 +707,62 @@ select.input-sm {
     color: var(--text-primary);
 }
 
+/* Equipment rig (profile) selector */
+.rig-bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.rig-bar-label {
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 10px;
+}
+
+.rig-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 12px 0;
+    max-height: 380px;
+    overflow-y: auto;
+}
+
+.rig-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.rig-row.active {
+    border-color: var(--accent);
+    background: rgba(33, 150, 243, 0.08);
+}
+
+.rig-row-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.rig-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 /* First-run location setup modal */
 .location-setup-modal {
     position: fixed;

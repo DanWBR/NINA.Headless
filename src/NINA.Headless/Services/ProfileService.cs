@@ -124,6 +124,114 @@ public class ProfileService {
         Save();
     }
 
+    // ----- Equipment profile (rig) management -----
+
+    /// <summary>The currently-active equipment rig, creating a "Default" rig
+    /// from the legacy LastXxx fields if the user has never used this feature
+    /// before.</summary>
+    public EquipmentProfile ActiveEquipmentProfile {
+        get {
+            EnsureMigratedToEquipmentProfiles();
+            var id = _activeProfile.ActiveEquipmentProfileId;
+            return _activeProfile.EquipmentProfiles.FirstOrDefault(e => e.Id == id)
+                ?? _activeProfile.EquipmentProfiles[0];
+        }
+    }
+
+    public List<EquipmentProfile> ListEquipmentProfiles() {
+        EnsureMigratedToEquipmentProfiles();
+        return _activeProfile.EquipmentProfiles.ToList();
+    }
+
+    public EquipmentProfile CreateEquipmentProfile(string name) {
+        EnsureMigratedToEquipmentProfiles();
+        var existing = _activeProfile.EquipmentProfiles
+            .FirstOrDefault(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (existing != null) return existing;
+
+        var rig = new EquipmentProfile { Name = name };
+        _activeProfile.EquipmentProfiles.Add(rig);
+        Save();
+        _logger.LogInformation("Created equipment profile: {Name}", name);
+        return rig;
+    }
+
+    /// <summary>Save the active rig's current values under a new name without
+    /// switching to it.</summary>
+    public EquipmentProfile CloneActiveRigAs(string newName) {
+        var src = ActiveEquipmentProfile;
+        var copy = new EquipmentProfile {
+            Name = newName,
+            Camera = src.Camera, Telescope = src.Telescope, Focuser = src.Focuser,
+            FilterWheel = src.FilterWheel, Rotator = src.Rotator,
+            FlatDevice = src.FlatDevice, Dome = src.Dome, Weather = src.Weather,
+            CoolerTargetTemperature = src.CoolerTargetTemperature,
+            DefaultGain = src.DefaultGain, DefaultOffset = src.DefaultOffset,
+            DefaultBinning = src.DefaultBinning,
+            FocuserStepSize = src.FocuserStepSize,
+            FocuserBacklashSteps = src.FocuserBacklashSteps,
+            FocalLengthMm = src.FocalLengthMm,
+            PHD2Host = src.PHD2Host, PHD2Port = src.PHD2Port
+        };
+        _activeProfile.EquipmentProfiles.Add(copy);
+        Save();
+        return copy;
+    }
+
+    public bool UpdateEquipmentProfile(string id, Action<EquipmentProfile> update) {
+        EnsureMigratedToEquipmentProfiles();
+        var rig = _activeProfile.EquipmentProfiles.FirstOrDefault(e => e.Id == id);
+        if (rig == null) return false;
+        update(rig);
+        Save();
+        return true;
+    }
+
+    public bool RenameEquipmentProfile(string id, string newName) {
+        return UpdateEquipmentProfile(id, r => r.Name = newName);
+    }
+
+    public bool DeleteEquipmentProfile(string id) {
+        EnsureMigratedToEquipmentProfiles();
+        if (_activeProfile.EquipmentProfiles.Count <= 1) return false; // never delete the last one
+        var rig = _activeProfile.EquipmentProfiles.FirstOrDefault(e => e.Id == id);
+        if (rig == null) return false;
+        _activeProfile.EquipmentProfiles.Remove(rig);
+        if (_activeProfile.ActiveEquipmentProfileId == id)
+            _activeProfile.ActiveEquipmentProfileId = _activeProfile.EquipmentProfiles[0].Id;
+        Save();
+        return true;
+    }
+
+    public bool ActivateEquipmentProfile(string id) {
+        EnsureMigratedToEquipmentProfiles();
+        if (!_activeProfile.EquipmentProfiles.Any(e => e.Id == id)) return false;
+        _activeProfile.ActiveEquipmentProfileId = id;
+        Save();
+        _logger.LogInformation("Activated equipment profile {Id}", id);
+        return true;
+    }
+
+    /// <summary>On first run (or upgrade from a pre-rig profile), create a
+    /// "Default" rig populated from the legacy LastXxx fields.</summary>
+    private void EnsureMigratedToEquipmentProfiles() {
+        if (_activeProfile.EquipmentProfiles.Count > 0) return;
+        var rig = new EquipmentProfile {
+            Name = "Default",
+            Camera = _activeProfile.LastCamera,
+            Telescope = _activeProfile.LastTelescope,
+            Focuser = _activeProfile.LastFocuser,
+            FilterWheel = _activeProfile.LastFilterWheel,
+            FocalLengthMm = _activeProfile.FocalLengthMm,
+            DefaultGain = _activeProfile.DefaultGain,
+            DefaultBinning = _activeProfile.DefaultBinning
+        };
+        _activeProfile.EquipmentProfiles.Add(rig);
+        _activeProfile.ActiveEquipmentProfileId = rig.Id;
+        Save();
+        _logger.LogInformation("Migrated legacy equipment selection into Default rig");
+    }
+
     private static string SanitizeFileName(string name) {
         var invalid = Path.GetInvalidFileNameChars();
         return new string(name.Where(c => !invalid.Contains(c)).ToArray())
@@ -139,7 +247,7 @@ public class UserProfile {
     public double Longitude { get; set; }
     public double Altitude { get; set; }
 
-    // Camera optics
+    // Camera optics (fallback only — live sensor dims come from the camera)
     public double SensorWidthMm { get; set; } = 23.5;
     public double SensorHeightMm { get; set; } = 15.7;
     public double FocalLengthMm { get; set; } = 478;
@@ -155,11 +263,18 @@ public class UserProfile {
     public string IndiHost { get; set; } = "localhost";
     public int IndiPort { get; set; } = 7624;
 
-    // Equipment selection (remembered)
+    // Legacy single-rig equipment selection (still serialised for
+    // backward-compat; new code uses EquipmentProfiles below).
     public string? LastCamera { get; set; }
     public string? LastTelescope { get; set; }
     public string? LastFocuser { get; set; }
     public string? LastFilterWheel { get; set; }
+
+    // Multi-rig support: a list of named equipment sets the user can switch
+    // between. Loaded on first run by migrating the legacy LastXxx fields
+    // into a "Default" rig.
+    public List<EquipmentProfile> EquipmentProfiles { get; set; } = new();
+    public string? ActiveEquipmentProfileId { get; set; }
 
     // Plate solver
     public string? AstapPath { get; set; }
@@ -169,6 +284,45 @@ public class UserProfile {
     public string ImageOutputDir { get; set; } = "";
     public string ImageNamePattern { get; set; } = "{target}_{filter}_{exposure}s_{date}_{seq}";
     public string ImageFormat { get; set; } = "fits";
+}
+
+/// <summary>
+/// A named equipment set (a "rig"). The user can save the device-name +
+/// per-rig preference pair for any combination of equipment, then switch
+/// rigs in one click without re-selecting every device. Common use cases:
+///   - "Backyard SCT" vs "Travel APO" vs "Remote site setup"
+///   - Different cameras with different optimal cooler temps
+///   - Different focuser positions / step sizes per OTA
+/// </summary>
+public class EquipmentProfile {
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "Default";
+
+    // Device selections — INDI device names as returned by getProperties
+    public string? Camera { get; set; }
+    public string? Telescope { get; set; }
+    public string? Focuser { get; set; }
+    public string? FilterWheel { get; set; }
+    public string? Rotator { get; set; }
+    public string? FlatDevice { get; set; }
+    public string? Dome { get; set; }
+    public string? Weather { get; set; }
+
+    // Per-rig defaults
+    public double CoolerTargetTemperature { get; set; } = -10;
+    public int DefaultGain { get; set; } = 100;
+    public int DefaultOffset { get; set; } = 50;
+    public int DefaultBinning { get; set; } = 1;
+    public int FocuserStepSize { get; set; } = 50;
+    public int FocuserBacklashSteps { get; set; }
+
+    // Optics specific to this rig (cameras share the OTA's focal length when
+    // physically swapped, but you may have multiple OTAs/reducers).
+    public double FocalLengthMm { get; set; } = 478;
+
+    // Per-rig PHD2 settings
+    public string PHD2Host { get; set; } = "localhost";
+    public int PHD2Port { get; set; } = 4400;
 }
 
 public class ProfileSummary {

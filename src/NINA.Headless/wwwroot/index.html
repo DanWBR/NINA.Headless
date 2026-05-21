@@ -411,6 +411,48 @@
                     <label>Host<input type="text" x-model="guiderHost" class="input-md"></label>
                     <label>Port<input type="number" x-model.number="guiderPort" class="input-sm"></label>
                     <button class="btn btn-primary" @click="guiderConnect()">Connect</button>
+                    <button class="btn" @click="launchPhd2()" :disabled="!phd2Process.executableConfigured"
+                            :title="phd2Process.executableConfigured ? 'Launch PHD2 then connect' : 'Set PHD2:ExecutablePath in appsettings'">
+                        ▶ Launch PHD2
+                    </button>
+                </div>
+
+                <!-- PHD2 management panel (visible only when connected) -->
+                <div x-show="guider.connected" class="phd2-mgmt">
+                    <div class="phd2-mgmt-row">
+                        <label>PHD2 profile
+                            <select class="input-md" x-model.number="phd2SelectedProfileId"
+                                    @change="setPhd2Profile($event.target.value)">
+                                <template x-for="p in phd2Profiles" :key="p.id">
+                                    <option :value="p.id" x-text="p.name"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <label>Exposure
+                            <select class="input-sm" x-model.number="phd2Exposure"
+                                    @change="setPhd2Exposure($event.target.value)">
+                                <template x-for="e in phd2ExposureOptions" :key="e">
+                                    <option :value="e" x-text="e >= 1000 ? (e/1000).toFixed(1)+'s' : e+'ms'"></option>
+                                </template>
+                            </select>
+                        </label>
+                        <label>Dec mode
+                            <select class="input-sm" x-model="phd2DecMode"
+                                    @change="setPhd2DecMode($event.target.value)">
+                                <option value="Auto">Auto</option>
+                                <option value="North">North</option>
+                                <option value="South">South</option>
+                                <option value="Off">Off</option>
+                            </select>
+                        </label>
+                        <button class="btn btn-sm"
+                                @click="phd2EquipmentConnected ? disconnectPhd2Equipment() : connectPhd2Equipment()"
+                                :class="phd2EquipmentConnected ? 'btn-active' : ''">
+                            <span x-text="phd2EquipmentConnected ? 'Disconnect equipment' : 'Connect equipment'"></span>
+                        </button>
+                        <button class="btn btn-sm btn-danger" @click="shutdownPhd2()"
+                                title="Shut down PHD2 (graceful)">⏻ Shutdown</button>
+                    </div>
                 </div>
 
                 <!-- Live metrics -->

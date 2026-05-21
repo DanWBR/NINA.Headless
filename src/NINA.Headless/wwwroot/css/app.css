@@ -1031,6 +1031,29 @@ select.input-sm {
     flex-wrap: wrap;
 }
 
+/* PHD2 management panel */
+.phd2-mgmt {
+    padding: 8px 14px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+
+.phd2-mgmt-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.phd2-mgmt-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
 /* Guider PHD2 graph */
 .guide-connect-row {
     display: flex;

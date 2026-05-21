@@ -367,6 +367,81 @@ public class PHD2Client : IDisposable {
 
     public Task<JsonElement?> ClearCalibrationAsync() => CallAsync("clear_calibration");
 
+    // ---- High-level management (profile + equipment + exposure) ----
+
+    /// <summary>List every PHD2 profile configured in the user's PHD2 install.</summary>
+    public async Task<List<PHD2Profile>> GetProfilesAsync(CancellationToken ct = default) {
+        var result = await CallAsync("get_profiles", ct: ct);
+        var list = new List<PHD2Profile>();
+        if (!result.HasValue || result.Value.ValueKind != JsonValueKind.Array) return list;
+        foreach (var p in result.Value.EnumerateArray()) {
+            list.Add(new PHD2Profile {
+                Id = TryGetInt(p, "id"),
+                Name = TryGetString(p, "name") ?? ""
+            });
+        }
+        return list;
+    }
+
+    public async Task<PHD2Profile?> GetCurrentProfileAsync(CancellationToken ct = default) {
+        var result = await CallAsync("get_profile", ct: ct);
+        if (!result.HasValue || result.Value.ValueKind != JsonValueKind.Object) return null;
+        return new PHD2Profile {
+            Id = TryGetInt(result.Value, "id"),
+            Name = TryGetString(result.Value, "name") ?? ""
+        };
+    }
+
+    /// <summary>
+    /// Switch PHD2 to a different profile. PHD2 requires equipment to be
+    /// *disconnected* first — this method does that for you (idempotent: if
+    /// already disconnected, the SetConnected(false) call is a no-op).
+    /// </summary>
+    public async Task SetProfileAsync(int profileId, CancellationToken ct = default) {
+        try { await SetConnectedAsync(false, ct); } catch { /* may already be disconnected */ }
+        await CallAsync("set_profile", new object[] { profileId }, ct: ct);
+    }
+
+    public async Task<bool> GetConnectedAsync(CancellationToken ct = default) {
+        var r = await CallAsync("get_connected", ct: ct);
+        return r.HasValue && r.Value.ValueKind == JsonValueKind.True;
+    }
+
+    /// <summary>Tell PHD2 to connect (or disconnect) all the equipment in the active profile.</summary>
+    public Task SetConnectedAsync(bool connected, CancellationToken ct = default) =>
+        CallAsync("set_connected", new object[] { connected }, ct: ct);
+
+    public async Task<int> GetExposureAsync(CancellationToken ct = default) {
+        var r = await CallAsync("get_exposure", ct: ct);
+        return r.HasValue && r.Value.ValueKind == JsonValueKind.Number ? r.Value.GetInt32() : 0;
+    }
+
+    public Task SetExposureMsAsync(int milliseconds, CancellationToken ct = default) =>
+        CallAsync("set_exposure", new object[] { milliseconds }, ct: ct);
+
+    /// <summary>List of selectable exposure durations PHD2's UI offers (in ms).</summary>
+    public async Task<List<int>> GetExposureDurationsAsync(CancellationToken ct = default) {
+        var r = await CallAsync("get_exposure_durations", ct: ct);
+        var list = new List<int>();
+        if (!r.HasValue || r.Value.ValueKind != JsonValueKind.Array) return list;
+        foreach (var v in r.Value.EnumerateArray())
+            if (v.ValueKind == JsonValueKind.Number) list.Add(v.GetInt32());
+        return list;
+    }
+
+    public async Task<string> GetDecGuideModeAsync(CancellationToken ct = default) {
+        var r = await CallAsync("get_dec_guide_mode", ct: ct);
+        return r.HasValue && r.Value.ValueKind == JsonValueKind.String ? r.Value.GetString() ?? "" : "";
+    }
+
+    /// <summary>"Auto" / "North" / "South" / "Off" — see PHD2 docs.</summary>
+    public Task SetDecGuideModeAsync(string mode, CancellationToken ct = default) =>
+        CallAsync("set_dec_guide_mode", new object[] { mode }, ct: ct);
+
+    /// <summary>Ask PHD2 to shut itself down gracefully (closes the window).</summary>
+    public Task ShutdownAsync(CancellationToken ct = default) =>
+        CallAsync("shutdown", ct: ct);
+
     /// <summary>
     /// Asks PHD2 which equipment it is currently using (guide camera, mount,
     /// AO, aux mount). Returns null if PHD2 isn't connected.
@@ -467,4 +542,9 @@ public record PHD2Equipment {
 public record PHD2Device {
     public string Name { get; init; } = "";
     public bool Connected { get; init; }
+}
+
+public record PHD2Profile {
+    public int Id { get; init; }
+    public string Name { get; init; } = "";
 }

@@ -165,6 +165,103 @@ public static class GuiderEndpoints {
             phd2.ClearStepHistory();
             return Results.Ok(new { status = "cleared" });
         });
+
+        // ---- Profile management ----
+
+        group.MapGet("/profiles", async (PHD2Client phd2) => {
+            if (!phd2.IsConnected) return Results.BadRequest(new { error = "PHD2 not connected" });
+            try {
+                var profiles = await phd2.GetProfilesAsync();
+                var current = await phd2.GetCurrentProfileAsync();
+                return Results.Ok(new { current, profiles });
+            } catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        group.MapPost("/profile/{id:int}", async (int id, PHD2Client phd2) => {
+            if (!phd2.IsConnected) return Results.BadRequest(new { error = "PHD2 not connected" });
+            try {
+                await phd2.SetProfileAsync(id);
+                return Results.Ok(new { status = "profile_switched", profileId = id });
+            } catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        // ---- Equipment connect/disconnect (PHD2's own equipment) ----
+
+        group.MapGet("/equipment/connected", async (PHD2Client phd2) => {
+            if (!phd2.IsConnected) return Results.Ok(new { connected = false });
+            try { return Results.Ok(new { connected = await phd2.GetConnectedAsync() }); }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        group.MapPost("/equipment/connect", async (PHD2Client phd2) => {
+            if (!phd2.IsConnected) return Results.BadRequest(new { error = "PHD2 not connected" });
+            try { await phd2.SetConnectedAsync(true); return Results.Ok(new { connected = true }); }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        group.MapPost("/equipment/disconnect", async (PHD2Client phd2) => {
+            if (!phd2.IsConnected) return Results.BadRequest(new { error = "PHD2 not connected" });
+            try { await phd2.SetConnectedAsync(false); return Results.Ok(new { connected = false }); }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        // ---- Exposure ----
+
+        group.MapGet("/exposure", async (PHD2Client phd2) => {
+            if (!phd2.IsConnected) return Results.BadRequest(new { error = "PHD2 not connected" });
+            try {
+                var current = await phd2.GetExposureAsync();
+                var available = await phd2.GetExposureDurationsAsync();
+                return Results.Ok(new { current, available });
+            } catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        group.MapPost("/exposure/set/{ms:int}", async (int ms, PHD2Client phd2) => {
+            if (!phd2.IsConnected) return Results.BadRequest(new { error = "PHD2 not connected" });
+            try {
+                await phd2.SetExposureMsAsync(ms);
+                return Results.Ok(new { exposure = ms });
+            } catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        // ---- Dec guide mode ----
+
+        group.MapGet("/dec-mode", async (PHD2Client phd2) => {
+            if (!phd2.IsConnected) return Results.BadRequest(new { error = "PHD2 not connected" });
+            try { return Results.Ok(new { mode = await phd2.GetDecGuideModeAsync() }); }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        group.MapPost("/dec-mode/{mode}", async (string mode, PHD2Client phd2) => {
+            if (!phd2.IsConnected) return Results.BadRequest(new { error = "PHD2 not connected" });
+            if (mode is not ("Auto" or "North" or "South" or "Off"))
+                return Results.BadRequest(new { error = "mode must be Auto/North/South/Off" });
+            try { await phd2.SetDecGuideModeAsync(mode); return Results.Ok(new { mode }); }
+            catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        // ---- Process lifecycle (launch / shutdown PHD2 itself) ----
+
+        group.MapGet("/process/status", async (PHD2ProcessManager pm) => Results.Ok(new {
+            executableConfigured = pm.ExecutableConfigured,
+            executablePath = pm.ExecutablePath,
+            running = await pm.IsRunningAsync(),
+            weStartedIt = pm.WeStartedIt
+        }));
+
+        group.MapPost("/process/launch", async (PHD2ProcessManager pm) => {
+            try {
+                var ok = await pm.LaunchAsync();
+                return Results.Ok(new { launched = ok, running = await pm.IsRunningAsync() });
+            } catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
+
+        group.MapPost("/process/shutdown", async (PHD2ProcessManager pm, PHD2Client phd2) => {
+            try {
+                var ok = await pm.ShutdownAsync(phd2);
+                return Results.Ok(new { stopped = ok });
+            } catch (Exception ex) { return Results.Problem(ex.Message); }
+        });
     }
 
     public record ConnectGuiderRequest(string? Host, int? Port);

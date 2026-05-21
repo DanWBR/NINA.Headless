@@ -151,6 +151,15 @@ function ninaApp() {
         guideChartScale: 2.0, // arcsec range each direction (auto-expands)
         guiderEquipment: { camera: null, mount: null, auxMount: null, ao: null },
 
+        // PHD2 management state
+        phd2Profiles: [],
+        phd2SelectedProfileId: 0,
+        phd2Exposure: 1000,
+        phd2ExposureOptions: [],
+        phd2DecMode: 'Auto',
+        phd2EquipmentConnected: false,
+        phd2Process: { executableConfigured: false, executablePath: '', running: false, weStartedIt: false },
+
         // Sky Atlas filters + altitude chart
         showAtlasFilters: false,
         atlasFilter: { type: '', minMag: null, maxMag: null, minDec: null, maxDec: null },
@@ -291,6 +300,7 @@ function ninaApp() {
             this.loadMfSettings();
             this.loadAtlasTypes();
             this.loadRigs();
+            this.fetchPhd2ProcessStatus();
         },
 
         // --- Network helpers ---
@@ -2435,6 +2445,117 @@ function ninaApp() {
                     };
                 }
             } catch (err) { /* ignore */ }
+            // Pull the full management state alongside (parallel, best-effort)
+            await Promise.allSettled([
+                this.fetchPhd2Profiles(),
+                this.fetchPhd2Exposure(),
+                this.fetchPhd2DecMode(),
+                this.fetchPhd2EquipmentConnected()
+            ]);
+        },
+
+        // ---- PHD2 management ----
+
+        async fetchPhd2ProcessStatus() {
+            try {
+                const s = await this.apiGet('/api/guider/process/status');
+                this.phd2Process = s;
+            } catch (e) { /* ignore */ }
+        },
+
+        async launchPhd2() {
+            this.toast('Launching PHD2…', 'ok');
+            try {
+                const r = await this.apiPost('/api/guider/process/launch');
+                if (r.running) {
+                    this.toast('PHD2 is up — connecting…', 'ok');
+                    // Wait a beat then try the JSON-RPC connect
+                    setTimeout(() => this.guiderConnect(), 1500);
+                } else {
+                    this.toast('PHD2 launched but event server did not come up', 'warn');
+                }
+            } catch (e) { this.toast('Launch failed: ' + e.message, 'error'); }
+        },
+
+        async shutdownPhd2() {
+            if (!confirm('Shut down PHD2? Any ongoing guiding will stop.')) return;
+            try {
+                await this.apiPost('/api/guider/process/shutdown');
+                this.guider.connected = false;
+                this.phd2EquipmentConnected = false;
+                this.toast('PHD2 shut down', 'warn');
+            } catch (e) { this.toast('Shutdown failed: ' + e.message, 'error'); }
+        },
+
+        async fetchPhd2Profiles() {
+            try {
+                const r = await this.apiGet('/api/guider/profiles');
+                this.phd2Profiles = r.profiles || [];
+                this.phd2SelectedProfileId = r.current?.id || 0;
+            } catch (e) { /* PHD2 may not be ready yet */ }
+        },
+
+        async setPhd2Profile(id) {
+            try {
+                await this.apiPost(`/api/guider/profile/${id}`);
+                this.phd2SelectedProfileId = parseInt(id);
+                this.toast('PHD2 profile switched', 'ok');
+                // Equipment is disconnected by SetProfileAsync — refresh
+                await this.fetchPhd2EquipmentConnected();
+            } catch (e) { this.toast('Profile switch failed: ' + e.message, 'error'); }
+        },
+
+        async fetchPhd2Exposure() {
+            try {
+                const r = await this.apiGet('/api/guider/exposure');
+                this.phd2Exposure = r.current || 1000;
+                this.phd2ExposureOptions = r.available || [];
+            } catch (e) { /* ignore */ }
+        },
+
+        async setPhd2Exposure(ms) {
+            try {
+                await this.apiPost(`/api/guider/exposure/set/${ms}`);
+                this.phd2Exposure = parseInt(ms);
+            } catch (e) { this.toast('Exposure set failed', 'error'); }
+        },
+
+        async fetchPhd2DecMode() {
+            try {
+                const r = await this.apiGet('/api/guider/dec-mode');
+                if (r.mode) this.phd2DecMode = r.mode;
+            } catch (e) { /* ignore */ }
+        },
+
+        async setPhd2DecMode(mode) {
+            try {
+                await this.apiPost(`/api/guider/dec-mode/${mode}`);
+                this.phd2DecMode = mode;
+            } catch (e) { this.toast('Dec mode set failed', 'error'); }
+        },
+
+        async fetchPhd2EquipmentConnected() {
+            try {
+                const r = await this.apiGet('/api/guider/equipment/connected');
+                this.phd2EquipmentConnected = !!r.connected;
+            } catch (e) { /* ignore */ }
+        },
+
+        async connectPhd2Equipment() {
+            try {
+                await this.apiPost('/api/guider/equipment/connect');
+                this.phd2EquipmentConnected = true;
+                this.toast('PHD2 equipment connected', 'ok');
+                this.fetchGuiderEquipment();
+            } catch (e) { this.toast('Connect equipment failed: ' + e.message, 'error'); }
+        },
+
+        async disconnectPhd2Equipment() {
+            try {
+                await this.apiPost('/api/guider/equipment/disconnect');
+                this.phd2EquipmentConnected = false;
+                this.toast('PHD2 equipment disconnected', 'warn');
+            } catch (e) { this.toast('Disconnect failed: ' + e.message, 'error'); }
         },
         async guiderDisconnect() {
             try {

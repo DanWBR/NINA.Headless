@@ -25,6 +25,7 @@ builder.Services.AddSingleton<SlewCenterService>();
 builder.Services.AddSingleton<ProfileService>();
 builder.Services.AddSingleton<ImageWriterService>();
 builder.Services.AddSingleton<PHD2Client>();
+builder.Services.AddSingleton<PHD2ProcessManager>();
 builder.Services.AddSingleton<AutoFocusService>();
 builder.Services.AddSingleton<MeridianFlipService>();
 builder.Services.AddSingleton<FlatWizardService>();

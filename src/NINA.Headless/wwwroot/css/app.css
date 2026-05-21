@@ -1173,8 +1173,13 @@ select.input-sm {
     flex: 0 0 auto;
 }
 .sky-viewer {
-    flex: 1 1 0;         /* take remaining space without growing past it */
-    min-height: 0;       /* allow shrinking inside flex */
+    /* Hard cap based on viewport — .content above has overflow-y:auto and
+       no definite height, so flex:1 alone lets the SVG inflate the parent.
+       The 240 px reserve covers: top bar (50) + search row (60) + projection
+       row (60) + action row (60) + a touch of padding. */
+    flex: 0 0 auto;
+    height: calc(100vh - 240px);
+    min-height: 280px;
     width: 100%;
     background: #000;
     position: relative;  /* anchor for the absolutely-positioned SVG */

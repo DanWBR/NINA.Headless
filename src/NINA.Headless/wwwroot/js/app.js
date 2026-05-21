@@ -1277,7 +1277,13 @@ function ninaApp() {
         // the projection centre on initial load:
         //   - mount connected → sync to its RA/Dec
         //   - otherwise → celestial pole matching the observer's
-        //     hemisphere (NCP if lat ≥ 0, SCP if lat < 0)
+        //     hemisphere (NCP if lat ≥ 0, SCP if lat < 0), with RA set
+        //     to the current Local Sidereal Time so the meridian of the
+        //     observer's zenith becomes the projection's vertical
+        //     centreline. That way the horizon line — perpendicular to
+        //     the zenith direction — comes out horizontal on screen
+        //     instead of tilted at whatever angle the sidereal time
+        //     happens to be at when the page loaded.
         // Dec is clamped to ±89.5° because d3.geo's stereographic rotate
         // hits a singularity at exactly ±90° and silently no-ops.
         _computeInitialCentre(lat, lng) {
@@ -1289,7 +1295,9 @@ function ninaApp() {
                 return [mountRa * 15, Math.max(-89.5, Math.min(89.5, mountDec)), 0];
             }
             const poleDec = lat >= 0 ? 89.5 : -89.5;
-            return [0, poleDec, 0];
+            const lstHours = this._localSiderealTime(new Date(), lng);
+            const raDeg = (lstHours * 15) % 360;
+            return [raDeg, poleDec, 0];
         },
 
         // Convert equatorial (RA in hours, Dec in degrees) to horizontal

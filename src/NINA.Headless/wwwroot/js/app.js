@@ -1823,11 +1823,24 @@ function ninaApp() {
             });
         },
 
-        // Helper: mark a card's thumb as failed-to-load (broken URL,
-        // CORS, hot-link block). Reassigns the whole `thumbs` dict so
-        // Alpine actually picks up the change — direct property writes
-        // on a tracked object don't always trigger re-render in v3.
+        // Helper: mark a card's thumb as failed-to-load. If we were
+        // trying the local cached URL and a remote URL is also known,
+        // swap to the remote URL once before giving up — this covers
+        // the case where /api/sky/image/file/{slug} 404s due to a
+        // stale in-memory cache on the backend but NASA / Wikipedia
+        // still has the original. Reassigns the whole `thumbs` dict
+        // so Alpine picks up the change (direct property writes on a
+        // tracked object don't always trigger re-render in v3).
         tonightThumbFailed(item) {
+            const current = this.tonight.thumbs[item.name];
+            if (current?.url && current?.remoteUrl && current.url !== current.remoteUrl) {
+                // First failure: fall back to the remote URL.
+                this.tonight.thumbs = {
+                    ...this.tonight.thumbs,
+                    [item.name]: { ...current, url: current.remoteUrl }
+                };
+                return;
+            }
             this.tonight.thumbs = {
                 ...this.tonight.thumbs,
                 [item.name]: { url: null, missing: true }
@@ -1871,14 +1884,17 @@ function ninaApp() {
                 // downloaded the bytes (PrefetchAsync or a previous
                 // lazy fetch). Falls back to the remote NASA/Wikipedia
                 // URL if local isn't available, so even un-prefetched
-                // sessions keep working with internet.
+                // sessions keep working with internet. We also remember
+                // the remoteUrl separately so tonightThumbFailed() can
+                // swap to it if the local URL 404s at the browser.
                 this.tonight.thumbs = {
                     ...this.tonight.thumbs,
                     [item.name]: found ? {
-                        url:     found.localUrl || found.thumbnailUrl,
-                        title:   found.title,
-                        credit:  found.credit,
-                        missing: false
+                        url:       found.localUrl || found.thumbnailUrl,
+                        remoteUrl: found.thumbnailUrl,
+                        title:     found.title,
+                        credit:    found.credit,
+                        missing:   false
                     } : { url: null, missing: true }
                 };
             }

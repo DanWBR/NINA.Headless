@@ -178,10 +178,18 @@ public class CelestialImageService {
                 } catch { /* keep whatever _mem had */ }
             }
         }
-        if (entry?.LocalFileExt == null) return null;
+        if (entry?.LocalFileExt == null) {
+            _logger.LogInformation("GetLocalFilePath {Slug}: entry null or no LocalFileExt", slug);
+            return null;
+        }
         var allowed = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
-        if (!allowed.Contains(entry.LocalFileExt.ToLowerInvariant())) return null;
+        if (!allowed.Contains(entry.LocalFileExt.ToLowerInvariant())) {
+            _logger.LogInformation("GetLocalFilePath {Slug}: ext {Ext} not allowed", slug, entry.LocalFileExt);
+            return null;
+        }
         var path = Path.Combine(_cacheDir, slug + entry.LocalFileExt);
+        _logger.LogInformation("GetLocalFilePath {Slug}: checking {Path} (exists={Exists}, cacheDir={CacheDir})",
+            slug, path, File.Exists(path), _cacheDir);
         if (File.Exists(path)) return path;
 
         // The in-memory entry says LocalFileExt=X but the file isn't

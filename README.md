@@ -39,6 +39,7 @@ Browser (laptop / tablet / phone)        Raspberry Pi / Mini PC
   - [Weather Forecast](#weather-forecast)
   - [Tonight's Best](#tonights-best)
   - [Studio (post-processing)](#studio-post-processing)
+  - [File explorer](#file-explorer)
   - [Sequence Engine + Image Persistence](#sequence-engine--image-persistence)
   - [Flat Wizard](#flat-wizard)
   - [Web UI](#web-ui)
@@ -463,6 +464,49 @@ capture at 02:30 local time still belongs to the previous evening.
 
 Each operation writes a new FITS under `{rig}/processed/{target}/` and
 auto-refreshes the library.
+
+### File explorer
+
+The **Files** tab is a full server-side file explorer. Browse the
+device that runs Polaris — including USB sticks and external SSDs —
+without dropping into an SSH session.
+
+- **Roots** — Windows drive letters (`C:`, `D:`, …) or Unix mount
+  points (`/`, `/home`, `/mnt`, `/media`, `~`). Free-space and volume
+  label shown per root.
+- **Navigation** — clickable breadcrumbs, parent shortcut, "show
+  hidden" toggle, persistent cwd across reloads.
+- **Selection** — plain click selects one, ctrl/cmd-click toggles,
+  shift-click selects a range. The header checkbox selects all.
+- **Operations** — new folder, rename, cut, copy, paste, delete.
+  Cut + paste across volumes falls back to copy-then-delete
+  automatically.
+- **Preview** — FITS / XISF render via the same auto-stretch as
+  Studio (JPEG). PNG / JPG / GIF / BMP / WebP pass through. TIFF
+  decoded via SkiaSharp. `.txt` / `.log` / `.json` / `.md` / `.xml` /
+  `.csv` open in an inline text viewer (first ~32 KB).
+- **Download** — single file is a direct browser download with the
+  correct filename; multi-select streams a ZIP archive built on the
+  fly, so dragging 50 × 60 MB FITS onto your laptop doesn't OOM the
+  Raspberry Pi.
+- **Studio root** — select a folder and click **⭐ Set as Studio
+  root**. Studio rescans this tree on its next visit. The Settings
+  tab no longer carries the directory input; it just shows the
+  current value and links here.
+
+**Safety**: every destructive operation prompts with `window.confirm`
+and the server requires `confirmed=true` on the `/delete` endpoint —
+nothing gets wiped by an accidental double-click. A path blocklist
+refuses access to `C:\Windows`, `/proc`, `/sys`, `/dev`, `/etc/shadow`,
+`/etc/ssh`, and per-segment matches for `.ssh`, `.aws`, `.gnupg`, and
+`.config/gh` at any depth. Every file operation logs at `Information`
+level with `EventId="FileOp"`.
+
+> **The Polaris server has no authentication on the LAN.** The Files
+> tab exposes the filesystem to anyone who can reach the server
+> address. Polaris assumes a trusted local network — do **not**
+> expose port 5000 directly to the internet. For remote access use
+> the Relay (which has per-tenant tokens and quotas).
 
 ### Sequence Engine + Image Persistence
 

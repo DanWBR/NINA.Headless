@@ -10,7 +10,7 @@ public static class SequenceEndpoints {
             return Results.Ok(new {
                 items = engine.Items.Select(i => new {
                     i.Name, i.Exposure, i.Gain, i.Binning, i.Count,
-                    i.Filter, i.Ra, i.Dec
+                    i.Filter, i.Ra, i.Dec, i.ImageType
                 }),
                 state = engine.State.ToString().ToLowerInvariant()
             });
@@ -72,6 +72,15 @@ public static class SequenceEndpoints {
 
         group.MapGet("/dither", (SequenceEngine engine) => {
             return Results.Ok(engine.Dither);
+        });
+
+        // --- End-of-run actions ---
+
+        group.MapGet("/end-actions", (SequenceEngine engine) => Results.Ok(engine.EndActions));
+
+        group.MapPut("/end-actions", (SequenceEndActions actions, SequenceEngine engine) => {
+            engine.EndActions = actions ?? new SequenceEndActions();
+            return Results.Ok(engine.EndActions);
         });
 
         group.MapPut("/dither", (DitherSettings settings, SequenceEngine engine) => {

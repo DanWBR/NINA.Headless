@@ -33,6 +33,9 @@ public class SequenceEngine {
     /// <summary>How many dithers were issued in the current run (diagnostic).</summary>
     public int DithersIssued { get; private set; }
 
+    /// <summary>End-of-run housekeeping (park, warm, etc). Default: nothing.</summary>
+    public SequenceEndActions EndActions { get; set; } = new();
+
     public SequenceEngine(EquipmentManager equip, ImageRelayService relay,
         LiveStackingService liveStack, PHD2Client phd2, MeridianFlipService meridianFlip,
         ImageWriterService imageWriter, ILogger<SequenceEngine> logger) {
@@ -145,7 +148,8 @@ public class SequenceEngine {
             LastError = LastError,
             DithersIssued = DithersIssued,
             FramesSinceDither = _framesSinceDither,
-            Dither = Dither
+            Dither = Dither,
+            EndActions = EndActions
         };
     }
 
@@ -156,11 +160,22 @@ public class SequenceEngine {
                 CurrentItemIndex = i;
                 var item = Items[i];
 
-                _logger.LogInformation("Sequence item {Index}/{Total}: {Name} ({Exposure}s x {Count})",
-                    i + 1, Items.Count, item.Name, item.Exposure, item.Count);
+                // BIAS frames are zero-second exposures by definition. If the
+                // UI somehow sent a non-zero exposure, clamp it — saves the
+                // user from wasting time on an obvious mistake.
+                var imageType = (item.ImageType ?? "LIGHT").Trim().ToUpperInvariant();
+                if (imageType == "BIAS") item.Exposure = 0;
+                bool isCalibration = imageType is "DARK" or "BIAS" or "FLAT" or "DARKFLAT";
 
-                // Slew to target if coordinates provided
-                if (item.Ra.HasValue && item.Dec.HasValue && _equip.Telescope != null) {
+                _logger.LogInformation("Sequence item {Index}/{Total}: {Name} ({Type} {Exposure}s x {Count})",
+                    i + 1, Items.Count, item.Name, imageType, item.Exposure, item.Count);
+
+                // Slew only for LIGHT frames with explicit coords. Calibration
+                // frames either don't care where the scope is pointed (darks,
+                // bias) or rely on an external flat panel (flat).
+                if (!isCalibration
+                    && item.Ra.HasValue && item.Dec.HasValue
+                    && _equip.Telescope != null) {
                     _logger.LogInformation("Slewing to {Name} (RA={Ra:F4}, Dec={Dec:F4})",
                         item.Name, item.Ra, item.Dec);
 
@@ -191,8 +206,10 @@ public class SequenceEngine {
                     await _pauseGate.WaitAsync(ct);
                     _pauseGate.Release();
 
-                    // Meridian flip check (only if target has coordinates)
-                    if (item.Ra.HasValue && item.Dec.HasValue
+                    // Meridian flip check — meaningful only for LIGHT frames
+                    // pointed at a real target.
+                    if (!isCalibration
+                        && item.Ra.HasValue && item.Dec.HasValue
                         && _meridianFlip.Settings.Enabled
                         && _meridianFlip.ShouldFlipNow(item.Ra.Value)) {
                         _logger.LogInformation("Meridian flip due for target {Name} — executing", item.Name);
@@ -224,8 +241,10 @@ public class SequenceEngine {
                         if (item.Ra.HasValue) imageData.MetaData.Target.RightAscension = item.Ra.Value;
                         if (item.Dec.HasValue) imageData.MetaData.Target.Declination = item.Dec.Value;
 
-                        // Persist to disk with extended FITS headers (no-op if no output dir)
-                        _imageWriter.SaveImage(imageData, targetName: item.Name, imageType: "LIGHT", gain: item.Gain);
+                        // Persist to disk with extended FITS headers (no-op if no output dir).
+                        // imageType controls the calibration/light subfolder split in BuildSubDir.
+                        _imageWriter.SaveImage(imageData, targetName: item.Name,
+                            imageType: imageType, gain: item.Gain);
 
                         if (_liveStack.IsRunning) {
                             await _liveStack.AddFrameAsync(imageData, ct);
@@ -261,9 +280,11 @@ public class SequenceEngine {
                         }
                     }
 
-                    // Dither between frames (only after a successful capture and only if
-                    // this isn't the very last frame of the very last item).
-                    if (frameOk) {
+                    // Dither between frames (only after a successful capture, only
+                    // if this isn't the very last frame of the very last item, and
+                    // only for LIGHT — dithering darks/flats would corrupt the
+                    // calibration master and hammer the mount needlessly).
+                    if (frameOk && !isCalibration) {
                         _framesSinceDither++;
                         bool moreFramesComing = (f + 1 < item.Count) || (i + 1 < Items.Count);
                         if (moreFramesComing) {
@@ -280,12 +301,71 @@ public class SequenceEngine {
                 TotalFramesCompleted,
                 StartedAt.HasValue ? (DateTime.UtcNow - StartedAt.Value).ToString(@"hh\:mm\:ss") : "??");
 
+            // Natural completion always fires the end-actions.
+            await RunEndActionsAsync(triggeredByStop: false);
+
         } catch (OperationCanceledException) {
             _logger.LogInformation("Sequence cancelled");
+            // Stop is a user action — only run housekeeping if the user opted in.
+            if (EndActions.RunOnStop) {
+                await RunEndActionsAsync(triggeredByStop: true);
+            }
         } catch (Exception ex) {
             LastError = ex.Message;
             State = SequenceState.Idle;
             _logger.LogError(ex, "Sequence failed");
+            // Failure: still try housekeeping so the rig isn't left tracking unattended.
+            await RunEndActionsAsync(triggeredByStop: true);
+        }
+    }
+
+    /// <summary>
+    /// Run the configured post-sequence actions. All failures are caught + logged;
+    /// one broken action does not prevent the next from being tried. Uses a fresh
+    /// cancellation token so a sequence-stop cannot cancel the cleanup itself.
+    /// </summary>
+    private async Task RunEndActionsAsync(bool triggeredByStop) {
+        var ea = EndActions;
+        if (ea == null) return;
+        if (!ea.ParkMount && !ea.StopTracking && !ea.WarmCamera && !ea.DisconnectGuider) return;
+
+        _logger.LogInformation("Running end-of-sequence actions (triggeredByStop={Stop})", triggeredByStop);
+        using var ct = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+
+        // Park supersedes stop-tracking — parking implies tracking off, and most
+        // mounts refuse the explicit tracking-off command after they're parked.
+        if (ea.ParkMount && _equip.Telescope != null) {
+            try {
+                _logger.LogInformation("End-action: parking mount");
+                await _equip.Telescope.ParkAsync(ct.Token);
+            } catch (Exception ex) {
+                _logger.LogWarning(ex, "End-action park failed");
+            }
+        } else if (ea.StopTracking && _equip.Telescope != null) {
+            try {
+                _logger.LogInformation("End-action: stopping tracking");
+                await _equip.Telescope.SetTrackingAsync(false, ct.Token);
+            } catch (Exception ex) {
+                _logger.LogWarning(ex, "End-action stop-tracking failed");
+            }
+        }
+
+        if (ea.WarmCamera && _equip.Camera != null) {
+            try {
+                _logger.LogInformation("End-action: warming camera (cooler off)");
+                await _equip.Camera.SetCoolerAsync(false, ct.Token);
+            } catch (Exception ex) {
+                _logger.LogWarning(ex, "End-action warm-camera failed");
+            }
+        }
+
+        if (ea.DisconnectGuider && _phd2.IsConnected) {
+            try {
+                _logger.LogInformation("End-action: stopping PHD2 guiding");
+                await _phd2.StopAsync();
+            } catch (Exception ex) {
+                _logger.LogWarning(ex, "End-action stop-guider failed");
+            }
         }
     }
 
@@ -378,6 +458,29 @@ public class SequenceItem {
     public string? Filter { get; set; }
     public double? Ra { get; set; }
     public double? Dec { get; set; }
+
+    /// <summary>
+    /// Frame classification: LIGHT (default), DARK, BIAS, FLAT, DARKFLAT.
+    /// ImageWriterService.BuildSubDir already routes each type to its
+    /// own folder; the engine uses it to (a) tag the saved file, (b)
+    /// skip slew/dither/meridian-flip for calibration items, and (c)
+    /// force exposure=0 for BIAS regardless of what the UI sent.
+    /// </summary>
+    public string ImageType { get; set; } = "LIGHT";
+}
+
+/// <summary>
+/// Per-run actions executed once the sequence finishes (or is stopped,
+/// if <see cref="RunOnStop"/> is true). All actions are best-effort:
+/// a failure on one does not skip the rest — we log and move on.
+/// </summary>
+public class SequenceEndActions {
+    public bool ParkMount { get; set; }
+    public bool StopTracking { get; set; }
+    public bool WarmCamera { get; set; }
+    public bool DisconnectGuider { get; set; }
+    /// <summary>If true, end-actions also fire when the user hits Stop. Default false.</summary>
+    public bool RunOnStop { get; set; }
 }
 
 public class SequenceStatus {
@@ -393,6 +496,7 @@ public class SequenceStatus {
     public int DithersIssued { get; set; }
     public int FramesSinceDither { get; set; }
     public DitherSettings? Dither { get; set; }
+    public SequenceEndActions? EndActions { get; set; }
 }
 
 public class SequenceItemStatus {

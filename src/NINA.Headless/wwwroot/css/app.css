@@ -2204,6 +2204,74 @@ select.input-sm {
     overflow: hidden;
 }
 
+/* Frame-type pill selector inside each Autorun item. Mirrors ASIAIR's
+   Light/Bias/Flat/Dark group: ghost outlines until selected, then the
+   active pill paints in the colour the convention assigns to that
+   frame class (green light, blue bias, amber flat, red dark). */
+.seq-type-pills {
+    display: inline-flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin: 4px 0;
+}
+.seq-type-pill {
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.seq-type-pill:hover:not(:disabled) {
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+}
+.seq-type-pill:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.seq-type-pill.seq-type-light {
+    background: rgba(76, 175, 80, 0.18);
+    border-color: #4caf50;
+    color: #a5e1a8;
+}
+.seq-type-pill.seq-type-bias {
+    background: rgba(33, 150, 243, 0.18);
+    border-color: #2196f3;
+    color: #9fcdf6;
+}
+.seq-type-pill.seq-type-flat {
+    background: rgba(255, 167, 38, 0.18);
+    border-color: #ffa726;
+    color: #ffcc80;
+}
+.seq-type-pill.seq-type-dark {
+    background: rgba(229, 57, 53, 0.18);
+    border-color: #e53935;
+    color: #ef9a9a;
+}
+
+/* Estimate strip at the foot of the Autorun panel — same role as the
+   bottom strip on ASIAIR's shooting schedule. */
+.seq-estimate {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding: 10px 16px;
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.seq-estimate strong {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    margin-left: 4px;
+}
+
 .seq-dither-header {
     display: flex;
     align-items: center;

@@ -438,6 +438,18 @@ function ninaApp() {
         seqMfExpanded: false,
         _mfSaveTimer: null,
 
+        // End-of-run actions (post-sequence housekeeping). Default = nothing.
+        // Mirrors the SequenceEndActions DTO on the server.
+        endActions: {
+            parkMount: false,
+            stopTracking: false,
+            warmCamera: false,
+            disconnectGuider: false,
+            runOnStop: false
+        },
+        seqEndExpanded: false,
+        _endActionsSaveTimer: null,
+
         // In-flight request tracking
         _pending: {},
         _previewFetching: false,
@@ -469,6 +481,7 @@ function ninaApp() {
             this.loadSettingsFromServer();
             this.loadDitherSettings();
             this.loadMfSettings();
+            this.loadEndActions();
             this.loadAtlasTypes();
             this.loadRigs();
             this.loadCameraDrivers();
@@ -3598,6 +3611,51 @@ function ninaApp() {
             } catch (e) { /* server may not be reachable yet */ }
         },
 
+        // --- End-of-run actions ---
+
+        async loadEndActions() {
+            try {
+                const data = await this.apiGet('/api/sequence/end-actions');
+                if (data) {
+                    this.endActions = {
+                        parkMount: !!data.parkMount,
+                        stopTracking: !!data.stopTracking,
+                        warmCamera: !!data.warmCamera,
+                        disconnectGuider: !!data.disconnectGuider,
+                        runOnStop: !!data.runOnStop
+                    };
+                }
+            } catch (e) { /* not fatal — defaults stand */ }
+        },
+
+        saveEndActions() {
+            if (this._endActionsSaveTimer) clearTimeout(this._endActionsSaveTimer);
+            this._endActionsSaveTimer = setTimeout(async () => {
+                try {
+                    await this.apiPost('/api/sequence/end-actions', null, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.endActions)
+                    });
+                } catch (e) {
+                    this.toast('Failed to save end actions', 'error');
+                }
+            }, 400);
+        },
+
+        // Short summary shown in the panel header so the user knows what
+        // will happen without expanding the body.
+        endActionsSummary() {
+            const ea = this.endActions || {};
+            const parts = [];
+            if (ea.parkMount) parts.push('park');
+            else if (ea.stopTracking) parts.push('stop tracking');
+            if (ea.warmCamera) parts.push('warm camera');
+            if (ea.disconnectGuider) parts.push('stop PHD2');
+            if (!parts.length) return '(none)';
+            return parts.join(' · ') + (ea.runOnStop ? ' · also on stop' : '');
+        },
+
         // Debounced PUT — fires 400ms after the last edit
         saveDitherSettings() {
             if (this._ditherSaveTimer) clearTimeout(this._ditherSaveTimer);
@@ -4930,8 +4988,37 @@ function ninaApp() {
                 binning: parseInt(this.binning),
                 count: 10,
                 filter: null,
-                ra: null, dec: null
+                ra: null, dec: null,
+                imageType: 'LIGHT'
             });
+        },
+
+        // --- Autorun derived totals (shown in the estimate strip) ---
+
+        sequenceTotalFrames() {
+            return this.sequence.reduce((s, it) => s + (Number(it.count) || 0), 0);
+        },
+
+        sequenceTotalSeconds() {
+            // Per-item: (exposure + ~3s overhead per frame) × count.
+            // The 3s constant is the typical readout + write hit observed
+            // in the field; close enough for a planning estimate.
+            return this.sequence.reduce((s, it) => {
+                const exp = Number(it.exposure) || 0;
+                const n = Number(it.count) || 0;
+                return s + (exp + 3) * n;
+            }, 0);
+        },
+
+        sequenceEstimatedMB() {
+            // Need camera dimensions to estimate file size. If unknown,
+            // return 0 and the row hides the disk-hit line.
+            const w = this.equipCameraInfo?.width || this.cameraWidthPx;
+            const h = this.equipCameraInfo?.height || this.cameraHeightPx;
+            if (!w || !h) return 0;
+            // 16-bit mono FITS ≈ w*h*2 bytes per frame. Multiply by total frames.
+            const bytesPerFrame = w * h * 2;
+            return (bytesPerFrame * this.sequenceTotalFrames()) / 1048576;
         },
 
         removeSequenceItem(index) {

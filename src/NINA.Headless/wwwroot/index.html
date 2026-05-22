@@ -114,9 +114,9 @@
                 <svg viewBox="0 0 24 24" width="22" height="22"><path d="M7 18h11a4 4 0 1 0-.7-7.95A6 6 0 0 0 6.2 12.04 4.5 4.5 0 0 0 7 18z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="6" cy="6" r="1.5" fill="currentColor"/><circle cx="19" cy="5" r="1" fill="currentColor"/></svg>
                 <span class="nav-label">Weather</span>
             </button>
-            <button class="nav-btn" :class="{ active: tab === 'sequence' }" @click="tab = 'sequence'" title="Simple Sequence">
+            <button class="nav-btn" :class="{ active: tab === 'sequence' }" @click="tab = 'sequence'; loadEndActions()" title="Autorun (shooting schedule)">
                 <svg viewBox="0 0 24 24" width="22" height="22"><rect x="3" y="3" width="18" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="10" width="18" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3" y="17" width="18" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-                <span class="nav-label">Seq</span>
+                <span class="nav-label">Autorun</span>
             </button>
             <button class="nav-btn" :class="{ active: tab === 'seqadv' }" @click="tab = 'seqadv'; loadAdvSeq()" title="Advanced Sequencer">
                 <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 4h6v6H3V4zm0 10h6v6H3v-6zm10-10h8m-8 4h6m-6 10h8m-8 4h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -1752,7 +1752,7 @@
             <!-- SEQUENCE -->
             <div x-show="tab === 'sequence'" class="tab-panel">
                 <div class="panel-header">
-                    Sequence
+                    Autorun
                     <span class="status-indicator-sm" :class="{
                         'ok': seqState === 'running',
                         'warn': seqState === 'paused',
@@ -1796,11 +1796,27 @@
                             <span class="seq-num" x-text="i + 1"></span>
                             <div class="seq-item-body">
                                 <input type="text" class="seq-input seq-input-name" x-model="item.name"
-                                       :disabled="seqState === 'running'" placeholder="Target name">
+                                       :disabled="seqState === 'running'"
+                                       :placeholder="item.imageType === 'LIGHT' ? 'Target name' : (item.imageType || 'LIGHT').toLowerCase() + ' set'">
+                                <!-- Frame-type pill selector (Light / Bias / Flat / Dark) -->
+                                <div class="seq-type-pills">
+                                    <template x-for="t in ['LIGHT','BIAS','FLAT','DARK']" :key="t">
+                                        <button type="button" class="seq-type-pill"
+                                                :class="{
+                                                    'seq-type-light': t === 'LIGHT' && (item.imageType || 'LIGHT') === t,
+                                                    'seq-type-bias':  t === 'BIAS'  && item.imageType === t,
+                                                    'seq-type-flat':  t === 'FLAT'  && item.imageType === t,
+                                                    'seq-type-dark':  t === 'DARK'  && item.imageType === t
+                                                }"
+                                                @click="item.imageType = t; if (t === 'BIAS') item.exposure = 0"
+                                                :disabled="seqState === 'running'"
+                                                x-text="t.charAt(0) + t.slice(1).toLowerCase()"></button>
+                                    </template>
+                                </div>
                                 <div class="seq-item-params">
                                     <label>Exp<input type="number" class="seq-input seq-input-num"
-                                        x-model.number="item.exposure" step="1" min="0.001"
-                                        :disabled="seqState === 'running'">s</label>
+                                        x-model.number="item.exposure" step="1" min="0"
+                                        :disabled="seqState === 'running' || item.imageType === 'BIAS'">s</label>
                                     <label>x<input type="number" class="seq-input seq-input-num"
                                         x-model.number="item.count" step="1" min="1"
                                         :disabled="seqState === 'running'"></label>
@@ -1813,6 +1829,15 @@
                                         <option value="2">2</option>
                                         <option value="4">4</option>
                                     </select></label>
+                                    <label x-show="filterWheel.connected && filterWheel.filters.length > 0">
+                                        Filter<select class="seq-input" x-model="item.filter"
+                                            :disabled="seqState === 'running'">
+                                            <option value="">(current)</option>
+                                            <template x-for="f in filterWheel.filters" :key="f">
+                                                <option :value="f" x-text="f"></option>
+                                            </template>
+                                        </select>
+                                    </label>
                                 </div>
                                 <!-- Per-item progress when running -->
                                 <div class="seq-item-progress" x-show="seqStatus && seqStatus.items && seqStatus.items[i]">
@@ -1954,6 +1979,61 @@
                             ⚠ PHD2 connected but not guiding — start guiding before launching the sequence.
                         </p>
                     </div>
+                </div>
+
+                <!-- End-of-run actions panel -->
+                <div class="seq-dither-panel">
+                    <div class="seq-dither-header" @click="seqEndExpanded = !seqEndExpanded">
+                        <span x-text="seqEndExpanded ? '▾' : '▸'"></span>
+                        <strong>End Events</strong>
+                        <span class="text-muted" style="font-size: 11px;" x-text="endActionsSummary()"></span>
+                    </div>
+                    <div class="seq-dither-body" x-show="seqEndExpanded">
+                        <div class="seq-dither-row">
+                            <label class="seq-dither-checkbox">
+                                <input type="checkbox" x-model="endActions.parkMount"
+                                       @change="saveEndActions()" :disabled="seqState === 'running'">
+                                Park mount
+                            </label>
+                            <label class="seq-dither-checkbox">
+                                <input type="checkbox" x-model="endActions.stopTracking"
+                                       @change="saveEndActions()" :disabled="seqState === 'running'">
+                                Stop tracking
+                            </label>
+                            <label class="seq-dither-checkbox">
+                                <input type="checkbox" x-model="endActions.warmCamera"
+                                       @change="saveEndActions()" :disabled="seqState === 'running'">
+                                Warm camera (cooler off)
+                            </label>
+                            <label class="seq-dither-checkbox">
+                                <input type="checkbox" x-model="endActions.disconnectGuider"
+                                       @change="saveEndActions()" :disabled="seqState === 'running'">
+                                Stop PHD2 guiding
+                            </label>
+                        </div>
+                        <div class="seq-dither-row">
+                            <label class="seq-dither-checkbox">
+                                <input type="checkbox" x-model="endActions.runOnStop"
+                                       @change="saveEndActions()" :disabled="seqState === 'running'">
+                                Also run when sequence is stopped
+                            </label>
+                        </div>
+                        <p class="seq-dither-hint text-muted">
+                            Park supersedes stop-tracking. End events always run on natural completion;
+                            tick the box above to also run them when you press Stop.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Estimate row: total frames, total exposure time, total disk hit.
+                     Mirrors the bottom strip in ASIAIR's shooting schedule. -->
+                <div class="seq-estimate" x-show="sequence.length > 0">
+                    <span>Estimate: <strong x-text="formatTime(sequenceTotalSeconds())"></strong></span>
+                    <span>Frames: <strong x-text="sequenceTotalFrames()"></strong></span>
+                    <span x-show="sequenceEstimatedMB() > 0">Disk: <strong x-text="sequenceEstimatedMB().toFixed(1) + ' MB'"></strong></span>
+                    <span x-show="mfTimeToMeridianMinutes !== null && mfTimeToMeridianMinutes > 0 && mfTimeToMeridianMinutes < 6*60">
+                        Before meridian: <strong x-text="formatMinutes(mfTimeToMeridianMinutes)"></strong>
+                    </span>
                 </div>
 
                 <!-- Controls -->

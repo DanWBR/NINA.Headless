@@ -24,6 +24,7 @@ public static class StatusStreamHandler {
         var videoRecording = context.RequestServices.GetRequiredService<NINA.Headless.Services.Planetary.VideoRecordingService>();
         var videoStacker = context.RequestServices.GetRequiredService<NINA.Headless.Services.Planetary.PlanetaryStackerService>();
         var slewPreview = context.RequestServices.GetRequiredService<SlewPreviewService>();
+        var liveStackTriggers = context.RequestServices.GetRequiredService<LiveStackTriggersService>();
         var liveStack = context.RequestServices.GetRequiredService<LiveStackingService>();
         var sequence = context.RequestServices.GetRequiredService<SequenceEngine>();
         var phd2 = context.RequestServices.GetRequiredService<PHD2Client>();
@@ -186,7 +187,20 @@ public static class StatusStreamHandler {
                         type = "status",
                         timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                         equipment = equip.GetEquipmentStatus(),
-                        liveStack = liveStack.GetStatus(),
+                        // Stack status + triggers (LSTR-4). Triggers sub-object
+                        // carries last-action timestamps + reference RA/Dec +
+                        // executing flag so the UI banner + status lines can
+                        // render without a separate poll.
+                        liveStack = new {
+                            isRunning = liveStack.GetStatus().IsRunning,
+                            frameCount = liveStack.GetStatus().FrameCount,
+                            width = liveStack.GetStatus().Width,
+                            height = liveStack.GetStatus().Height,
+                            referenceStarCount = liveStack.GetStatus().ReferenceStarCount,
+                            lastFrameHfr = liveStack.LastFrameMedianHfr,
+                            lastFrameStarCount = liveStack.LastFrameStarCount,
+                            triggers = liveStackTriggers.CurrentStatus
+                        },
                         guider = guiderPayload,
                         autoFocus = autoFocusPayload,
                         meridianFlip = meridianPayload,

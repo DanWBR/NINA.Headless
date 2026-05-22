@@ -2228,11 +2228,24 @@ select.input-sm {
 }
 
 .home-footer {
-    padding: 18px 32px 28px;
+    /* Stick the footer to the bottom of the scrolling home-panel so
+       the credit + GitHub link stay visible regardless of how far
+       the user has scrolled. position: sticky inside an overflow-y
+       container parks the element at the requested edge of the
+       viewport without floating over content above it.
+       Translucent dark glass (same recipe as the cards) keeps the
+       nebula visible behind it while ensuring text contrast. */
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    padding: 14px 32px;
     border-top: 1px solid var(--border, #334155);
     color: var(--text-muted, #94a3b8);
     font-size: 12.5px;
     display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    background: rgba(5, 8, 16, 0.78);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 .home-footer a { color: var(--accent, #38bdf8); }
 .home-credit { font-size: 11px; opacity: 0.7; }

@@ -2026,22 +2026,36 @@ select.input-sm {
 }
 
 /* ----------------------------- Home / dashboard ------------------------------- */
+/* Background image lives on .home-panel so it stretches behind the
+   hero, the status strip, the get-started grid, and the footer — one
+   continuous nebula instead of the previous "image card on a flat
+   panel" split. The image is fixed-position so the panel can scroll
+   without scrolling the artwork (acts like a parallax backdrop). */
 .home-panel {
     padding: 0 !important;
     overflow-y: auto;
+    position: relative;
+    background:
+        /* Bottom darkening keeps the footer + lower cards legible. */
+        linear-gradient(180deg,
+            rgba(5, 8, 16, 0.10) 0%,
+            rgba(5, 8, 16, 0.30) 35%,
+            rgba(5, 8, 16, 0.75) 100%),
+        url("/img/horsehead.jpg") center/cover no-repeat fixed,
+        radial-gradient(ellipse at 30% 40%, #1a2440 0%, #050810 70%);
 }
+/* Hero only needs the gentler overlay that pulled the eye into the
+   title — no second copy of the nebula. The flex sizing stays the
+   same so the layout doesn't shift. */
 .home-hero {
     position: relative;
     min-height: 320px;
     padding: 60px 40px;
     display: flex; align-items: center;
-    background:
-        linear-gradient(180deg,
-            rgba(5, 8, 16, 0.55) 0%,
-            rgba(5, 8, 16, 0.35) 40%,
-            rgba(5, 8, 16, 0.85) 100%),
-        url("/img/horsehead.jpg") center/cover no-repeat,
-        radial-gradient(ellipse at 30% 40%, #1a2440 0%, #050810 70%);
+    background: linear-gradient(180deg,
+        rgba(5, 8, 16, 0.55) 0%,
+        rgba(5, 8, 16, 0.10) 60%,
+        rgba(5, 8, 16, 0.00) 100%);
 }
 .home-hero-text { max-width: 720px; }
 .home-eyebrow {
@@ -2120,7 +2134,12 @@ select.input-sm {
     padding: 24px 32px 8px;
 }
 .home-status-card {
-    background: var(--panel, #1e293b);
+    /* Translucent dark glass so the nebula behind the panel shows
+       through. The backdrop-filter blur (where supported) keeps text
+       crisp on top of busy background regions. */
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border: 1px solid var(--border, #334155);
     border-left: 3px solid var(--text-muted, #94a3b8);
     border-radius: 6px;
@@ -2162,7 +2181,11 @@ select.input-sm {
     gap: 14px;
 }
 .home-quick-card {
-    background: var(--panel, #1e293b);
+    /* Same glass treatment as the status cards so the row reads as a
+       single cohesive surface against the nebula. */
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border: 1px solid var(--border, #334155);
     border-radius: 8px;
     padding: 18px;

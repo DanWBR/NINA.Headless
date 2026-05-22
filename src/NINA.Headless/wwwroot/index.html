@@ -2497,7 +2497,31 @@
 
                 <div class="settings-section">
                     <h3>Image Output</h3>
-                    <label>Format
+                    <label>Directory
+                        <input type="text" class="input-md" style="width:100%;max-width:520px"
+                               x-model="settings.imageOutputDir"
+                               @change="saveSettingsToServer()"
+                               placeholder="e.g. C:\Astrophotos  or  /home/pi/astrophotos">
+                    </label>
+                    <p class="hint" style="margin-top:4px">
+                        Root folder for captured frames. The Studio panel scans this tree.
+                        Files are organised under
+                        <code>{rig}/lights · calibration · calibrated · integrated · processed/...</code>
+                        automatically.
+                    </p>
+                    <label style="margin-top:10px">Filename pattern
+                        <input type="text" class="input-md" style="width:100%;max-width:520px"
+                               x-model="settings.imageNamePattern"
+                               @change="saveSettingsToServer()"
+                               placeholder="{target}_{filter}_{exposure}s_{date}_{seq}">
+                    </label>
+                    <p class="hint" style="margin-top:4px">
+                        Tokens: <code>{target} {filter} {exposure} {gain} {binning} {bitdepth}
+                        {date} {time} {datetime} {framenr} {seq} {camera} {temp} {imagetype}</code>.
+                        Leave blank for the default
+                        (<code>{target}_{filter}_{exposure}s_{date}_{seq}</code>).
+                    </p>
+                    <label style="margin-top:10px">Format
                         <select class="input-sm" x-model="settings.imageFormat" @change="saveSettingsToServer()">
                             <option value="fits">FITS</option>
                             <option value="xisf">XISF (PixInsight, LZ4-compressed)</option>

@@ -67,6 +67,8 @@ function ninaApp() {
             latitude: 0, longitude: 0, altitude: 0,
             sensorWidth: 23.5, sensorHeight: 15.7, focalLength: 478,
             imageFormat: 'fits',
+            imageOutputDir: '',
+            imageNamePattern: '',
             stellariumHost: 'localhost',
             stellariumPort: 8090,
             preferAdvancedSequencer: false
@@ -1033,6 +1035,8 @@ function ninaApp() {
                     this.settings.sensorHeight = data.sensorHeightMm || 15.7;
                     this.settings.focalLength = data.focalLengthMm || 478;
                     this.settings.imageFormat = data.imageFormat || 'fits';
+                    this.settings.imageOutputDir = data.imageOutputDir || '';
+                    this.settings.imageNamePattern = data.imageNamePattern || '';
                     this.settings.preferAdvancedSequencer = !!data.preferAdvancedSequencer;
                     // First time the app boots, honour the user's preferred sequencer flavour.
                     if (!this._sequencerTabBootHandled) {
@@ -3447,6 +3451,8 @@ function ninaApp() {
                         defaultGain: this.gain,
                         defaultBinning: parseInt(this.binning),
                         imageFormat: this.settings.imageFormat,
+                        imageOutputDir: this.settings.imageOutputDir,
+                        imageNamePattern: this.settings.imageNamePattern,
                         preferAdvancedSequencer: this.settings.preferAdvancedSequencer
                     })
                 });

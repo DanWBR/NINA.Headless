@@ -438,6 +438,74 @@ public class PHD2Client : IDisposable {
     public Task SetDecGuideModeAsync(string mode, CancellationToken ct = default) =>
         CallAsync("set_dec_guide_mode", new object[] { mode }, ct: ct);
 
+    // ----- Algorithm parameter introspection + tuning -----
+    // PHD2 exposes per-axis algorithm parameters (RA / Dec / Mount). The
+    // parameter set depends on which algorithm is currently selected for
+    // that axis in the PHD2 Brain. We don't try to guess — callers use
+    // GetAlgoParamNamesAsync to discover the live param surface, then
+    // GetAlgoParamAsync / SetAlgoParamAsync to read/write individual knobs.
+    //
+    // PHD2 returns a JSON-RPC error if the param doesn't exist for the
+    // current algorithm — we surface that as null/empty rather than
+    // throwing, so callers can apply presets safely even when the user
+    // has a non-standard algorithm selected.
+
+    /// <summary>
+    /// Lists the algorithm parameter names PHD2 currently exposes for the
+    /// given axis. Axis is typically "ra", "dec", or "Mount" — see PHD2 docs.
+    /// Returns empty list if axis is invalid or PHD2 returns an error.
+    /// </summary>
+    public async Task<List<string>> GetAlgoParamNamesAsync(string axis, CancellationToken ct = default) {
+        var list = new List<string>();
+        try {
+            var r = await CallAsync("get_algo_param_names", new object[] { axis }, ct: ct);
+            if (!r.HasValue || r.Value.ValueKind != JsonValueKind.Array) return list;
+            foreach (var v in r.Value.EnumerateArray())
+                if (v.ValueKind == JsonValueKind.String) list.Add(v.GetString() ?? "");
+        } catch (Exception ex) {
+            _logger.LogDebug(ex, "get_algo_param_names({Axis}) failed", axis);
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Reads a single algorithm parameter value. Returns null if the
+    /// parameter doesn't exist for the axis's current algorithm.
+    /// </summary>
+    public async Task<double?> GetAlgoParamAsync(string axis, string name, CancellationToken ct = default) {
+        try {
+            var r = await CallAsync("get_algo_param", new object[] { axis, name }, ct: ct);
+            if (!r.HasValue || r.Value.ValueKind != JsonValueKind.Number) return null;
+            return r.Value.GetDouble();
+        } catch (Exception ex) {
+            _logger.LogDebug(ex, "get_algo_param({Axis}, {Name}) failed", axis, name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Sets a single algorithm parameter. Returns true on success.
+    /// Returns false (with a debug log) if the parameter doesn't exist
+    /// for the current algorithm — callers applying multi-param presets
+    /// should treat per-param failures as non-fatal.
+    /// </summary>
+    public async Task<bool> SetAlgoParamAsync(string axis, string name, double value, CancellationToken ct = default) {
+        try {
+            await CallAsync("set_algo_param", new object[] { axis, name, value }, ct: ct);
+            return true;
+        } catch (Exception ex) {
+            _logger.LogDebug(ex, "set_algo_param({Axis}, {Name}, {Value}) failed", axis, name, value);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Flip calibration data (used post meridian-flip when guiding through
+    /// a mount that doesn't auto-flip the calibration vectors).
+    /// </summary>
+    public Task FlipCalibrationAsync(CancellationToken ct = default) =>
+        CallAsync("flip_calibration", ct: ct);
+
     /// <summary>Ask PHD2 to shut itself down gracefully (closes the window).</summary>
     public Task ShutdownAsync(CancellationToken ct = default) =>
         CallAsync("shutdown", ct: ct);

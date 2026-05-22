@@ -3103,14 +3103,16 @@ select.input-sm {
 }
 
 .equip-connect-prompt {
-    flex: 1;
+    /* Sits at the top of the panel — do NOT stretch to fill vertical
+       space, otherwise the connect form ends up centered in the middle
+       of the page while equipment cards render below it. */
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 20px;
+    align-items: stretch;
+    padding: 16px 20px;
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: 13px;
 }
 
 .equip-scroll {
@@ -3128,6 +3130,12 @@ select.input-sm {
     background: var(--bg-secondary);
     overflow: hidden;
     transition: border-color var(--transition);
+    /* Keeps every card the same visible height even when its body has
+       only a placeholder dropdown — avoids the squished look when no
+       device is selected yet. */
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
 }
 
 .equip-card:hover {
@@ -3145,7 +3153,7 @@ select.input-sm {
     padding: 8px 12px;
     background: rgba(0, 0, 0, 0.15);
     border-bottom: 1px solid var(--border);
-    font-size: 13px;
+    font-size: 12px;
 }
 
 .equip-card-icon {
@@ -3184,6 +3192,22 @@ select.input-sm {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    /* Cards live inside a responsive grid, so let the body grow to
+       fill the card height set by min-height. */
+    flex: 1;
+    /* Smaller inner type so labels/values/buttons feel proportional
+       to the role-card layout (user feedback: "diminuir a fonte dentro
+       dos cards"). */
+    font-size: 11px;
+}
+
+/* Pull a couple of inner text styles down a notch too so the visual
+   hierarchy still reads with the smaller body font. */
+.equip-card-body .equip-detail-name {
+    font-size: 12px;
+}
+.equip-card-body .equip-detail-props {
+    font-size: 11px;
 }
 
 .equip-select-row {

@@ -210,4 +210,37 @@ public class PHD2ClientTests {
         Assert.That(_sut.Host, Is.EqualTo("localhost"));
         Assert.That(_sut.Port, Is.EqualTo(4400));
     }
+
+    // --- PH2X-1 wrappers: disconnected fallbacks ---
+    // Without a live PHD2 we can't exercise the RPC round-trip, but we
+    // can assert the wrappers don't throw and degrade to safe defaults
+    // (empty list / null / false) on disconnected state. Full round-trip
+    // is in integration tests.
+
+    [Test]
+    public async Task GetAlgoParamNamesAsync_Disconnected_ReturnsEmptyList() {
+        var result = await _sut.GetAlgoParamNamesAsync("ra");
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task GetAlgoParamAsync_Disconnected_ReturnsNull() {
+        var result = await _sut.GetAlgoParamAsync("ra", "Hysteresis");
+        Assert.That(result, Is.Null);
+    }
+
+    [Test]
+    public async Task SetAlgoParamAsync_Disconnected_ReturnsFalse() {
+        var result = await _sut.SetAlgoParamAsync("ra", "Hysteresis", 0.10);
+        Assert.That(result, Is.False);
+    }
+
+    [Test]
+    public void FlipCalibrationAsync_Disconnected_DoesNotThrowSynchronously() {
+        // The CallAsync path throws when there's no writer — that's surfaced
+        // as a faulted task, not a synchronous throw. Either is acceptable
+        // as long as the wrapper itself doesn't throw before awaiting.
+        Assert.DoesNotThrow(() => { var _ = _sut.FlipCalibrationAsync(); });
+    }
 }

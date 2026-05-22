@@ -48,5 +48,59 @@ public static class StudioEndpoints {
         // Aggregate stats — total light frames, total exposure (h),
         // distinct targets / filters. Used by the toolbar header.
         g.MapGet("/stats", (FrameLibraryService svc) => Results.Ok(svc.GetStats()));
+
+        // --- ST-2: viewer / stretch / stats / export ----------------
+
+        // Stretched JPEG preview. Slider drags hit this many times per
+        // second; FrameProcessingService keeps a small decoded-frame LRU
+        // so the LUT pass is the only work per request. All stretch
+        // params are optional — omit them to get the auto-stretch view.
+        g.MapGet("/frames/{id:int}/preview", async (FrameProcessingService svc,
+            int id, double? black, double? mid, double? white,
+            int? max, int? quality, string? format, CancellationToken ct) => {
+            var opts = new FrameProcessingService.StretchOptions(black, mid, white);
+            var fmt = (format ?? "jpg").Trim().ToLowerInvariant();
+            byte[]? bytes;
+            string mime;
+            if (fmt == "png") {
+                bytes = await svc.RenderPngAsync(id, opts, max ?? 1600, ct);
+                mime = "image/png";
+            } else {
+                bytes = await svc.RenderJpegAsync(id, opts, max ?? 1600, quality ?? 85, ct);
+                mime = "image/jpeg";
+            }
+            return bytes == null ? Results.NotFound() : Results.File(bytes, mime);
+        });
+
+        // Black/mid/white the UI should preload sliders with for this
+        // frame. Cheap to call (uses the LRU decoded buffer).
+        g.MapGet("/frames/{id:int}/autostretch", (FrameProcessingService svc, int id) => {
+            var p = svc.AutoStretchDefaults(id);
+            return p == null ? Results.NotFound() : Results.Ok(new {
+                black = p.Black, mid = p.Mid, white = p.White
+            });
+        });
+
+        // Full statistics + star list. `stars=false` skips StarDetector
+        // when the caller only wants histogram + numeric stats — useful
+        // for the toolbar that wants a count badge but not the overlay.
+        g.MapGet("/frames/{id:int}/stats", (FrameProcessingService svc, int id, bool? stars) => {
+            var s = svc.ComputeStats(id, includeStars: stars ?? true);
+            return s == null ? Results.NotFound() : Results.Ok(s);
+        });
+
+        // Export to {rig}/processed/{target}/. format = tif | png | jpg.
+        // stretched=false on TIFF writes the original 16-bit linear data
+        // so the user can re-process in PixInsight / Siril without our
+        // stretch baked in. PNG/JPG always stretched (8-bit only).
+        g.MapPost("/frames/{id:int}/export", async (FrameProcessingService svc,
+            int id, string? format, double? black, double? mid, double? white,
+            bool? stretched, CancellationToken ct) => {
+            var opts = new FrameProcessingService.StretchOptions(black, mid, white);
+            var path = await svc.ExportAsync(id, format ?? "tif", opts, stretched ?? true, ct);
+            return path == null
+                ? Results.NotFound()
+                : Results.Ok(new { path });
+        });
     }
 }

@@ -1961,7 +1961,9 @@
                 <div class="studio-grid" x-show="studio.frames.length">
                     <template x-for="f in studio.frames" :key="f.id">
                         <div class="studio-card" :class="{ selected: studio.selectedIds.includes(f.id) }"
-                             @click="studioToggleSelect(f.id)">
+                             @click="studioToggleSelect(f.id)"
+                             @dblclick="studioOpenViewer(f)"
+                             title="Click to select · Double-click to open viewer">
                             <div class="studio-thumb">
                                 <img :src="'/api/studio/frames/' + f.id + '/thumb'"
                                      :alt="f.fileName" loading="lazy"
@@ -1992,6 +1994,123 @@
                 <div class="studio-selection-bar" x-show="studio.selectedIds.length">
                     <span x-text="studio.selectedIds.length + ' selected'"></span>
                     <button class="btn btn-sm" @click="studio.selectedIds = []">Clear</button>
+                </div>
+
+                <!-- ST-2: Single-frame viewer modal -->
+                <div class="studio-viewer-modal" x-show="studio.viewer.frame"
+                     x-cloak @click.self="studioCloseViewer()"
+                     @keydown.escape.window="studio.viewer.frame && studioCloseViewer()">
+                    <div class="studio-viewer">
+                        <div class="studio-viewer-header">
+                            <div class="studio-viewer-title">
+                                <strong x-text="studio.viewer.frame?.fileName"></strong>
+                                <span class="muted" x-text="studio.viewer.frame
+                                    ? (studio.viewer.frame.imageType + ' · '
+                                       + studio.viewer.frame.exposureSec.toFixed(1) + 's · '
+                                       + (studio.viewer.frame.filter || '—')
+                                       + ' · g' + studio.viewer.frame.gain
+                                       + ' · ' + studio.viewer.frame.width + '×' + studio.viewer.frame.height)
+                                    : ''"></span>
+                            </div>
+                            <button class="btn btn-sm" @click="studioCloseViewer()" title="Close (Esc)">✕</button>
+                        </div>
+
+                        <div class="studio-viewer-body">
+                            <!-- Image canvas (stretched preview + star overlay) -->
+                            <div class="studio-viewer-canvas">
+                                <img :src="studio.viewer.previewUrl" alt="preview"
+                                     class="studio-viewer-img">
+                                <!-- Star annotation overlay (toggle via showStars) -->
+                                <svg class="studio-viewer-stars" x-show="studio.viewer.showStars
+                                     && studio.viewer.stats?.stars?.length"
+                                     :viewBox="'0 0 ' + (studio.viewer.frame?.width || 1)
+                                                + ' ' + (studio.viewer.frame?.height || 1)"
+                                     preserveAspectRatio="xMidYMid meet">
+                                    <template x-for="s in (studio.viewer.stats?.stars || [])" :key="s.x + ',' + s.y">
+                                        <circle :cx="s.x" :cy="s.y" :r="Math.max(8, s.hfr * 4)"
+                                                fill="none" stroke="#ffcc44" stroke-width="2"
+                                                opacity="0.65"></circle>
+                                    </template>
+                                </svg>
+                            </div>
+
+                            <!-- Right sidebar: sliders + stats + actions -->
+                            <div class="studio-viewer-sidebar">
+                                <div class="studio-viewer-section">
+                                    <h4>Stretch</h4>
+                                    <label class="studio-slider">
+                                        <span>Black point</span>
+                                        <input type="range" min="0" max="1" step="0.001"
+                                               x-model.number="studio.viewer.stretch.black"
+                                               @input="studioStretchChanged()">
+                                        <span class="studio-slider-val"
+                                              x-text="(studio.viewer.stretch.black ?? 0).toFixed(3)"></span>
+                                    </label>
+                                    <label class="studio-slider">
+                                        <span>Midtone</span>
+                                        <input type="range" min="0.001" max="0.999" step="0.001"
+                                               x-model.number="studio.viewer.stretch.mid"
+                                               @input="studioStretchChanged()">
+                                        <span class="studio-slider-val"
+                                              x-text="(studio.viewer.stretch.mid ?? 0.5).toFixed(3)"></span>
+                                    </label>
+                                    <label class="studio-slider">
+                                        <span>White point</span>
+                                        <input type="range" min="0" max="1" step="0.001"
+                                               x-model.number="studio.viewer.stretch.white"
+                                               @input="studioStretchChanged()">
+                                        <span class="studio-slider-val"
+                                              x-text="(studio.viewer.stretch.white ?? 1).toFixed(3)"></span>
+                                    </label>
+                                    <div class="control-row">
+                                        <button class="btn btn-sm" @click="studioAutoStretch()">⚡ Auto stretch</button>
+                                        <label class="checkbox-inline" style="margin-left:auto">
+                                            <input type="checkbox" x-model="studio.viewer.showStars">
+                                            <span>Stars</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="studio-viewer-section">
+                                    <h4>Histogram</h4>
+                                    <div class="studio-histogram-wrap">
+                                        <canvas id="studio-histogram"></canvas>
+                                    </div>
+                                </div>
+
+                                <div class="studio-viewer-section" x-show="studio.viewer.stats">
+                                    <h4>Statistics</h4>
+                                    <table class="studio-stats">
+                                        <tr><td>Mean</td>   <td x-text="studio.viewer.stats?.mean.toFixed(1)"></td></tr>
+                                        <tr><td>Median</td> <td x-text="studio.viewer.stats?.median.toFixed(1)"></td></tr>
+                                        <tr><td>StDev</td>  <td x-text="studio.viewer.stats?.stDev.toFixed(1)"></td></tr>
+                                        <tr><td>MAD</td>    <td x-text="studio.viewer.stats?.mad.toFixed(1)"></td></tr>
+                                        <tr><td>Min / Max</td>
+                                            <td x-text="(studio.viewer.stats?.min ?? 0) + ' / ' + (studio.viewer.stats?.max ?? 0)"></td></tr>
+                                        <tr><td>Stars</td>  <td x-text="studio.viewer.stats?.starCount"></td></tr>
+                                        <tr x-show="studio.viewer.stats?.hfrAvg > 0">
+                                            <td>HFR avg</td>
+                                            <td x-text="studio.viewer.stats?.hfrAvg.toFixed(2)"></td></tr>
+                                    </table>
+                                </div>
+
+                                <div class="studio-viewer-section">
+                                    <h4>Export to processed/</h4>
+                                    <div class="control-row">
+                                        <button class="btn btn-sm" @click="studioExport('tif')"
+                                                :disabled="studio.viewer.exporting">TIFF 16-bit (linear)</button>
+                                        <button class="btn btn-sm" @click="studioExport('png')"
+                                                :disabled="studio.viewer.exporting">PNG</button>
+                                        <button class="btn btn-sm" @click="studioExport('jpg')"
+                                                :disabled="studio.viewer.exporting">JPEG</button>
+                                    </div>
+                                    <div class="muted" style="font-size:11px;margin-top:6px"
+                                         x-show="studio.viewer.lastExport"
+                                         x-text="'→ ' + studio.viewer.lastExport"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 

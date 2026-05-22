@@ -212,15 +212,31 @@ function ninaApp() {
         weather: { forecast: null, loading: false, error: '', lastFetched: null },
         _weatherLastKey: '',
 
-        // Studio (post-processing) — ST-1 frame browser
+        // Studio (post-processing) — ST-1 frame browser + ST-2 viewer
         studio: {
             frames: [],
             stats: null,
             rescan: null,
             filter: { type: '', target: '', filter: '' },
-            selectedIds: []
+            selectedIds: [],
+            // Viewer modal state (ST-2). When `viewer.frame` is set the
+            // modal is open. Stretch params drive /api/studio/frames/:id/preview;
+            // the URL is bumped through `viewer.previewUrl` after each
+            // debounced slider change.
+            viewer: {
+                frame: null,
+                previewUrl: '',
+                stretch: { black: null, mid: null, white: null },
+                showStars: false,
+                stats: null,
+                loadingStats: false,
+                exporting: false,
+                lastExport: ''
+            }
         },
         _studioRescanPoll: null,
+        _studioViewerDebounce: null,
+        _studioHistogramChart: null,
 
         // Observatory location helpers (Settings → Observatory)
         obsAddressQuery: '',
@@ -1610,6 +1626,148 @@ function ninaApp() {
             const idx = this.studio.selectedIds.indexOf(id);
             if (idx >= 0) this.studio.selectedIds.splice(idx, 1);
             else this.studio.selectedIds.push(id);
+        },
+
+        // ─── ST-2: Single-frame viewer ────────────────────────────────────
+
+        // Open the viewer modal for a frame. Fetches the auto-stretch
+        // defaults so the sliders start at sensible values, then triggers
+        // the first preview render + stats load.
+        async studioOpenViewer(frame) {
+            this.studio.viewer.frame = frame;
+            this.studio.viewer.stats = null;
+            this.studio.viewer.lastExport = '';
+            this.studio.viewer.stretch = { black: null, mid: null, white: null };
+            this.studio.viewer.previewUrl = '';
+            try {
+                const a = await this.apiGet(`/api/studio/frames/${frame.id}/autostretch`);
+                this.studio.viewer.stretch = {
+                    black: +a.black.toFixed(4),
+                    mid:   +a.mid.toFixed(4),
+                    white: +a.white.toFixed(4)
+                };
+            } catch { /* server will compute defaults on first preview */ }
+            this._studioRenderPreview();
+            this._studioLoadStats(frame.id);
+        },
+
+        studioCloseViewer() {
+            this.studio.viewer.frame = null;
+            this.studio.viewer.previewUrl = '';
+            this.studio.viewer.stats = null;
+            if (this._studioHistogramChart) {
+                this._studioHistogramChart.destroy();
+                this._studioHistogramChart = null;
+            }
+        },
+
+        // Triggered by slider input. Coalesces rapid drags into one
+        // render request — 150 ms is short enough to feel live, long
+        // enough to skip 80% of intermediate frames during a drag.
+        studioStretchChanged() {
+            clearTimeout(this._studioViewerDebounce);
+            this._studioViewerDebounce = setTimeout(() => this._studioRenderPreview(), 150);
+        },
+
+        async studioAutoStretch() {
+            const fr = this.studio.viewer.frame;
+            if (!fr) return;
+            try {
+                const a = await this.apiGet(`/api/studio/frames/${fr.id}/autostretch`);
+                this.studio.viewer.stretch = {
+                    black: +a.black.toFixed(4),
+                    mid:   +a.mid.toFixed(4),
+                    white: +a.white.toFixed(4)
+                };
+                this._studioRenderPreview();
+            } catch (e) {
+                this.toast?.('Auto stretch failed: ' + e.message, 'error');
+            }
+        },
+
+        _studioRenderPreview() {
+            const fr = this.studio.viewer.frame;
+            if (!fr) return;
+            const s = this.studio.viewer.stretch;
+            const qs = new URLSearchParams();
+            if (s.black != null) qs.set('black', s.black);
+            if (s.mid   != null) qs.set('mid',   s.mid);
+            if (s.white != null) qs.set('white', s.white);
+            // cache-bust so the <img> actually re-fetches after slider tweaks
+            qs.set('_t', Date.now());
+            this.studio.viewer.previewUrl = `/api/studio/frames/${fr.id}/preview?${qs.toString()}`;
+        },
+
+        async _studioLoadStats(frameId) {
+            this.studio.viewer.loadingStats = true;
+            try {
+                const s = await this.apiGet(`/api/studio/frames/${frameId}/stats?stars=true`);
+                this.studio.viewer.stats = s;
+                this.$nextTick(() => this._studioRenderHistogram());
+            } catch (e) {
+                this.toast?.('Stats failed: ' + e.message, 'error');
+            } finally {
+                this.studio.viewer.loadingStats = false;
+            }
+        },
+
+        _studioRenderHistogram() {
+            const stats = this.studio.viewer.stats;
+            if (!stats?.histogram) return;
+            const canvas = document.getElementById('studio-histogram');
+            if (!canvas || typeof Chart === 'undefined') return;
+            if (this._studioHistogramChart) this._studioHistogramChart.destroy();
+            this._studioHistogramChart = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels: stats.histogram.map((_, i) => i),
+                    datasets: [{
+                        data: stats.histogram,
+                        backgroundColor: '#9cb3ff',
+                        borderWidth: 0,
+                        barPercentage: 1.0,
+                        categoryPercentage: 1.0
+                    }]
+                },
+                options: {
+                    animation: false,
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    scales: {
+                        x: { display: false },
+                        // Log scale flattens the huge background spike that
+                        // would otherwise dwarf the highlight tail.
+                        y: { type: 'logarithmic', display: false }
+                    }
+                }
+            });
+        },
+
+        async studioExport(format) {
+            const fr = this.studio.viewer.frame;
+            if (!fr) return;
+            this.studio.viewer.exporting = true;
+            this.studio.viewer.lastExport = '';
+            try {
+                const s = this.studio.viewer.stretch;
+                const qs = new URLSearchParams({ format });
+                if (s.black != null) qs.set('black', s.black);
+                if (s.mid   != null) qs.set('mid',   s.mid);
+                if (s.white != null) qs.set('white', s.white);
+                // TIFF defaults to *linear* 16-bit so downstream PixInsight /
+                // Siril can re-process without our stretch baked in. PNG/JPG
+                // always get the stretched 8-bit view.
+                if (format === 'tif') qs.set('stretched', 'false');
+                const resp = await this.apiPost(`/api/studio/frames/${fr.id}/export?${qs.toString()}`, {});
+                const r = await resp.json();
+                this.studio.viewer.lastExport = r.path;
+                this.toast?.(`Exported ${format.toUpperCase()} → ${r.path}`, 'ok');
+            } catch (e) {
+                this.toast?.('Export failed: ' + e.message, 'error');
+            } finally {
+                this.studio.viewer.exporting = false;
+            }
         },
 
         // ─── Weather forecast (7Timer via /api/weather/forecast) ──────────

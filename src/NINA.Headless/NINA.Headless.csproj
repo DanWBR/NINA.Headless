@@ -23,6 +23,8 @@
          the SelectCamera path with OperatingSystem.IsWindows() so the
          Linux build never reaches the P/Invoke surface. -->
     <ProjectReference Include="..\NINA.Camera.CanonEdsdk\NINA.Camera.CanonEdsdk.csproj" />
+    <ProjectReference Include="..\NINA.Camera.NikonSdk\NINA.Camera.NikonSdk.csproj" />
+    <ProjectReference Include="..\NINA.Camera.SonySdk\NINA.Camera.SonySdk.csproj" />
   </ItemGroup>
 
   <ItemGroup>

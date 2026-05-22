@@ -53,7 +53,9 @@ public class EquipmentManager : IDisposable {
         Camera = driver switch {
             "indi" => new IndiCamera(_indiClient, deviceId),
             "canon-edsdk" => CreateCanonCamera(deviceId),
-            // Alpaca + Nikon + Sony land in follow-up commits.
+            "nikon-sdk"   => CreateNikonCamera(deviceId),
+            "sony-sdk"    => new NINA.Camera.SonySdk.SonySdkCamera(deviceId),
+            // Alpaca lands in a follow-up commit.
             _ => throw new NotSupportedException(
                 $"Camera driver '{driver}' is not implemented yet. " +
                 "Use 'indi' (or install the matching vendor SDK)."),
@@ -73,6 +75,15 @@ public class EquipmentManager : IDisposable {
         return new NINA.Camera.CanonEdsdk.CanonEdsdkCamera(deviceId);
     }
 
+    private static ICamera CreateNikonCamera(string deviceId) {
+        if (!OperatingSystem.IsWindows()) {
+            throw new NotSupportedException(
+                "Nikon SDK only runs on Windows. On Linux, use the INDI " +
+                "gphoto driver instead — see docs/dslr-linux.md.");
+        }
+        return new NINA.Camera.NikonSdk.NikonSdkCamera(deviceId);
+    }
+
     /// <summary>List of camera driver kinds the host can offer. Always
     /// includes <c>indi</c>; vendor SDK drivers are listed only when
     /// the matching native dependency is present on the current OS.</summary>
@@ -84,17 +95,25 @@ public class EquipmentManager : IDisposable {
                 Description: "ASCOM-over-HTTP cameras. Wiring pending."),
         };
         if (OperatingSystem.IsWindows()) {
-            // Probe each vendor SDK so the UI can show a green check
-            // when EDSDK.dll (etc.) is reachable on the DLL search
-            // path, or a "download here" banner when it isn't.
+            // Canon EDSDK + Nikon MAID/Imaging SDKs are Windows-only.
+            // Probe each so the UI can show a green check when the
+            // native DLLs are reachable on the search path or a
+            // "download" banner when they aren't.
             list.Add(new("canon-edsdk", "Canon EOS (EDSDK)",
                 Available: NINA.Camera.CanonEdsdk.CanonEdsdkRegistry.IsAvailable,
                 Description: "Canon DSLR / mirrorless. Requires EDSDK DLLs."));
-            list.Add(new("nikon-sdk", "Nikon (Imaging SDK)", Available: false,
-                Description: "Nikon DSLR / Z mirrorless. Requires Nikon SDK DLLs."));
-            list.Add(new("sony-sdk", "Sony (Camera Remote SDK)", Available: false,
-                Description: "Sony α series. Requires Sony Camera Remote SDK."));
+            list.Add(new("nikon-sdk", "Nikon (MAID SDK)",
+                Available: NINA.Camera.NikonSdk.NikonSdkRegistry.IsAvailable,
+                Description: "Nikon DSLR / Z mirrorless. Skeleton driver — " +
+                    "see docs/dslr-windows-nikon.md to wire up the actual SDK."));
         }
+        // Sony Camera Remote SDK ships native binaries for both
+        // Windows and Linux, so it shows up on every OS — including
+        // Raspberry Pi via the SDK's linux-arm64 build.
+        list.Add(new("sony-sdk", "Sony (Camera Remote SDK)",
+            Available: NINA.Camera.SonySdk.SonySdkRegistry.IsAvailable,
+            Description: "Sony α series (Windows + Linux). Skeleton driver — " +
+                "see docs/dslr-windows-sony.md to wire up the actual SDK."));
         return list;
     }
 
@@ -117,6 +136,24 @@ public class EquipmentManager : IDisposable {
                 return Array.Empty<DiscoveredCamera>();
             }
         }
+        if (driver == "nikon-sdk" && OperatingSystem.IsWindows()) {
+            try {
+                return EnumerateNikonCameras();
+            } catch (Exception ex) {
+                _logger.LogWarning(ex, "Nikon SDK discovery failed");
+                return Array.Empty<DiscoveredCamera>();
+            }
+        }
+        if (driver == "sony-sdk") {
+            try {
+                return NINA.Camera.SonySdk.SonySdkDiscovery.Enumerate()
+                    .Select(e => new DiscoveredCamera(e.Id, e.Model, e.PortName))
+                    .ToList();
+            } catch (Exception ex) {
+                _logger.LogWarning(ex, "Sony SDK discovery failed");
+                return Array.Empty<DiscoveredCamera>();
+            }
+        }
         return Array.Empty<DiscoveredCamera>();
     }
 
@@ -126,6 +163,12 @@ public class EquipmentManager : IDisposable {
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static IReadOnlyList<DiscoveredCamera> EnumerateCanonCameras()
         => NINA.Camera.CanonEdsdk.CanonEdsdkDiscovery.Enumerate()
+            .Select(e => new DiscoveredCamera(e.Id, e.Model, e.PortName))
+            .ToList();
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static IReadOnlyList<DiscoveredCamera> EnumerateNikonCameras()
+        => NINA.Camera.NikonSdk.NikonSdkDiscovery.Enumerate()
             .Select(e => new DiscoveredCamera(e.Id, e.Model, e.PortName))
             .ToList();
 

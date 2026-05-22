@@ -18,5 +18,7 @@
     <ProjectReference Include="..\..\src\NINA.Core.Portable\NINA.Core.Portable.csproj" />
     <ProjectReference Include="..\..\src\NINA.Relay.Server\NINA.Relay.Server.csproj" />
     <ProjectReference Include="..\..\src\NINA.Camera.CanonEdsdk\NINA.Camera.CanonEdsdk.csproj" />
+    <ProjectReference Include="..\..\src\NINA.Camera.NikonSdk\NINA.Camera.NikonSdk.csproj" />
+    <ProjectReference Include="..\..\src\NINA.Camera.SonySdk\NINA.Camera.SonySdk.csproj" />
   </ItemGroup>
 </Project>

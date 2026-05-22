@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>NINA.Camera.SonySdk</RootNamespace>
+    <AssemblyName>NINA.Camera.SonySdk</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Sony Camera Remote SDK ships native binaries for both
+         Windows and Linux. The actual platform-availability probe
+         in SonySdkRegistry handles the runtime decision; this
+         project targets net10.0 with no OS attribute so the
+         assembly compiles cross-platform. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NINA.Core.Portable\NINA.Core.Portable.csproj" />
+    <ProjectReference Include="..\NINA.Image.Portable\NINA.Image.Portable.csproj" />
+  </ItemGroup>
+
+</Project>

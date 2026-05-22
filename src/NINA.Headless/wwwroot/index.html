@@ -3326,8 +3326,46 @@
                 variants when you don't have masters yet.
             </p>
 
-            <!-- Progress block once a job starts -->
+            <!-- Encadear GraXpert BGE antes do Siril stack. Útil em
+                 céus com forte poluição luminosa onde cada light
+                 tem gradient distinto: cada um sai limpo do BGE,
+                 depois o Siril stacka frames já uniformes. -->
+            <div x-show="graxpert.status?.available && !siril.currentJob" style="margin: 8px 0">
+                <label class="seq-dither-checkbox">
+                    <input type="checkbox" x-model="siril.modalInjectBge">
+                    Inject GraXpert BGE per-frame before stacking
+                </label>
+                <p class="hint" style="margin-top:4px">
+                    Runs GraXpert background extraction on every light
+                    first (~10 s each), then feeds the cleaned _bge
+                    versions into the Siril script. Slower but cleans
+                    up gradients before they get baked into the master.
+                </p>
+            </div>
+
+            <!-- BGE pre-pass progress (only when modalInjectBge is on
+                 and the BGE batch is in flight). -->
+            <div class="siril-modal-progress"
+                 x-show="siril.modalBgePhase && !siril.currentJob">
+                <div class="hint" style="margin-bottom:6px">🌅 GraXpert BGE pre-pass</div>
+                <div class="siril-modal-progress-bar">
+                    <div class="siril-modal-progress-fill"
+                         :style="'width: ' + (siril.modalBgePhase
+                             ? Math.round(100 * (siril.modalBgePhase.done + siril.modalBgePhase.failed)
+                                          / Math.max(1, siril.modalBgePhase.total))
+                             : 0) + '%'"></div>
+                </div>
+                <div class="siril-modal-progress-meta">
+                    <span x-text="(siril.modalBgePhase?.done || 0) + ' / '
+                                  + (siril.modalBgePhase?.total || 0) + ' done'"></span>
+                    <span x-text="(siril.modalBgePhase?.failed || 0) + ' failed'"></span>
+                </div>
+            </div>
+
+            <!-- Siril phase progress -->
             <div class="siril-modal-progress" x-show="siril.currentJob">
+                <div class="hint" style="margin-bottom:6px"
+                     x-show="siril.modalBgePhase">⚡ Siril stack (post-BGE)</div>
                 <div class="siril-modal-progress-bar">
                     <div class="siril-modal-progress-fill"
                          :style="'width: ' + (siril.currentJob?.percentDone || 0) + '%'"></div>

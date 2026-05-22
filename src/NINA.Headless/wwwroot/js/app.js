@@ -373,6 +373,8 @@ function ninaApp() {
             modalDarks: [],
             modalFlats: [],
             modalBiases: [],
+            modalInjectBge: false,   // pre-process each light with GraXpert BGE
+            modalBgePhase: null,     // null | { jobId, total, done, failed }
             currentJobId: null,
             currentJob: null,
             _pollTimer: null
@@ -5018,6 +5020,11 @@ function ninaApp() {
             this.siril.modalDarks = [];
             this.siril.modalFlats = [];
             this.siril.modalBiases = [];
+            // BGE inject is opt-in per run, not sticky — every modal
+            // open starts unchecked so the user must consciously add
+            // the ~10 s × N frames cost.
+            this.siril.modalInjectBge = false;
+            this.siril.modalBgePhase = null;
             this.siril.currentJobId = null;
             this.siril.currentJob = null;
             this.siril.modalOpen = true;
@@ -5040,6 +5047,50 @@ function ninaApp() {
                 this.toast('No light frames selected', 'warn');
                 return;
             }
+
+            // Phase 1 (optional): GraXpert BGE on each light, then
+            // swap the lights list to the _bge siblings. We sit in
+            // the modal showing BGE progress while this runs, then
+            // transition seamlessly into the Siril phase.
+            let lightsForSiril = this.siril.modalLights;
+            if (this.siril.modalInjectBge && this.graxpert.status?.available) {
+                this.toast('Running GraXpert BGE on ' + lightsForSiril.length
+                           + ' lights first (this can take a while)…', 'info');
+                try {
+                    const bgeRun = await this.apiPost('/api/graxpert/run', null, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            paths: lightsForSiril,
+                            operation: 'background-extraction',
+                            smoothing: this.settings.graxpertBgeSmoothing,
+                            correction: this.settings.graxpertBgeCorrection
+                        })
+                    });
+                    this.siril.modalBgePhase = { jobId: bgeRun.jobId, total: lightsForSiril.length,
+                                                  done: 0, failed: 0 };
+                    // Poll the BGE batch until it terminates.
+                    const bgeResult = await this._sirilWaitForBgeBatch(bgeRun.jobId);
+                    if (!bgeResult) return;   // user cancelled or error
+                    // Resolve the new lights paths from the batch results
+                    // (sibling _bge.fits next to each original).
+                    lightsForSiril = bgeResult.results
+                        .filter(r => !r.error && r.outputPath)
+                        .map(r => r.outputPath);
+                    if (lightsForSiril.length === 0) {
+                        this.toast('GraXpert produced no usable outputs — aborting Siril phase', 'error');
+                        this.siril.modalBgePhase = null;
+                        return;
+                    }
+                    this.toast('BGE complete (' + lightsForSiril.length + ' frames clean) — starting Siril', 'ok');
+                } catch (e) {
+                    this.toast('GraXpert pre-pass failed: ' + (e.message || ''), 'error');
+                    this.siril.modalBgePhase = null;
+                    return;
+                }
+            }
+
+            // Phase 2: Siril script on the (possibly BGE-cleaned) lights.
             try {
                 const r = await this.apiPost('/api/siril/run', null, {
                     method: 'POST',
@@ -5047,7 +5098,7 @@ function ninaApp() {
                     body: JSON.stringify({
                         scriptName: this.siril.modalScriptName,
                         targetName: this.siril.modalTargetName,
-                        lightPaths: this.siril.modalLights,
+                        lightPaths: lightsForSiril,
                         darkPaths: this.siril.modalDarks.length ? this.siril.modalDarks : null,
                         flatPaths: this.siril.modalFlats.length ? this.siril.modalFlats : null,
                         biasPaths: this.siril.modalBiases.length ? this.siril.modalBiases : null
@@ -5059,6 +5110,27 @@ function ninaApp() {
             } catch (e) {
                 this.toast('Siril start failed: ' + (e.message || ''), 'error');
             }
+        },
+
+        // Promise-style waiter for the BGE pre-pass: polls the
+        // GraXpert batch endpoint until completedAt is set, returns
+        // the final job snapshot (or null on failure / cancel).
+        async _sirilWaitForBgeBatch(jobId) {
+            return new Promise(resolve => {
+                const tick = async () => {
+                    try {
+                        const j = await this.apiGet('/api/graxpert/jobs/' + encodeURIComponent(jobId));
+                        if (j) {
+                            this.siril.modalBgePhase = {
+                                jobId, total: j.total, done: j.done, failed: j.failed
+                            };
+                            if (j.completedAt) { resolve(j); return; }
+                        }
+                    } catch { /* transient — keep polling */ }
+                    setTimeout(tick, 1500);
+                };
+                tick();
+            });
         },
 
         _sirilStartPolling() {

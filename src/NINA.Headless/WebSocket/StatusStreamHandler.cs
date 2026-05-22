@@ -23,6 +23,9 @@ public static class StatusStreamHandler {
         var liveStack = context.RequestServices.GetRequiredService<LiveStackingService>();
         var sequence = context.RequestServices.GetRequiredService<SequenceEngine>();
         var phd2 = context.RequestServices.GetRequiredService<PHD2Client>();
+        var profileSync = context.RequestServices.GetRequiredService<PHD2ProfileSyncService>();
+        var phd2Calibration = context.RequestServices.GetRequiredService<PHD2CalibrationOrchestrator>();
+        var phd2Gui = context.RequestServices.GetRequiredService<Phd2GuiSessionService>();
         var autoFocus = context.RequestServices.GetRequiredService<AutoFocusService>();
         var meridianFlip = context.RequestServices.GetRequiredService<MeridianFlipService>();
         var profile = context.RequestServices.GetRequiredService<ProfileService>();
@@ -49,6 +52,37 @@ public static class StatusStreamHandler {
             while (!cts.Token.IsCancellationRequested && ws.State == WebSocketState.Open) {
                 try {
                     var seqStatus = sequence.GetStatus();
+
+                    // Compact summaries of PH2X-3/4/6 services — surface
+                    // as sub-objects on the guider block so UI can read
+                    // sync/calibrate/embed status without polling endpoints.
+                    var profileSyncPayload = new {
+                        phase = profileSync.CurrentStatus.Phase,
+                        rigId = profileSync.CurrentStatus.RigId,
+                        rigName = profileSync.CurrentStatus.RigName,
+                        profileId = profileSync.CurrentStatus.ProfileId,
+                        profileMissing = profileSync.CurrentStatus.ProfileMissing,
+                        error = profileSync.CurrentStatus.Error,
+                        at = profileSync.CurrentStatus.At
+                    };
+                    var calibrateJobPayload = phd2Calibration.CurrentJob == null ? null : new {
+                        id = phd2Calibration.CurrentJob.Id,
+                        phase = phd2Calibration.CurrentJob.State.ToString(),
+                        stepMs = phd2Calibration.CurrentJob.CalibrationStepMs,
+                        pixelScale = phd2Calibration.CurrentJob.PixelScale,
+                        error = phd2Calibration.CurrentJob.Error,
+                        warnings = phd2Calibration.CurrentJob.Warnings,
+                        done = phd2Calibration.CurrentJob.State == CalibrationPhase.Ok
+                            || phd2Calibration.CurrentJob.State == CalibrationPhase.Fail
+                    };
+                    var guiSessionPayload = new {
+                        supportedOs = phd2Gui.IsSupportedOs,
+                        xpraInstalled = phd2Gui.XpraInstalled,
+                        xpraVersion = phd2Gui.XpraVersion,
+                        running = phd2Gui.SessionRunning,
+                        port = phd2Gui.BindPort,
+                        lastError = phd2Gui.LastError
+                    };
 
                     // Compact guider payload: last 60 samples for inline chart
                     object? guiderPayload = null;
@@ -78,10 +112,18 @@ public static class StatusStreamHandler {
                                 t = ((DateTimeOffset)s.Timestamp).ToUnixTimeMilliseconds(),
                                 ra = s.RaArcsec,
                                 dec = s.DecArcsec
-                            })
+                            }),
+                            profileSync = profileSyncPayload,
+                            calibrateJob = calibrateJobPayload,
+                            guiSession = guiSessionPayload
                         };
                     } else {
-                        guiderPayload = new { connected = false, appState = "Stopped" };
+                        guiderPayload = new {
+                            connected = false, appState = "Stopped",
+                            profileSync = profileSyncPayload,
+                            calibrateJob = calibrateJobPayload,
+                            guiSession = guiSessionPayload
+                        };
                     }
 
                     // Meridian flip live status (LST + time-to-meridian for the current mount RA)

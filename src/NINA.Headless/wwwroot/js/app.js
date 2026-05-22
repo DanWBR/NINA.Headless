@@ -133,6 +133,15 @@ function ninaApp() {
         cameraDiscovering: false,
         cameraIso: 800,
 
+        // Mount driver state — same shape as camera. Today the
+        // dropdown shows INDI + synscan-wifi (the rest of the
+        // catalogue is "(not installed)"). mountDriver drives the
+        // ?driver= query param on /api/telescope/select; the
+        // equipMountChoice input doubles as "INDI device name" or
+        // "host:port" depending on driver.
+        mountDriver: 'indi',
+        mountDrivers: [],
+
         // Rotator
         rotator: { connected: false, name: '', position: null, moving: false, reversed: false },
 
@@ -457,6 +466,7 @@ function ninaApp() {
             this.loadAtlasTypes();
             this.loadRigs();
             this.loadCameraDrivers();
+            this.loadMountDrivers();
             this.fetchPhd2ProcessStatus();
             this.fetchPhd2InstallInfo();
         },
@@ -3271,6 +3281,11 @@ function ninaApp() {
             // backend's ?? coalesce; the UI mirrors that here.
             this.cameraDriver = rig.cameraDriver || 'indi';
             this.equipMountChoice = rig.telescope || '';
+            // Same pattern for the mount driver. For direct WiFi drivers
+            // (synscan-wifi, nexstar-wifi, lx200-tcp) the "device name"
+            // is the host:port the user typed; for INDI it's the device
+            // name advertised by the indiserver.
+            this.mountDriver = rig.telescopeDriver || 'indi';
             this.equipFocuserChoice = rig.focuser || '';
             this.equipFilterChoice = rig.filterWheel || '';
             this.equipRotatorChoice = rig.rotator || '';
@@ -3534,6 +3549,7 @@ function ninaApp() {
                 camera: this.equipCameraChoice || rig.camera,
                 cameraDriver: this.cameraDriver || rig.cameraDriver || 'indi',
                 telescope: this.equipMountChoice || rig.telescope,
+                telescopeDriver: this.mountDriver || rig.telescopeDriver || 'indi',
                 focuser: this.equipFocuserChoice || rig.focuser,
                 filterWheel: this.equipFilterChoice || rig.filterWheel,
                 rotator: this.equipRotatorChoice || rig.rotator,
@@ -4079,7 +4095,13 @@ function ninaApp() {
         async equipConnectMount() {
             if (!this.equipMountChoice) return;
             try {
-                await this.apiPost(`/api/telescope/select/${encodeURIComponent(this.equipMountChoice)}`);
+                // Pass driver as query param so the backend dispatches
+                // to the right ITelescope factory. Default 'indi' keeps
+                // the legacy path unchanged.
+                const qs = this.mountDriver && this.mountDriver !== 'indi'
+                    ? `?driver=${encodeURIComponent(this.mountDriver)}` : '';
+                await this.apiPost(
+                    `/api/telescope/select/${encodeURIComponent(this.equipMountChoice)}${qs}`);
                 await this.apiPost('/api/telescope/connect');
                 this.selectedTelescope = this.equipMountChoice;
                 this.mount.connected = true;
@@ -4087,6 +4109,26 @@ function ninaApp() {
             } catch (e) {
                 this.toast('Mount connection failed: ' + e.message, 'error');
             }
+        },
+
+        // Load the mount-driver catalogue once per session. Same
+        // pattern as loadCameraDrivers — INDI is always available, the
+        // WiFi/TCP drivers advertise their availability flag.
+        async loadMountDrivers() {
+            try {
+                this.mountDrivers = await this.apiGet('/api/telescope/drivers');
+            } catch (e) {
+                this.mountDrivers = [{
+                    id: 'indi', name: 'INDI', available: true,
+                    description: 'Mounts via INDI server.'
+                }];
+            }
+        },
+
+        // Currently-selected mount-driver descriptor. Drives the
+        // install banner + the INDI-dropdown-vs-host-input toggle.
+        get mountDriverInfo() {
+            return this.mountDrivers.find(d => d.id === this.mountDriver) || null;
         },
 
         async equipDisconnectMount() {

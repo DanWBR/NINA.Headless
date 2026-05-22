@@ -976,15 +976,60 @@
                             <span class="equip-status-dot" :class="mount.connected ? 'connected' : 'disconnected'"></span>
                         </div>
                         <div class="equip-card-body">
+                            <!-- Driver picker. INDI by default; direct WiFi
+                                 drivers (SynScan UDP today, NexStar TCP /
+                                 LX200 TCP / Alpaca pending) only show up
+                                 when the driver list reports them as
+                                 available. -->
+                            <div class="equip-driver-row" x-show="mountDrivers.length > 1">
+                                <label class="equip-driver-label">Driver</label>
+                                <select class="equip-select equip-driver-select"
+                                        x-model="mountDriver"
+                                        @change="equipMountChoice = ''">
+                                    <template x-for="d in mountDrivers" :key="d.id">
+                                        <option :value="d.id" :disabled="!d.available"
+                                                x-text="d.name + (d.available ? '' : ' (not installed)')"></option>
+                                    </template>
+                                </select>
+                            </div>
+
+                            <!-- Install banner — vendor driver picked but
+                                 backend not reachable (NexStar / LX200 /
+                                 Alpaca placeholders today). Links to the
+                                 mounts-wifi doc that explains the path. -->
+                            <div class="equip-install-banner"
+                                 x-show="mountDriverInfo && !mountDriverInfo.available"
+                                 x-cloak>
+                                <span x-text="mountDriverInfo?.name + ' driver not implemented yet.'"></span>
+                                <a href="https://github.com/DanWBR/nina-headless/blob/master/docs/mounts-wifi.md"
+                                   target="_blank">See the WiFi-mount landscape doc →</a>
+                            </div>
+
                             <div class="equip-select-row">
-                                <select class="equip-select" x-model="equipMountChoice">
+                                <!-- INDI path: device dropdown is populated
+                                     from the active indiserver. -->
+                                <select class="equip-select" x-model="equipMountChoice"
+                                        x-show="mountDriver === 'indi'">
                                     <option value="">-- Select device --</option>
                                     <template x-for="dev in devices" :key="'mnt-'+dev.name">
                                         <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
                                     </template>
                                 </select>
+
+                                <!-- Direct Wi-Fi drivers (synscan-wifi today):
+                                     no discovery, the user types the mount's
+                                     IP. Placeholder shows the factory AP
+                                     default so AZ-GTi works out of the box. -->
+                                <input type="text" class="equip-select"
+                                       x-show="mountDriver !== 'indi'"
+                                       x-model="equipMountChoice"
+                                       :placeholder="mountDriver === 'synscan-wifi'
+                                                     ? '192.168.4.1:11880 (default)'
+                                                     : 'host:port'"
+                                       title="Mount IP and port. Empty falls back to the driver's default endpoint (e.g. 192.168.4.1:11880 for SynScan factory AP).">
+
                                 <button class="btn btn-sm btn-primary" @click="equipConnectMount()"
-                                        :disabled="!equipMountChoice">Connect</button>
+                                        :disabled="(mountDriver === 'indi' && !equipMountChoice) || (mountDriver !== 'indi' && !mountDriverInfo?.available)">Connect</button>
                                 <button class="btn btn-sm btn-danger" @click="equipDisconnectMount()"
                                         :disabled="!mount.connected">Disconnect</button>
                             </div>

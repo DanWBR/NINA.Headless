@@ -102,5 +102,32 @@ public static class StudioEndpoints {
                 ? Results.NotFound()
                 : Results.Ok(new { path });
         });
+
+        // --- ST-3: master calibration frames -------------------------
+
+        // Start a master-frame integration. Body:
+        //   { frameIds: [1,2,3...], type: "Dark"|"Bias"|"Flat"|"DarkFlat",
+        //     method: "Mean"|"Median"|"SigmaClippedMean" }
+        // Returns { jobId } the UI polls.
+        g.MapPost("/masters", (MasterFrameService svc, MasterRequest req) => {
+            if (req.FrameIds == null || req.FrameIds.Count < 2)
+                return Results.BadRequest(new { error = "Need at least 2 frames to integrate." });
+            if (!Enum.TryParse<MasterType>(req.Type, true, out var type))
+                return Results.BadRequest(new { error = $"Unknown master type '{req.Type}'." });
+            if (!Enum.TryParse<IntegrationMethod>(req.Method, true, out var method))
+                return Results.BadRequest(new { error = $"Unknown method '{req.Method}'." });
+            var jobId = svc.StartJob(req.FrameIds, type, method);
+            return Results.Accepted(value: new { jobId });
+        });
+
+        g.MapGet("/masters/{jobId}/status", (MasterFrameService svc, string jobId) => {
+            var p = svc.GetStatus(jobId);
+            return p == null ? Results.NotFound() : Results.Ok(p);
+        });
     }
+
+    // POST body for /masters. Kept in the endpoints file (not the
+    // service) because it's purely an API contract, and Enum names go
+    // over the wire as strings to keep the JS side legible.
+    public record MasterRequest(List<int> FrameIds, string Type, string Method);
 }

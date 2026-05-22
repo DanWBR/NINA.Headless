@@ -1994,6 +1994,96 @@
                 <div class="studio-selection-bar" x-show="studio.selectedIds.length">
                     <span x-text="studio.selectedIds.length + ' selected'"></span>
                     <button class="btn btn-sm" @click="studio.selectedIds = []">Clear</button>
+                    <!-- Master frame creation: enabled when ≥2 frames
+                         selected. Type auto-detected from majority
+                         IMAGETYP in the selection, user can override. -->
+                    <button class="btn btn-sm btn-primary"
+                            :disabled="studio.selectedIds.length < 2"
+                            @click="studioOpenMasterDialog()">
+                        ⨯ Create master from selection
+                    </button>
+                </div>
+
+                <!-- ST-3: Master integration modal -->
+                <div class="studio-viewer-modal" x-show="studio.master.open"
+                     x-cloak @click.self="studioCloseMasterDialog()"
+                     @keydown.escape.window="studio.master.open && studioCloseMasterDialog()">
+                    <div class="studio-master-modal">
+                        <div class="studio-viewer-header">
+                            <div class="studio-viewer-title">
+                                <strong>Create master frame</strong>
+                                <span class="muted" x-text="studio.selectedIds.length + ' frames selected'"></span>
+                            </div>
+                            <button class="btn btn-sm" @click="studioCloseMasterDialog()" :disabled="studio.master.running">✕</button>
+                        </div>
+                        <div class="studio-master-body">
+                            <label class="control-row">
+                                <span style="min-width:90px">Type</span>
+                                <select x-model="studio.master.type" :disabled="studio.master.running" class="input-md">
+                                    <option value="Bias">Bias</option>
+                                    <option value="Dark">Dark</option>
+                                    <option value="Flat">Flat</option>
+                                    <option value="DarkFlat">Dark flat</option>
+                                </select>
+                                <span class="muted" style="font-size:11px;margin-left:8px">
+                                    auto-detected from majority IMAGETYP
+                                </span>
+                            </label>
+
+                            <label class="control-row">
+                                <span style="min-width:90px">Method</span>
+                                <select x-model="studio.master.method" :disabled="studio.master.running" class="input-md">
+                                    <option value="SigmaClippedMean">Sigma-clipped mean (recommended)</option>
+                                    <option value="Median">Median</option>
+                                    <option value="Mean">Mean</option>
+                                </select>
+                            </label>
+
+                            <div class="muted" style="font-size:12px;margin-top:8px">
+                                <p x-show="studio.master.method === 'SigmaClippedMean'">
+                                    Iteratively rejects pixels &gt;3σ from the running mean (2 passes).
+                                    Best general default — handles hot pixels and cosmic ray hits.
+                                </p>
+                                <p x-show="studio.master.method === 'Median'">
+                                    Per-pixel median of all frames. Robust against single outliers
+                                    but loses some signal-to-noise compared to clipped mean.
+                                </p>
+                                <p x-show="studio.master.method === 'Mean'">
+                                    Plain arithmetic mean. Maximum signal-to-noise but doesn't
+                                    reject any outliers — only safe with clean inputs.
+                                </p>
+                            </div>
+
+                            <!-- Progress -->
+                            <div class="studio-master-progress" x-show="studio.master.running || studio.master.lastJob">
+                                <div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em">
+                                    Status: <span x-text="studio.master.lastJob?.stage || 'idle'"></span>
+                                </div>
+                                <div class="studio-master-bar" x-show="studio.master.lastJob?.total > 0">
+                                    <div class="studio-master-bar-fill"
+                                         :style="'width:' + Math.round(100 * (studio.master.lastJob?.done || 0) / (studio.master.lastJob?.total || 1)) + '%'"></div>
+                                </div>
+                                <div style="font-size:11px;color:var(--text-muted)" x-show="studio.master.lastJob">
+                                    <span x-text="(studio.master.lastJob?.done || 0) + ' / ' + (studio.master.lastJob?.total || 0)"></span>
+                                </div>
+                                <div style="color:#ff9c66;font-size:12px" x-show="studio.master.lastJob?.error"
+                                     x-text="studio.master.lastJob?.error"></div>
+                                <div style="color:#88e088;font-size:12px;word-break:break-all"
+                                     x-show="studio.master.lastJob?.outputPath"
+                                     x-text="'→ ' + studio.master.lastJob?.outputPath"></div>
+                            </div>
+
+                            <div class="control-row actions" style="margin-top:14px">
+                                <button class="btn" @click="studioCloseMasterDialog()"
+                                        :disabled="studio.master.running">Close</button>
+                                <button class="btn btn-primary" @click="studioStartMaster()"
+                                        :disabled="studio.master.running || studio.selectedIds.length < 2">
+                                    <span x-show="!studio.master.running">▶ Integrate</span>
+                                    <span x-show="studio.master.running">Working…</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- ST-2: Single-frame viewer modal -->

@@ -232,11 +232,22 @@ function ninaApp() {
                 loadingStats: false,
                 exporting: false,
                 lastExport: ''
+            },
+            // ST-3: master-frame creation dialog. type/method drive the
+            // POST body; lastJob carries the rolling progress payload
+            // returned by /api/studio/masters/{jobId}/status.
+            master: {
+                open: false,
+                running: false,
+                type: 'Dark',
+                method: 'SigmaClippedMean',
+                lastJob: null
             }
         },
         _studioRescanPoll: null,
         _studioViewerDebounce: null,
         _studioHistogramChart: null,
+        _studioMasterPoll: null,
 
         // Observatory location helpers (Settings → Observatory)
         obsAddressQuery: '',
@@ -1742,6 +1753,77 @@ function ninaApp() {
                     }
                 }
             });
+        },
+
+        // ─── ST-3: Master frame creation ─────────────────────────────────
+
+        // Open the create-master modal. Auto-detect type from the
+        // majority IMAGETYP across the selection — usually the user
+        // already filtered to one type, but the override is there in
+        // case they didn't.
+        studioOpenMasterDialog() {
+            const selectedRows = this.studio.frames.filter(f => this.studio.selectedIds.includes(f.id));
+            const tally = {};
+            for (const f of selectedRows) {
+                const t = (f.imageType || 'LIGHT').toUpperCase();
+                tally[t] = (tally[t] || 0) + 1;
+            }
+            // Map FITS IMAGETYP to our enum names.
+            const winner = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0] || 'DARK';
+            this.studio.master.type = winner === 'BIAS'      ? 'Bias'
+                                     : winner === 'FLAT'     ? 'Flat'
+                                     : winner === 'DARKFLAT' ? 'DarkFlat'
+                                     : 'Dark';   // default for anything else
+            this.studio.master.method = 'SigmaClippedMean';
+            this.studio.master.lastJob = null;
+            this.studio.master.open = true;
+        },
+
+        studioCloseMasterDialog() {
+            this.studio.master.open = false;
+            if (this._studioMasterPoll) {
+                clearInterval(this._studioMasterPoll);
+                this._studioMasterPoll = null;
+            }
+        },
+
+        async studioStartMaster() {
+            if (this.studio.selectedIds.length < 2) return;
+            this.studio.master.running = true;
+            this.studio.master.lastJob = { stage: 'queued', done: 0, total: this.studio.selectedIds.length };
+            try {
+                const resp = await this.apiPost('/api/studio/masters', {
+                    frameIds: this.studio.selectedIds,
+                    type:     this.studio.master.type,
+                    method:   this.studio.master.method
+                });
+                const r = await resp.json();
+                // Poll the job until it finishes. Long jobs can run for
+                // minutes on a 32MP × 30-frame stack; 1 Hz polling is
+                // plenty responsive without hammering the server.
+                this._studioMasterPoll = setInterval(async () => {
+                    try {
+                        const s = await this.apiGet(`/api/studio/masters/${r.jobId}/status`);
+                        this.studio.master.lastJob = s;
+                        if (!s.inProgress) {
+                            clearInterval(this._studioMasterPoll);
+                            this._studioMasterPoll = null;
+                            this.studio.master.running = false;
+                            if (s.stage === 'done') {
+                                this.toast?.('Master frame written → ' + s.outputPath, 'ok');
+                                // Refresh browser so the new master shows up.
+                                this.loadStudio();
+                            } else if (s.stage === 'error') {
+                                this.toast?.('Master integration failed: ' + s.error, 'error');
+                            }
+                        }
+                    } catch { /* swallow transient failure, keep polling */ }
+                }, 1000);
+            } catch (e) {
+                this.studio.master.running = false;
+                this.studio.master.lastJob = { stage: 'error', error: e.message, done: 0, total: 0 };
+                this.toast?.('Master start failed: ' + e.message, 'error');
+            }
         },
 
         async studioExport(format) {

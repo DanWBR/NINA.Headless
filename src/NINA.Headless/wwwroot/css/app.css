@@ -3263,3 +3263,42 @@ select.input-sm {
     .studio-viewer-body { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
     .studio-viewer-sidebar { border-left: 0; border-top: 1px solid var(--border); max-height: 50%; }
 }
+
+/* ────────── ST-3: Master frame modal ────────── */
+.studio-master-modal {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    width: min(560px, 90vw);
+    max-height: 90vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+.studio-master-body {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.studio-master-progress {
+    margin-top: 14px;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.studio-master-bar {
+    height: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.studio-master-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4fc3f7, #9cb3ff);
+    transition: width 0.3s ease;
+}

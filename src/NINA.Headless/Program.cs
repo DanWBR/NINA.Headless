@@ -45,6 +45,7 @@ builder.Services.AddSingleton<CometEphemerisService>();
 builder.Services.AddSingleton<TonightsBestService>();
 builder.Services.AddSingleton<NINA.Headless.Services.Studio.FrameLibraryService>();
 builder.Services.AddSingleton<NINA.Headless.Services.Studio.FrameProcessingService>();
+builder.Services.AddSingleton<NINA.Headless.Services.Studio.MasterFrameService>();
 builder.Services.AddHostedService<MdnsService>();
 builder.Services.AddSingleton<RelayClient>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RelayClient>());

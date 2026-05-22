@@ -68,7 +68,45 @@ public interface ICamera {
     Task SetCoolerAsync(bool on, CancellationToken ct = default);
     Task SetIsoAsync(int iso, CancellationToken ct = default);
     Task AbortExposureAsync(CancellationToken ct = default);
+
+    // ----- Native video streaming (optional, gated by Capabilities.SupportsVideoStream) -----
+    // Backends without driver-level streaming leave the defaults and
+    // CameraStreamService falls back to a server-side capture loop.
+
+    /// <summary>True while a native driver-level video stream is active.
+    /// Default: always false.</summary>
+    bool IsStreaming => false;
+
+    /// <summary>Subscribe a frame callback used while a native stream is
+    /// open. Returns an IDisposable that removes the subscription. Frames
+    /// are ephemeral (no FITS save, no star detection) — CameraStreamService
+    /// routes them straight to ImageRelayService for low-latency display.
+    /// Default: returns a no-op disposable so non-streaming backends
+    /// can ignore.</summary>
+    IDisposable SubscribeVideoFrames(Action<IImageData> handler) => new NoopDisposable();
+
+    /// <summary>Open the driver's video stream. Throws
+    /// <see cref="NotSupportedException"/> when
+    /// <see cref="CameraCapabilities.SupportsVideoStream"/> is false.
+    /// Frame cadence and exposure semantics are driver-specific.</summary>
+    Task StartVideoStreamAsync(VideoStreamOptions? opts = null, CancellationToken ct = default)
+        => throw new NotSupportedException(
+            "Camera does not support native video streaming. Use loop mode instead.");
+
+    /// <summary>Close the driver's video stream. No-op when not streaming.</summary>
+    Task StopVideoStreamAsync(CancellationToken ct = default) => Task.CompletedTask;
 }
+
+internal sealed class NoopDisposable : IDisposable { public void Dispose() { } }
+
+/// <summary>Optional per-stream tunables. Backends pick defaults that
+/// match their driver — typical: ~50 ms exposure / ~10-30 fps.</summary>
+public record VideoStreamOptions(
+    double? ExposureSeconds = null,
+    int? Gain = null,
+    int? BinX = null,
+    int? BinY = null,
+    int? TargetFps = null);
 
 /// <summary>Optional per-exposure overrides. Nulls mean "use the
 /// camera's current property value". Set the fields the caller cares
@@ -89,7 +127,8 @@ public record CameraCapabilities(
     bool SupportsBinning,
     bool SupportsRoi,
     bool SupportsIso,
-    bool SupportsBulb) {
+    bool SupportsBulb,
+    bool SupportsVideoStream = false) {
     /// <summary>Typical astronomy-camera profile (INDI / Alpaca CCDs).</summary>
     public static readonly CameraCapabilities Astro = new(
         SupportsCooler: true, SupportsBinning: true, SupportsRoi: true,

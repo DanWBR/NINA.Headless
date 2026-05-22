@@ -13,6 +13,7 @@ builder.WebHost.ConfigureKestrel(options =>
 
 // Services
 builder.Services.AddSingleton<ImageRelayService>();
+builder.Services.AddSingleton<CameraStreamService>();
 builder.Services.AddSingleton<LiveStackingService>();
 builder.Services.AddSingleton<EquipmentManager>();
 builder.Services.AddSingleton<SequenceEngine>();

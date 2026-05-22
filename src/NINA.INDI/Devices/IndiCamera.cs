@@ -10,6 +10,13 @@ namespace NINA.INDI.Devices;
 public class IndiCamera : ICamera {
     private readonly IndiClient _client;
     private TaskCompletionSource<IImageData>? _exposureTcs;
+    // Native CCD_VIDEO_STREAM subscribers — added by CameraStreamService
+    // when a native stream is active. Frames arrive via OnBlobReceived
+    // and fan out to every subscriber. Concurrent for safety against
+    // late-arriving BLOBs after Stop.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, Action<IImageData>> _streamSubscribers = new();
+    private int _nextSubscriberId;
+    private volatile bool _isStreaming;
 
     public string DeviceName { get; }
     public bool IsConnected => _client.IsConnected;
@@ -49,7 +56,68 @@ public class IndiCamera : ICamera {
     public IReadOnlyList<int> IsoOptions => Array.Empty<int>();
     public int SelectedIso => 0;
 
-    public CameraCapabilities Capabilities => CameraCapabilities.Astro;
+    /// <summary>Per-instance capabilities — SupportsVideoStream gets
+    /// recomputed lazily from whether the driver advertises
+    /// <c>CCD_VIDEO_STREAM</c> (most ZWO/QHY/gphoto drivers do).</summary>
+    public CameraCapabilities Capabilities {
+        get {
+            var supportsStream = _client.GetProperty(DeviceName, "CCD_VIDEO_STREAM") != null;
+            return CameraCapabilities.Astro with { SupportsVideoStream = supportsStream };
+        }
+    }
+
+    public bool IsStreaming => _isStreaming;
+
+    public IDisposable SubscribeVideoFrames(Action<IImageData> handler) {
+        var id = System.Threading.Interlocked.Increment(ref _nextSubscriberId);
+        _streamSubscribers[id] = handler;
+        return new StreamSubscription(this, id);
+    }
+
+    private sealed class StreamSubscription : IDisposable {
+        private readonly IndiCamera _cam;
+        private readonly int _id;
+        public StreamSubscription(IndiCamera cam, int id) { _cam = cam; _id = id; }
+        public void Dispose() => _cam._streamSubscribers.TryRemove(_id, out _);
+    }
+
+    /// <summary>Toggle the driver's <c>CCD_VIDEO_STREAM</c> switch ON.
+    /// Frame cadence is whatever the driver chooses (often configurable
+    /// via <c>STREAMING_EXPOSURE</c> + <c>FPS</c> properties on the device).</summary>
+    public async Task StartVideoStreamAsync(VideoStreamOptions? opts = null, CancellationToken ct = default) {
+        if (!Capabilities.SupportsVideoStream)
+            throw new NotSupportedException(
+                $"INDI device {DeviceName} does not expose CCD_VIDEO_STREAM. Use loop mode instead.");
+
+        // Honour optional per-stream overrides where the driver exposes
+        // the matching properties. Silently skip when absent — different
+        // drivers expose different subset of streaming knobs.
+        if (opts?.ExposureSeconds is double exp && exp > 0) {
+            try {
+                await _client.SetNumberAsync(DeviceName, "STREAMING_EXPOSURE",
+                    new Dictionary<string, double> { ["STREAMING_EXPOSURE_VALUE"] = exp }, ct);
+            } catch { /* property may not exist on this driver */ }
+        }
+        if (opts?.Gain is int g) {
+            try {
+                await _client.SetNumberAsync(DeviceName, "CCD_CONTROLS",
+                    new Dictionary<string, double> { ["Gain"] = g }, ct);
+            } catch { }
+        }
+
+        _isStreaming = true;
+        await _client.SetSwitchAsync(DeviceName, "CCD_VIDEO_STREAM",
+            new Dictionary<string, bool> { ["STREAM_ON"] = true, ["STREAM_OFF"] = false }, ct);
+    }
+
+    public async Task StopVideoStreamAsync(CancellationToken ct = default) {
+        if (!_isStreaming) return;
+        _isStreaming = false;
+        try {
+            await _client.SetSwitchAsync(DeviceName, "CCD_VIDEO_STREAM",
+                new Dictionary<string, bool> { ["STREAM_ON"] = false, ["STREAM_OFF"] = true }, ct);
+        } catch { /* driver may already be torn down; nothing to do */ }
+    }
 
     public IndiCamera(IndiClient client, string deviceName) {
         _client = client;
@@ -131,9 +199,23 @@ public class IndiCamera : ICamera {
                 imageData.MetaData.Camera.PixelSizeX = PixelSizeX;
                 imageData.MetaData.Camera.PixelSizeY = PixelSizeY;
 
-                _exposureTcs?.TrySetResult(imageData);
+                // Native streaming path: when CCD_VIDEO_STREAM is ON the
+                // driver fires BLOBs continuously at its native cadence
+                // (10-30 fps typical). Fan them out to every subscriber
+                // and bypass the exposure-completion TCS so a long-pending
+                // CaptureAsync isn't accidentally resolved with a stream
+                // frame.
+                if (_isStreaming) {
+                    foreach (var sub in _streamSubscribers.Values) {
+                        try { sub(imageData); } catch { /* one subscriber's bug shouldn't kill the loop */ }
+                    }
+                } else {
+                    _exposureTcs?.TrySetResult(imageData);
+                }
             } catch (Exception ex) {
-                _exposureTcs?.TrySetException(ex);
+                if (!_isStreaming) _exposureTcs?.TrySetException(ex);
+                // While streaming, a bad frame is just a dropped frame —
+                // don't poison the whole stream.
             }
         }
     }

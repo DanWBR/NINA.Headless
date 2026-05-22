@@ -323,38 +323,11 @@ public class FrameLibraryService {
     }
 
     private static void GenerateThumbnail(FrameRow row, string cachePath) {
-        BaseImageData img;
-        using (var fs = File.OpenRead(row.Path)) {
-            img = FITSReader.Read(fs);
-        }
-        var stretched = NINA.Image.ImageAnalysis.AutoStretch.Apply(
-            img.Data, img.Properties.Width, img.Properties.Height, img.Properties.BitDepth);
-
-        // Build a Gray8 SKBitmap from the stretched byte buffer, then
-        // resize down to 256 on the long side. JPEG decoders are flaky
-        // with Gray8, so round-trip via Rgba8888 before encoding.
-        using var gray = new SKBitmap(img.Properties.Width, img.Properties.Height,
-            SKColorType.Gray8, SKAlphaType.Opaque);
-        unsafe {
-            fixed (byte* p = stretched) {
-                gray.SetPixels((IntPtr)p);
-            }
-        }
-
-        // Copy so the backing buffer outlives the byte[] reference.
-        using var grayCopy = gray.Copy();
-        double scale = 256.0 / Math.Max(grayCopy.Width, grayCopy.Height);
-        int newW = Math.Max(1, (int)Math.Round(grayCopy.Width  * scale));
-        int newH = Math.Max(1, (int)Math.Round(grayCopy.Height * scale));
-        using var resized = grayCopy.Resize(
-            new SKImageInfo(newW, newH, SKColorType.Gray8, SKAlphaType.Opaque),
-            SKSamplingOptions.Default);
-
-        using var rgb = new SKBitmap(newW, newH, SKColorType.Rgba8888, SKAlphaType.Opaque);
-        using (var canvas = new SKCanvas(rgb)) canvas.DrawBitmap(resized, 0, 0);
-        using var data = rgb.Encode(SKEncodedImageFormat.Jpeg, 85);
-        using var outStream = File.Create(cachePath);
-        data?.SaveTo(outStream);
+        // Heavy lifting now lives in FitsThumbnailer so the FILES tab
+        // can reuse the exact same renderer for paths it has never
+        // indexed (a master FITS dropped in any folder, etc).
+        var jpeg = FitsThumbnailer.RenderJpegFromPath(row.Path, maxDim: 256, quality: 85);
+        File.WriteAllBytes(cachePath, jpeg);
     }
 
     // --- Header helpers ---

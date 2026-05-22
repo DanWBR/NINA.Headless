@@ -24,15 +24,35 @@ namespace NINA.Headless.Services;
 /// every header. The shape is:
 ///
 ///   ImageOutputDir/
-///     lights/{target}/{filter}/{yyyy-MM-dd}/light_*.fits
-///     calibration/
-///       dark/{exposure}s_g{gain}/dark_*.fits
-///       bias/g{gain}/bias_*.fits
-///       flat/{filter}_g{gain}/flat_*.fits
-///       masters/master_*.fits            (written by STUDIO ST-3)
-///     calibrated/{target}/{filter}/...   (written by STUDIO ST-4)
-///     integrated/{target}/{filter}/...   (written by STUDIO ST-5)
-///     processed/{target}/...             (written by STUDIO ST-7 — TIFF/PNG/JPEG)
+///     {rig}/                                     ← active equipment-profile name
+///       lights/{target}/{filter}/{session}/      ← session = local night (noon-to-noon)
+///         light_*.fits
+///       calibration/                             ← rig-level — reusable across sessions
+///         dark/{exposure}s_g{gain}/dark_*.fits
+///         bias/g{gain}/bias_*.fits
+///         darkflat/{exposure}s_g{gain}/darkflat_*.fits
+///         flat/{filter}_g{gain}/flat_*.fits
+///         masters/master_*.fits                  (written by STUDIO ST-3)
+///       calibrated/{target}/{filter}/...         (written by STUDIO ST-4)
+///       integrated/{target}/{filter}/...         (written by STUDIO ST-5)
+///       processed/{target}/...                   (written by STUDIO ST-7 — TIFF/PNG/JPEG)
+///
+/// Rig + session rationale:
+///   - **Rig as top-level** means each optical chain (different scope,
+///     camera, focal reducer) gets its own self-contained archive. Master
+///     darks/biases/flats belong to a specific sensor at a specific
+///     temperature setpoint and gain — they're not transferable. Putting
+///     them under the rig prevents cross-contamination when the user
+///     switches setups.
+///   - **Session = astronomical night**. A capture started at 02:30 local
+///     time still belongs to the previous evening's session. Computed
+///     with a noon-to-noon rollover so the date in the folder name is
+///     the date the night *started*, matching how astronomers describe
+///     observation runs.
+///   - **Calibration stays per-rig (not per-session)** so masters can be
+///     reused across nights — typical PixInsight workflow. Raw cal
+///     frames accumulate in the same bucket regardless of which night
+///     they were shot, then STUDIO ST-3 integrates them into masters.
 ///
 /// The sub-path is derived from IMAGETYP. The filename pattern still
 /// controls just the leaf name. Pre-existing flat layouts keep being
@@ -93,8 +113,11 @@ public class ImageWriterService {
             // Standard subdirectory layout — keeps lights / calibration /
             // STUDIO outputs separated so the post-processing pipeline can
             // find matching darks by exposure+gain (and flats by filter+gain)
-            // without scanning every header.
-            var subDir = BuildSubDir(imageType, imageData, profile);
+            // without scanning every header. Frames also bucketed under the
+            // active rig and the astronomical session date.
+            var rigName = _profile.ActiveEquipmentProfile?.Name ?? "Default";
+            var sessionDate = SessionDateForLocal(imageData.MetaData.CreationTime.ToLocalTime());
+            var subDir = BuildSubDir(imageType, imageData, profile, rigName, sessionDate);
             var targetDir = string.IsNullOrEmpty(subDir) ? dir : Path.Combine(dir, subDir);
             Directory.CreateDirectory(targetDir);
             var fullPath = Path.Combine(targetDir, fileName);
@@ -205,19 +228,23 @@ public class ImageWriterService {
 
     /// <summary>
     /// Pick the structured subdirectory under ImageOutputDir for a frame
-    /// based on its IMAGETYP. Lights live under
-    /// lights/{target}/{filter}/{date}; calibration frames are grouped by
-    /// the keys that matter for matching them to lights later (exposure +
-    /// gain for darks, gain for bias, filter + gain for flats).
+    /// based on the active rig + IMAGETYP. Lights live under
+    /// {rig}/lights/{target}/{filter}/{session}; calibration frames are
+    /// grouped by the keys that matter for matching them to lights later
+    /// (exposure + gain for darks, gain for bias, filter + gain for
+    /// flats). Calibration is rig-level (no session bucket) so masters
+    /// can be reused across nights.
     /// </summary>
-    public static string BuildSubDir(string imageType, IImageData img, UserProfile profile) {
+    public static string BuildSubDir(string imageType, IImageData img, UserProfile profile,
+                                     string rigName, DateTime sessionDate) {
         var m = img.MetaData;
         var typeUpper = (imageType ?? "LIGHT").Trim().ToUpperInvariant();
+        var rig      = SanitizeFolder(string.IsNullOrEmpty(rigName) ? "Default" : rigName);
         var filter   = SanitizeFolder(string.IsNullOrEmpty(m.Exposure.Filter) ? "L" : m.Exposure.Filter);
         var gain     = m.Camera.Gain;
         var exposure = m.Exposure.ExposureTime;
 
-        return typeUpper switch {
+        var subPath = typeUpper switch {
             "DARK"      => Path.Combine("calibration", "dark",
                             FormattableString.Invariant($"{exposure:0.##}s_g{gain}")),
             "BIAS"      => Path.Combine("calibration", "bias",
@@ -229,10 +256,21 @@ public class ImageWriterService {
             _           => Path.Combine("lights",
                             SanitizeFolder(string.IsNullOrEmpty(m.Target.Name) ? "Unknown" : m.Target.Name),
                             filter,
-                            m.CreationTime.ToLocalTime().ToString("yyyy-MM-dd",
+                            sessionDate.ToString("yyyy-MM-dd",
                                 System.Globalization.CultureInfo.InvariantCulture))
         };
+        return Path.Combine(rig, subPath);
     }
+
+    /// <summary>
+    /// Map a local timestamp to its astronomical session date — the date
+    /// the *evening* started. A capture at 02:30 local time still belongs
+    /// to the previous evening's session, so the rollover is local noon.
+    /// This matches how observers describe sessions ("the night of May
+    /// 21st" runs from May 21 sunset through May 22 sunrise).
+    /// </summary>
+    public static DateTime SessionDateForLocal(DateTime local) =>
+        (local.Hour < 12 ? local.AddDays(-1) : local).Date;
 
     private static string SanitizeFolder(string s) {
         if (string.IsNullOrWhiteSpace(s)) return "Unknown";

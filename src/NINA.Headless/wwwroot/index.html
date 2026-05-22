@@ -804,7 +804,7 @@
                     <div class="control-row" style="margin-bottom:10px">
                         <label style="flex:1">SER file
                             <select x-model="video.processSerPath" class="input-sm">
-                                <option value="">— Pick a recorded SER —</option>
+                                <option value="">Pick a recorded SER</option>
                                 <template x-for="f in video.serList" :key="f.path">
                                     <option :value="f.path" x-text="f.label"></option>
                                 </template>
@@ -1325,7 +1325,7 @@
                                 <label>Brand (catalog)
                                     <select x-model="settings.telescopeBrand"
                                             @change="onTelescopeBrandPick()" class="input-sm">
-                                        <option value="">— Manual entry —</option>
+                                        <option value="">Manual entry</option>
                                         <template x-for="b in opticsBrands" :key="b">
                                             <option :value="b" x-text="b"></option>
                                         </template>
@@ -1336,7 +1336,7 @@
                                             @change="onTelescopeModelPick()"
                                             :disabled="!settings.telescopeBrand"
                                             class="input-sm">
-                                        <option value="">— Pick a model —</option>
+                                        <option value="">Pick a model</option>
                                         <template x-for="t in opticsModelsForRig({telescopeBrand: settings.telescopeBrand})"
                                                   :key="t.brand + t.model">
                                             <option :value="t.model"
@@ -1350,7 +1350,7 @@
                                     <select x-model="settings.accessoryModel"
                                             @change="onAccessoryPick()"
                                             class="input-sm">
-                                        <option value="">— None —</option>
+                                        <option value="">None</option>
                                         <template x-for="a in opticsAccessoriesForRig({telescopeModel: settings.telescopeModel})"
                                                   :key="a.brand + a.model">
                                             <option :value="a.brand + ' ' + a.model"
@@ -1439,7 +1439,7 @@
                                      the active indiserver's device list. -->
                                 <select class="equip-select" x-model="equipCameraChoice"
                                         x-show="cameraDriver === 'indi'">
-                                    <option value="">-- Select device --</option>
+                                    <option value="">Select device</option>
                                     <template x-for="dev in devices" :key="'cam-'+dev.name">
                                         <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
                                     </template>
@@ -1455,7 +1455,7 @@
                                             <span>-- Click Detect to scan --</span>
                                         </template>
                                         <template x-if="cameraVendorDevices.length > 0">
-                                            <span>-- Select camera --</span>
+                                            <span>Select camera</span>
                                         </template>
                                     </option>
                                     <template x-for="c in cameraVendorDevices" :key="c.id">
@@ -1567,7 +1567,7 @@
                                      from the active indiserver. -->
                                 <select class="equip-select" x-model="equipMountChoice"
                                         x-show="mountDriver === 'indi'">
-                                    <option value="">-- Select device --</option>
+                                    <option value="">Select device</option>
                                     <template x-for="dev in devices" :key="'mnt-'+dev.name">
                                         <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
                                     </template>
@@ -1620,7 +1620,7 @@
                         <div class="equip-card-body">
                             <div class="equip-select-row">
                                 <select class="equip-select" x-model="equipFocuserChoice">
-                                    <option value="">-- Select device --</option>
+                                    <option value="">Select device</option>
                                     <template x-for="dev in devices" :key="'foc-'+dev.name">
                                         <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
                                     </template>
@@ -1651,7 +1651,7 @@
                         <div class="equip-card-body">
                             <div class="equip-select-row">
                                 <select class="equip-select" x-model="equipFilterChoice">
-                                    <option value="">-- Select device --</option>
+                                    <option value="">Select device</option>
                                     <template x-for="dev in devices" :key="'fw-'+dev.name">
                                         <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
                                     </template>
@@ -1793,7 +1793,7 @@
                         <div class="equip-card-body">
                             <div class="equip-select-row">
                                 <select class="equip-select" x-model="equipRotatorChoice">
-                                    <option value="">-- Select device --</option>
+                                    <option value="">Select device</option>
                                     <template x-for="dev in devices" :key="'rot-'+dev.name">
                                         <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
                                     </template>
@@ -1836,7 +1836,7 @@
                         <div class="equip-card-body">
                             <div class="equip-select-row">
                                 <select class="equip-select" x-model="equipFlatChoice">
-                                    <option value="">-- Select device --</option>
+                                    <option value="">Select device</option>
                                     <template x-for="dev in devices" :key="'flat-'+dev.name">
                                         <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
                                     </template>
@@ -1884,7 +1884,7 @@
                         <div class="equip-card-body">
                             <div class="equip-select-row">
                                 <select class="equip-select" x-model="equipDomeChoice">
-                                    <option value="">-- Select device --</option>
+                                    <option value="">Select device</option>
                                     <template x-for="dev in devices" :key="'dome-'+dev.name">
                                         <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
                                     </template>
@@ -1933,7 +1933,7 @@
                         <div class="equip-card-body">
                             <div class="equip-select-row">
                                 <select class="equip-select" x-model="equipWeatherChoice">
-                                    <option value="">-- Select device --</option>
+                                    <option value="">Select device</option>
                                     <template x-for="dev in devices" :key="'wx-'+dev.name">
                                         <option :value="dev.name" x-text="dev.name + (dev.driver ? ' (' + dev.driver + ')' : '')"></option>
                                     </template>

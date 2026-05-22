@@ -11,8 +11,8 @@ The Raspberry Pi (or Windows mini PC) acts as a data broker — controlling hard
 ```
 Browser (laptop / tablet / phone)        Raspberry Pi / Mini PC
 ┌──────────────────────────────┐         ┌──────────────────────────┐
-│  Web UI (Alpine.js)          │◄──HTTP──►│  ASP.NET Core + Kestrel  │
-│  Live preview (Canvas/WebGL) │◄──WS────►│  INDI client (TCP 7624)  │
+│  Web UI (Alpine.js)          │◄──HTTP─►│  ASP.NET Core + Kestrel  │
+│  Live preview (Canvas/WebGL) │◄──WS───►│  INDI client (TCP 7624)  │
 │  Image processing (client)   │         │  Plate solving (ASTAP)   │
 │  Sky explorer                │         │  Sequence engine         │
 └──────────────────────────────┘         │  Live stacking           │

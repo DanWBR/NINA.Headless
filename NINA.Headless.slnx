@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/NINA.Core.Portable/NINA.Core.Portable.csproj" />
     <Project Path="src/NINA.Headless/NINA.Headless.csproj" />

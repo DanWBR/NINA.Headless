@@ -89,6 +89,59 @@ public class FITSReaderFloatTests {
         Assert.That(img.Data[2], Is.EqualTo(65535), "max finite (1.0) → 65535");
     }
 
+    // --- NAXIS=3 RGB cube --------------------------------------------
+
+    [Test]
+    public void Read_Float32_RgbCube_PopulatesAllThreeChannels() {
+        // NAXIS=3, NAXIS3=3, 2×2 image. Plane order is R, G, B.
+        // Auto-rescale runs across the whole buffer so a single global
+        // [min, max] preserves channel balance — verify that here by
+        // checking the relative ordering of the brightest sample in
+        // each plane survives.
+        var fits = BuildFloatRgbFits(2, 2, new float[] {
+            // R plane (dim)
+            0.1f, 0.2f, 0.3f, 0.4f,
+            // G plane (mid)
+            0.4f, 0.5f, 0.6f, 0.7f,
+            // B plane (bright — pins the max)
+            0.7f, 0.8f, 0.9f, 1.0f
+        });
+
+        var img = FITSReader.Read(new MemoryStream(fits));
+
+        Assert.That(img.Properties.Width, Is.EqualTo(2));
+        Assert.That(img.Properties.Height, Is.EqualTo(2));
+        Assert.That(img.Properties.Channels, Is.EqualTo(3));
+        Assert.That(img.Properties.IsColor, Is.True);
+        Assert.That(img.Data.Length, Is.EqualTo(12), "buffer must hold all 3 planes");
+
+        // Global remap: 0.1 → 0, 1.0 → 65535. So the R plane (max 0.4)
+        // stays comparatively dim and the B plane (max 1.0) hits the
+        // top. The relative ordering is the bit we care about for the
+        // thumbnailer to render real colour.
+        int rMax = 0, gMax = 0, bMax = 0;
+        for (int i = 0; i < 4; i++) {
+            if (img.Data[0 + i] > rMax) rMax = img.Data[0 + i];
+            if (img.Data[4 + i] > gMax) gMax = img.Data[4 + i];
+            if (img.Data[8 + i] > bMax) bMax = img.Data[8 + i];
+        }
+        Assert.That(rMax, Is.LessThan(gMax), "R plane should peak below G plane after global remap");
+        Assert.That(gMax, Is.LessThan(bMax), "G plane should peak below B plane after global remap");
+        Assert.That(bMax, Is.EqualTo(65535), "B plane's max sample (1.0) should hit the top");
+    }
+
+    [Test]
+    public void Read_Float32_Naxis2_ChannelsDefaultsToOne() {
+        // Make sure the new NAXIS=3 path doesn't break the existing
+        // mono pipeline. NAXIS=2 must still produce a single-plane
+        // buffer with Channels=1.
+        var fits = BuildFloatFits(2, 2, new float[] { 0f, 0.5f, 0.5f, 1f });
+        var img = FITSReader.Read(new MemoryStream(fits));
+        Assert.That(img.Properties.Channels, Is.EqualTo(1));
+        Assert.That(img.Properties.IsColor, Is.False);
+        Assert.That(img.Data.Length, Is.EqualTo(4));
+    }
+
     // --- Helpers ----------------------------------------------------
 
     /// <summary>
@@ -126,6 +179,50 @@ public class FITSReaderFloatTests {
         var dataBlock = new byte[paddedDataBytes];
         for (int i = 0; i < pixels.Length; i++) {
             var le = BitConverter.GetBytes(pixels[i]);   // little-endian on Intel
+            dataBlock[i * 4 + 0] = le[3];
+            dataBlock[i * 4 + 1] = le[2];
+            dataBlock[i * 4 + 2] = le[1];
+            dataBlock[i * 4 + 3] = le[0];
+        }
+
+        var combined = new byte[headerBlock.Length + dataBlock.Length];
+        Buffer.BlockCopy(headerBlock, 0, combined, 0, headerBlock.Length);
+        Buffer.BlockCopy(dataBlock,   0, combined, headerBlock.Length, dataBlock.Length);
+        return combined;
+    }
+
+    /// <summary>
+    /// Same as BuildFloatFits but emits NAXIS=3 with NAXIS3=3. Pixels
+    /// are plane-sequential: first all of R, then all of G, then all
+    /// of B. Each plane is <paramref name="width"/>×<paramref name="height"/>
+    /// long, so the buffer is 3× the size.
+    /// </summary>
+    private static byte[] BuildFloatRgbFits(int width, int height, float[] pixels) {
+        Assert.That(pixels.Length, Is.EqualTo(width * height * 3),
+            "pixel buffer must be width*height*3 for a 3-plane cube");
+
+        var headerCards = new List<string> {
+            FormatCard("SIMPLE", "T"),
+            FormatCard("BITPIX", "-32"),
+            FormatCard("NAXIS",  "3"),
+            FormatCard("NAXIS1", width.ToString()),
+            FormatCard("NAXIS2", height.ToString()),
+            FormatCard("NAXIS3", "3"),
+            "END" + new string(' ', 77)
+        };
+
+        var headerBlock = new byte[2880];
+        for (int i = 0; i < headerCards.Count; i++) {
+            var bytes = System.Text.Encoding.ASCII.GetBytes(headerCards[i]);
+            Array.Copy(bytes, 0, headerBlock, i * 80, Math.Min(80, bytes.Length));
+        }
+        for (int i = headerCards.Count * 80; i < 2880; i++) headerBlock[i] = (byte)' ';
+
+        int dataBytes = pixels.Length * 4;
+        int paddedDataBytes = ((dataBytes + 2879) / 2880) * 2880;
+        var dataBlock = new byte[paddedDataBytes];
+        for (int i = 0; i < pixels.Length; i++) {
+            var le = BitConverter.GetBytes(pixels[i]);
             dataBlock[i * 4 + 0] = le[3];
             dataBlock[i * 4 + 1] = le[2];
             dataBlock[i * 4 + 2] = le[1];

@@ -14,6 +14,11 @@ public static class FITSReader {
         int naxis = GetIntHeader(headers, "NAXIS", 2);
         int width = GetIntHeader(headers, "NAXIS1", 0);
         int height = GetIntHeader(headers, "NAXIS2", 0);
+        // RGB cubes use NAXIS=3 + NAXIS3=3 (R/G/B planes). Anything
+        // else collapses to a single plane (grayscale or just the
+        // first plane of a multi-frame cube — close enough for v1).
+        int planes = (naxis >= 3) ? GetIntHeader(headers, "NAXIS3", 1) : 1;
+        if (planes != 1 && planes != 3) planes = 1;
         int bzero = GetIntHeader(headers, "BZERO", 0);
         double bscale = GetDoubleHeader(headers, "BSCALE", 1.0);
         string bayerPat = GetStringHeader(headers, "BAYERPAT", "");
@@ -26,14 +31,19 @@ public static class FITSReader {
             _ => BayerPatternEnum.None
         };
 
-        var pixels = ReadPixelData(stream, width, height, bitpix, bzero, bscale);
+        // Read the full buffer covering every plane. For grayscale this
+        // is the existing width*height; for RGB it's 3× larger and
+        // stored plane-sequentially (R first, then G, then B) — the
+        // FITS convention also used by PixInsight, Siril, and astropy.
+        var pixels = ReadPixelData(stream, width, height * planes, bitpix, bzero, bscale);
 
         var props = new ImageProperties {
             Width = width,
             Height = height,
             BitDepth = Math.Abs(bitpix) > 16 ? 16 : Math.Abs(bitpix),
             IsBayered = bayerPattern != BayerPatternEnum.None,
-            BayerPattern = bayerPattern
+            BayerPattern = bayerPattern,
+            Channels = planes
         };
 
         var metaData = ExtractMetaData(headers);

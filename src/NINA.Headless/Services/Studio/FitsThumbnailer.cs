@@ -10,9 +10,10 @@ namespace NINA.Headless.Services.Studio;
 /// including files that were never indexed by STUDIO (an arbitrary
 /// master coming back from PixInsight, for example).
 ///
-/// The output is grayscale, single-page JPEG. Bayer-pattern frames
-/// are still rendered as luminance — same behaviour STUDIO has
-/// always had; full debayer is a STUDIO pipeline step.
+/// Output is grayscale for single-plane (mono) input or RGB for
+/// NAXIS=3 colour cubes (PixInsight / Siril / GraXpert export
+/// convention). Bayer-pattern frames are still rendered as luminance
+/// — full debayer is a STUDIO pipeline step.
 /// </summary>
 public static class FitsThumbnailer {
 
@@ -25,15 +26,20 @@ public static class FitsThumbnailer {
     public static byte[] RenderJpegFromPath(string fitsPath, int maxDim = 256, int quality = 85) {
         using var fs = File.OpenRead(fitsPath);
         var img = FITSReader.Read(fs);
-        return RenderJpegFromBuffer(img.Data, img.Properties.Width, img.Properties.Height,
-            img.Properties.BitDepth, maxDim, quality);
+        var w = img.Properties.Width;
+        var h = img.Properties.Height;
+        var bits = img.Properties.BitDepth;
+        if (img.Properties.IsColor) {
+            return RenderJpegFromRgbPlanes(img.Data, w, h, bits, maxDim, quality);
+        }
+        return RenderJpegFromBuffer(img.Data, w, h, bits, maxDim, quality);
     }
 
     /// <summary>
-    /// Render directly from an in-memory ushort buffer. Used both by
-    /// <see cref="RenderJpegFromPath"/> and by callers that already
-    /// have decoded pixel data (the live-stack preview path, future
-    /// XISF reader, etc.).
+    /// Render directly from an in-memory grayscale ushort buffer.
+    /// Used both by <see cref="RenderJpegFromPath"/> (mono branch) and
+    /// by callers that already have decoded pixel data (live-stack
+    /// preview, future XISF reader, etc.).
     /// </summary>
     public static byte[] RenderJpegFromBuffer(ushort[] pixels, int width, int height,
                                               int bitDepth, int maxDim = 256, int quality = 85) {
@@ -75,6 +81,74 @@ public static class FitsThumbnailer {
             using var rgb = new SKBitmap(newW, newH, SKColorType.Rgba8888, SKAlphaType.Opaque);
             using (var canvas = new SKCanvas(rgb)) canvas.DrawBitmap(drawSrc, 0, 0);
             using var data = rgb.Encode(SKEncodedImageFormat.Jpeg, quality);
+            return data.ToArray();
+        } finally {
+            resized?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Render an RGB colour preview from a plane-sequential ushort
+    /// buffer (R plane, then G plane, then B plane — each
+    /// width*height long). Each channel is auto-stretched
+    /// independently so a stacked OSC integration looks natural
+    /// (per-channel MTF is what most viewers do for FITS RGB cubes).
+    /// </summary>
+    public static byte[] RenderJpegFromRgbPlanes(ushort[] pixels, int width, int height,
+                                                 int bitDepth, int maxDim = 256, int quality = 85) {
+        int planeSize = width * height;
+        if (pixels.Length < planeSize * 3)
+            // Defensive — caller mis-claimed colour. Fall back to mono
+            // so the user at least sees something instead of a crash.
+            return RenderJpegFromBuffer(pixels, width, height, bitDepth, maxDim, quality);
+
+        // Stretch each channel separately. The vendored AutoStretch
+        // doesn't take a stride/offset, so we slice into temporary
+        // buffers. The slices are short-lived; for a 24 MP frame we're
+        // talking ~48 MB peak which the RPi handles fine.
+        var r = new ushort[planeSize];
+        var g = new ushort[planeSize];
+        var b = new ushort[planeSize];
+        Array.Copy(pixels, planeSize * 0, r, 0, planeSize);
+        Array.Copy(pixels, planeSize * 1, g, 0, planeSize);
+        Array.Copy(pixels, planeSize * 2, b, 0, planeSize);
+
+        var rs = NINA.Image.ImageAnalysis.AutoStretch.Apply(r, width, height, bitDepth);
+        var gs = NINA.Image.ImageAnalysis.AutoStretch.Apply(g, width, height, bitDepth);
+        var bs = NINA.Image.ImageAnalysis.AutoStretch.Apply(b, width, height, bitDepth);
+
+        // Interleave into RGBA8888 for Skia. Alpha is opaque.
+        var rgba = new byte[planeSize * 4];
+        for (int i = 0; i < planeSize; i++) {
+            int o = i * 4;
+            rgba[o + 0] = rs[i];     // R
+            rgba[o + 1] = gs[i];     // G
+            rgba[o + 2] = bs[i];     // B
+            rgba[o + 3] = 255;       // A
+        }
+
+        using var color = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque);
+        unsafe {
+            fixed (byte* p = rgba) {
+                color.SetPixels((IntPtr)p);
+            }
+        }
+        using var colorCopy = color.Copy();   // own the backing storage
+
+        double scale = (double)maxDim / Math.Max(colorCopy.Width, colorCopy.Height);
+        if (scale > 1) scale = 1;
+        int newW = Math.Max(1, (int)Math.Round(colorCopy.Width * scale));
+        int newH = Math.Max(1, (int)Math.Round(colorCopy.Height * scale));
+
+        bool needsResize = newW != colorCopy.Width || newH != colorCopy.Height;
+        SKBitmap? resized = needsResize
+            ? colorCopy.Resize(
+                new SKImageInfo(newW, newH, SKColorType.Rgba8888, SKAlphaType.Opaque),
+                SKSamplingOptions.Default)
+            : null;
+        try {
+            var src = resized ?? colorCopy;
+            using var data = src.Encode(SKEncodedImageFormat.Jpeg, quality);
             return data.ToArray();
         } finally {
             resized?.Dispose();

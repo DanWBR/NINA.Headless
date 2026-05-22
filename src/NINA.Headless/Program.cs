@@ -51,6 +51,7 @@ builder.Services.AddSingleton<NINA.Headless.Services.Studio.BatchStackingService
 builder.Services.AddSingleton<NINA.Headless.Services.Studio.FrameOperationsService>();
 builder.Services.AddSingleton<FileBrowserService>();
 builder.Services.AddSingleton<NINA.Headless.Services.External.SirilService>();
+builder.Services.AddSingleton<NINA.Headless.Services.External.GraXpertService>();
 builder.Services.AddHostedService<MdnsService>();
 builder.Services.AddSingleton<RelayClient>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RelayClient>());
@@ -94,6 +95,7 @@ app.MapImageEndpoints();
 app.MapStudioEndpoints();
 app.MapFilesEndpoints();
 app.MapSirilEndpoints();
+app.MapGraXpertEndpoints();
 
 // Live stacking + INDI
 app.MapLiveStackEndpoints();

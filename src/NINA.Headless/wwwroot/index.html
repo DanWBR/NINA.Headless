@@ -2752,6 +2752,25 @@
                             :disabled="files.selectedPaths.length !== 1">✏ Rename</button>
                     <button class="btn btn-sm btn-danger" @click="filesDelete()"
                             :disabled="files.selectedPaths.length === 0">🗑 Delete</button>
+                    <!-- GraXpert dropdown: only when binary detected.
+                         BGE is always offered; decon/denoise are gated
+                         on the v3.0+ flag from /api/graxpert/status. -->
+                    <span x-show="graxpert.status?.available" style="display:inline-flex;gap:4px">
+                        <button class="btn btn-sm"
+                                :disabled="files.selectedPaths.length === 0"
+                                @click="graxpertOpenModal('background-extraction')"
+                                title="Remove gradient with GraXpert">🌅 BGE</button>
+                        <button class="btn btn-sm"
+                                x-show="graxpert.status?.supportsDeconvolution"
+                                :disabled="files.selectedPaths.length === 0"
+                                @click="graxpertOpenModal('deconvolution')"
+                                title="Sharpen with GraXpert deconvolution">✨ Decon</button>
+                        <button class="btn btn-sm"
+                                x-show="graxpert.status?.supportsDenoising"
+                                :disabled="files.selectedPaths.length === 0"
+                                @click="graxpertOpenModal('denoising')"
+                                title="Reduce noise with GraXpert">🔇 Denoise</button>
+                    </span>
                     <span style="flex:1"></span>
                     <button class="btn btn-sm btn-primary" @click="filesSetStudioRoot()"
                             :disabled="!filesSelectedDir()"
@@ -3017,18 +3036,75 @@
                         </div>
                     </div>
 
-                    <!-- GraXpert row (status only for now; full controls land in F4/F5) -->
+                    <!-- GraXpert row -->
                     <div class="external-tool-row">
                         <div class="external-tool-head">
                             <strong>GraXpert</strong>
-                            <span class="external-tool-status idle">Coming next</span>
+                            <span class="external-tool-status"
+                                  :class="graxpert.status?.available ? 'ok' : 'idle'"
+                                  x-text="graxpert.status?.available
+                                          ? ('✓ Detected v' + (graxpert.status.version || '?')
+                                             + (graxpert.status?.supportsDeconvolution
+                                                ? ' — BGE + Decon + Denoise'
+                                                : ' — BGE only'))
+                                          : '✗ Not detected'"></span>
+                            <button class="btn btn-sm" @click="graxpertRedetect()">Re-detect</button>
                         </div>
-                        <p class="hint" style="margin-top:6px;margin-bottom:0">
-                            Background extraction, deconvolution, and denoising integration
-                            arrives in the next iteration. Install GraXpert v3.0+ from
-                            <a href="https://www.graxpert.com" target="_blank" rel="noopener">graxpert.com</a>
-                            in the meantime.
-                        </p>
+                        <div class="external-tool-body">
+                            <label>
+                                Path override
+                                <input type="text" class="input-md" style="width:100%;max-width:520px"
+                                       x-model="settings.graxpertPath"
+                                       @change="saveSettingsToServer(); graxpertRedetect()"
+                                       placeholder="(auto) e.g. C:\Program Files\GraXpert\GraXpert.exe">
+                            </label>
+                            <p class="hint" style="margin-top:6px"
+                               x-show="graxpert.status?.available">
+                                <span x-text="graxpert.status?.binaryPath || ''"></span>
+                            </p>
+                            <p class="hint text-warn" style="margin-top:6px"
+                               x-show="!graxpert.status?.available">
+                                Install GraXpert v3.0+ from
+                                <a href="https://www.graxpert.com" target="_blank" rel="noopener">graxpert.com</a>
+                                — Deconvolution + Denoising require v3.0+, BGE works on v2.x too.
+                            </p>
+
+                            <!-- Default tuning shown only when detected; saved into the
+                                 profile so runs without per-job overrides use these. -->
+                            <details style="margin-top:10px" x-show="graxpert.status?.available">
+                                <summary class="hint" style="cursor:pointer">Default tuning</summary>
+                                <div style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">
+                                    <label>BGE smoothing
+                                        <input type="number" class="input-sm" step="0.05" min="0" max="1"
+                                               x-model.number="settings.graxpertBgeSmoothing"
+                                               @change="saveSettingsToServer()">
+                                    </label>
+                                    <label>BGE correction
+                                        <select class="input-sm"
+                                                x-model="settings.graxpertBgeCorrection"
+                                                @change="saveSettingsToServer()">
+                                            <option value="Subtraction">Subtraction</option>
+                                            <option value="Division">Division</option>
+                                        </select>
+                                    </label>
+                                    <label x-show="graxpert.status?.supportsDeconvolution">Decon strength
+                                        <input type="number" class="input-sm" step="0.05" min="0" max="1"
+                                               x-model.number="settings.graxpertDeconStrength"
+                                               @change="saveSettingsToServer()">
+                                    </label>
+                                    <label x-show="graxpert.status?.supportsDeconvolution">PSF size
+                                        <input type="number" class="input-sm" step="0.5" min="0.5" max="20"
+                                               x-model.number="settings.graxpertDeconPsfSize"
+                                               @change="saveSettingsToServer()">
+                                    </label>
+                                    <label x-show="graxpert.status?.supportsDenoising">Denoise strength
+                                        <input type="number" class="input-sm" step="0.05" min="0" max="1"
+                                               x-model.number="settings.graxpertDenoiseStrength"
+                                               @change="saveSettingsToServer()">
+                                    </label>
+                                </div>
+                            </details>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3265,6 +3341,100 @@
                 <button class="btn btn-primary"
                         x-show="!siril.currentJob"
                         @click="sirilStartRun()">Start</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GraXpert run modal — single modal handles BGE, Decon, and
+         Denoise. The op chosen at open() time gates which controls
+         render so the user doesn't see Decon sliders when running BGE. -->
+    <div class="siril-modal" x-show="graxpert.modalOpen" x-cloak
+         @click.self="graxpertCloseModal()"
+         @keydown.escape.window="graxpertCloseModal()">
+        <div class="siril-modal-frame">
+            <h2>
+                <span x-show="graxpert.modalOp === 'background-extraction'">🌅 GraXpert — Remove gradient</span>
+                <span x-show="graxpert.modalOp === 'deconvolution'">✨ GraXpert — Deconvolution</span>
+                <span x-show="graxpert.modalOp === 'denoising'">🔇 GraXpert — Denoise</span>
+            </h2>
+
+            <p class="hint">
+                <span x-text="graxpert.modalPaths.length + ' file(s) selected.'"></span>
+                Output: <code x-text="'<input>' + graxpertSuffix(graxpert.modalOp) + '.fits sibling to each input'"></code>
+            </p>
+            <p class="hint text-warn"
+               x-show="(graxpert.modalOp === 'deconvolution' || graxpert.modalOp === 'denoising')
+                       && graxpertPathsLookLikeLights()">
+                ⚠ Decon and Denoise are best applied to integrated masters,
+                not individual lights. The selection looks like lights —
+                results may degrade SNR rather than improve it.
+            </p>
+
+            <!-- BGE controls -->
+            <div class="siril-modal-row" x-show="graxpert.modalOp === 'background-extraction'">
+                <label>Smoothing
+                    <input type="number" class="input-sm" step="0.05" min="0" max="1"
+                           x-model.number="graxpert.modalSmoothing">
+                </label>
+                <label>Correction
+                    <select class="input-sm" x-model="graxpert.modalCorrection">
+                        <option value="Subtraction">Subtraction</option>
+                        <option value="Division">Division</option>
+                    </select>
+                </label>
+                <label class="seq-dither-checkbox" style="align-self:end">
+                    <input type="checkbox" x-model="graxpert.modalSaveBackground">
+                    Save background model
+                </label>
+            </div>
+
+            <!-- Decon controls -->
+            <div class="siril-modal-row" x-show="graxpert.modalOp === 'deconvolution'">
+                <label>Strength
+                    <input type="number" class="input-sm" step="0.05" min="0" max="1"
+                           x-model.number="graxpert.modalDeconStrength">
+                </label>
+                <label>PSF size (px)
+                    <input type="number" class="input-sm" step="0.5" min="0.5" max="20"
+                           x-model.number="graxpert.modalDeconPsfSize">
+                </label>
+            </div>
+
+            <!-- Denoise controls -->
+            <div class="siril-modal-row" x-show="graxpert.modalOp === 'denoising'">
+                <label>Strength
+                    <input type="number" class="input-sm" step="0.05" min="0" max="1"
+                           x-model.number="graxpert.modalDenoiseStrength">
+                </label>
+            </div>
+
+            <!-- Live progress -->
+            <div class="siril-modal-progress" x-show="graxpert.currentJob">
+                <div class="siril-modal-progress-bar">
+                    <div class="siril-modal-progress-fill"
+                         :style="'width: ' + graxpertJobPercent() + '%'"></div>
+                </div>
+                <div class="siril-modal-progress-meta">
+                    <span x-text="(graxpert.currentJob?.done || 0) + ' / ' + (graxpert.currentJob?.total || 0) + ' done'"></span>
+                    <span x-text="(graxpert.currentJob?.failed || 0) + ' failed'"></span>
+                </div>
+                <p class="hint" x-show="graxpert.currentJob?.currentlyProcessing?.length > 0">
+                    Processing:
+                    <code x-text="graxpert.currentJob.currentlyProcessing.map(p =>
+                        p.split(/[\\/]+/).pop()).join(', ')"></code>
+                </p>
+            </div>
+
+            <div class="siril-modal-actions">
+                <button class="btn"
+                        x-show="!graxpert.currentJob || graxpert.currentJob.completedAt"
+                        @click="graxpertCloseModal()">Close</button>
+                <button class="btn btn-danger"
+                        x-show="graxpert.currentJob && !graxpert.currentJob.completedAt"
+                        @click="graxpertCancelCurrent()">Cancel job</button>
+                <button class="btn btn-primary"
+                        x-show="!graxpert.currentJob"
+                        @click="graxpertStartRun()">Start</button>
             </div>
         </div>
     </div>

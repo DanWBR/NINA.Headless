@@ -82,7 +82,13 @@ function ninaApp() {
             // Empty = auto-detect (BinaryLocator on the server picks
             // the right path for the host OS).
             sirilPath: '',
-            sirilScriptsDir: ''
+            sirilScriptsDir: '',
+            graxpertPath: '',
+            graxpertBgeSmoothing: 1.0,
+            graxpertBgeCorrection: 'Subtraction',
+            graxpertDeconStrength: 0.5,
+            graxpertDeconPsfSize: 4.0,
+            graxpertDenoiseStrength: 0.5
         },
 
         // Connection state
@@ -371,6 +377,23 @@ function ninaApp() {
             currentJob: null,
             _pollTimer: null
         },
+        // GraXpert state mirrors Siril's. modalOp distinguishes which
+        // of the three operations the modal is currently driving.
+        graxpert: {
+            status: null,        // { available, binaryPath, version, supportsDeconvolution, supportsDenoising }
+            modalOpen: false,
+            modalOp: 'background-extraction',
+            modalPaths: [],
+            modalSmoothing: 1.0,
+            modalCorrection: 'Subtraction',
+            modalSaveBackground: false,
+            modalDeconStrength: 0.5,
+            modalDeconPsfSize: 4.0,
+            modalDenoiseStrength: 0.5,
+            currentJobId: null,
+            currentJob: null,
+            _pollTimer: null
+        },
 
         // d3-celestial Sky Viewer (offline, BSD-3-Clause).
         // Always renders the live sky from the observer's location at the
@@ -544,6 +567,7 @@ function ninaApp() {
             this.loadMfSettings();
             this.loadEndActions();
             this.loadSirilStatus();
+            this.loadGraxpertStatus();
             this.loadAtlasTypes();
             this.loadRigs();
             this.loadCameraDrivers();
@@ -1152,6 +1176,12 @@ function ninaApp() {
                     this.settings.preferAdvancedSequencer = !!data.preferAdvancedSequencer;
                     this.settings.sirilPath = data.sirilPath || '';
                     this.settings.sirilScriptsDir = data.sirilScriptsDir || '';
+                    this.settings.graxpertPath = data.graxpertPath || '';
+                    this.settings.graxpertBgeSmoothing = data.graxpertBgeSmoothing ?? 1.0;
+                    this.settings.graxpertBgeCorrection = data.graxpertBgeCorrection || 'Subtraction';
+                    this.settings.graxpertDeconStrength = data.graxpertDeconStrength ?? 0.5;
+                    this.settings.graxpertDeconPsfSize = data.graxpertDeconPsfSize ?? 4.0;
+                    this.settings.graxpertDenoiseStrength = data.graxpertDenoiseStrength ?? 0.5;
                     // First time the app boots, honour the user's preferred sequencer flavour.
                     if (!this._sequencerTabBootHandled) {
                         this._sequencerTabBootHandled = true;
@@ -4329,7 +4359,13 @@ function ninaApp() {
                         imageNamePattern: this.settings.imageNamePattern,
                         preferAdvancedSequencer: this.settings.preferAdvancedSequencer,
                         sirilPath: this.settings.sirilPath,
-                        sirilScriptsDir: this.settings.sirilScriptsDir
+                        sirilScriptsDir: this.settings.sirilScriptsDir,
+                        graxpertPath: this.settings.graxpertPath,
+                        graxpertBgeSmoothing: this.settings.graxpertBgeSmoothing,
+                        graxpertBgeCorrection: this.settings.graxpertBgeCorrection,
+                        graxpertDeconStrength: this.settings.graxpertDeconStrength,
+                        graxpertDeconPsfSize: this.settings.graxpertDeconPsfSize,
+                        graxpertDenoiseStrength: this.settings.graxpertDenoiseStrength
                     })
                 });
             } catch (e) { }
@@ -5052,6 +5088,144 @@ function ninaApp() {
             try {
                 await this.apiPost('/api/siril/jobs/'
                     + encodeURIComponent(this.siril.currentJobId) + '/cancel');
+                this.toast('Cancellation requested', 'info');
+            } catch (e) {
+                this.toast('Cancel failed: ' + (e.message || ''), 'error');
+            }
+        },
+
+        // --- External tools: GraXpert ----------------------------------
+
+        async loadGraxpertStatus() {
+            try {
+                this.graxpert.status = await this.apiGet('/api/graxpert/status');
+            } catch (e) {
+                this.graxpert.status = { available: false };
+            }
+        },
+
+        async graxpertRedetect() {
+            try {
+                const r = await this.apiPost('/api/graxpert/redetect');
+                this.graxpert.status = r;
+                this.toast(r.available
+                    ? 'GraXpert detected: v' + (r.version || '?')
+                    : 'GraXpert not found — check the path override', r.available ? 'ok' : 'warn');
+            } catch (e) {
+                this.toast('GraXpert detection failed: ' + (e.message || ''), 'error');
+            }
+        },
+
+        // Open the GraXpert batch modal for the operation requested
+        // (BGE / Decon / Denoise). Defaults pulled from the profile
+        // so the modal already has sensible values per op.
+        graxpertOpenModal(operation) {
+            if (!this.graxpert.status?.available) {
+                this.toast('GraXpert is not installed on this host', 'warn');
+                return;
+            }
+            // Source paths come from FILES selection (when called from
+            // the FILES toolbar). Studio + Autorun call this with
+            // explicit prefilledPaths in F7.
+            this.graxpert.modalPaths = (this.files?.selectedPaths || []).slice();
+            this.graxpert.modalOp = operation;
+            this.graxpert.modalSmoothing = this.settings.graxpertBgeSmoothing;
+            this.graxpert.modalCorrection = this.settings.graxpertBgeCorrection;
+            this.graxpert.modalSaveBackground = false;
+            this.graxpert.modalDeconStrength = this.settings.graxpertDeconStrength;
+            this.graxpert.modalDeconPsfSize = this.settings.graxpertDeconPsfSize;
+            this.graxpert.modalDenoiseStrength = this.settings.graxpertDenoiseStrength;
+            this.graxpert.currentJobId = null;
+            this.graxpert.currentJob = null;
+            this.graxpert.modalOpen = true;
+        },
+
+        graxpertCloseModal() {
+            this.graxpert.modalOpen = false;
+            if (this.graxpert._pollTimer) {
+                clearInterval(this.graxpert._pollTimer);
+                this.graxpert._pollTimer = null;
+            }
+        },
+
+        // Heuristic: if the paths sit under a "lights" folder we
+        // warn the user that decon/denoise on individual lights is
+        // usually a mistake (they're best on integrated masters).
+        graxpertPathsLookLikeLights() {
+            return this.graxpert.modalPaths.some(p => /[\\/]lights[\\/]/i.test(p));
+        },
+
+        graxpertSuffix(op) {
+            return op === 'background-extraction' ? '_bge'
+                 : op === 'deconvolution'        ? '_decon'
+                 : op === 'denoising'            ? '_denoise'
+                 : '_gx';
+        },
+
+        graxpertJobPercent() {
+            const j = this.graxpert.currentJob;
+            if (!j || !j.total) return 0;
+            return Math.min(100, Math.round(100 * (j.done + j.failed) / j.total));
+        },
+
+        async graxpertStartRun() {
+            if (this.graxpert.modalPaths.length === 0) {
+                this.toast('No files selected', 'warn');
+                return;
+            }
+            try {
+                const r = await this.apiPost('/api/graxpert/run', null, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        paths: this.graxpert.modalPaths,
+                        operation: this.graxpert.modalOp,
+                        // Backend reads the operation-specific fields
+                        // it needs; passing them all is cheap + harmless.
+                        smoothing: this.graxpert.modalSmoothing,
+                        correction: this.graxpert.modalCorrection,
+                        saveBackground: this.graxpert.modalSaveBackground,
+                        deconStrength: this.graxpert.modalDeconStrength,
+                        deconPsfSize: this.graxpert.modalDeconPsfSize,
+                        denoiseStrength: this.graxpert.modalDenoiseStrength
+                    })
+                });
+                this.graxpert.currentJobId = r.jobId;
+                this.toast('GraXpert batch started: ' + r.jobId, 'ok');
+                this._graxpertStartPolling();
+            } catch (e) {
+                this.toast('GraXpert start failed: ' + (e.message || ''), 'error');
+            }
+        },
+
+        _graxpertStartPolling() {
+            if (this.graxpert._pollTimer) clearInterval(this.graxpert._pollTimer);
+            this.graxpert._pollTimer = setInterval(async () => {
+                if (!this.graxpert.currentJobId) return;
+                try {
+                    const job = await this.apiGet('/api/graxpert/jobs/'
+                        + encodeURIComponent(this.graxpert.currentJobId));
+                    this.graxpert.currentJob = job;
+                    if (job?.completedAt) {
+                        clearInterval(this.graxpert._pollTimer);
+                        this.graxpert._pollTimer = null;
+                        const msg = `GraXpert done — ${job.done} ok, ${job.failed} failed`;
+                        this.toast(msg, job.failed ? 'warn' : 'ok');
+                        if (this.tab === 'files') {
+                            // Refresh the FILES listing so new _bge/_decon/_denoise
+                            // siblings show up immediately.
+                            try { await this.filesReload(); } catch {}
+                        }
+                    }
+                } catch (e) { /* transient — keep polling */ }
+            }, 1500);
+        },
+
+        async graxpertCancelCurrent() {
+            if (!this.graxpert.currentJobId) return;
+            try {
+                await this.apiPost('/api/graxpert/jobs/'
+                    + encodeURIComponent(this.graxpert.currentJobId) + '/cancel');
                 this.toast('Cancellation requested', 'info');
             } catch (e) {
                 this.toast('Cancel failed: ' + (e.message || ''), 'error');

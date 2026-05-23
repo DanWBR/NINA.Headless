@@ -3737,11 +3737,14 @@ function ninaApp() {
             const pt = this._projectCelestial(raHours * 15, decDeg);
             if (!pt) return;
             const [cx, cy] = pt;
-            const ctn = Celestial.container;
+            const og = this._fovOverlayGroup();
+            if (!og) return;
             // Small crosshair + dot at the FOV center — always visible
             // regardless of zoom, so the user can tell where the
-            // (possibly sub-pixel) FOV rectangle is anchored.
-            const g = ctn.append('g').attr('class', className);
+            // (possibly sub-pixel) FOV rectangle is anchored. Drawn
+            // inside the dedicated overlay group so it stays above
+            // every built-in map layer.
+            const g = og.append('g').attr('class', className);
             g.append('circle').attr('cx', cx).attr('cy', cy).attr('r', 3)
                 .style('fill', color).style('stroke', '#fff')
                 .style('stroke-width', 0.5);
@@ -3751,6 +3754,26 @@ function ninaApp() {
             g.append('line').attr('x1', cx).attr('y1', cy - 8)
                 .attr('x2', cx).attr('y2', cy + 8)
                 .style('stroke', color).style('stroke-width', 1);
+        },
+
+        // Get-or-create a dedicated <g> at the END of the celestial
+        // container's children, so SVG painter's algorithm renders our
+        // overlays on top of every built-in layer (stars, dsos,
+        // constellations, etc.) — d3-celestial's user-layer redraws
+        // run during the full redraw cycle but some builtins repaint
+        // after, which left the FOV rectangles + markers buried under
+        // the constellation lines.
+        _fovOverlayGroup() {
+            const ctn = Celestial.container;
+            if (!ctn) return null;
+            let g = ctn.select('g.fov-overlay-group');
+            if (g.empty()) {
+                g = ctn.append('g').attr('class', 'fov-overlay-group');
+            }
+            // raise() moves the element to the END of its parent's
+            // children list = top of paint order. Cheap, idempotent.
+            g.raise();
+            return g;
         },
 
         _ensureFovLayers() {
@@ -3764,15 +3787,20 @@ function ninaApp() {
                 Celestial.add({
                     type: 'line',
                     callback: () => {
-                        Celestial.container.selectAll('.fov-mount').remove();
-                        Celestial.container.selectAll('.fov-mount-mark').remove();
+                        const og = self._fovOverlayGroup();
+                        if (og) {
+                            og.selectAll('.fov-mount').remove();
+                            og.selectAll('.fov-mount-mark').remove();
+                        }
                     },
                     redraw: () => {
-                        Celestial.container.selectAll('.fov-mount').remove();
-                        Celestial.container.selectAll('.fov-mount-mark').remove();
+                        const og = self._fovOverlayGroup();
+                        if (!og) return;
+                        og.selectAll('.fov-mount').remove();
+                        og.selectAll('.fov-mount-mark').remove();
                         const g = self._fovMountGeo;
                         if (!g) return;
-                        Celestial.container.selectAll('.fov-mount')
+                        og.selectAll('.fov-mount')
                             .data(g.features).enter().append('path')
                             .attr('class', 'fov-mount')
                             .attr('d', Celestial.map(g))
@@ -3795,17 +3823,22 @@ function ninaApp() {
                 Celestial.add({
                     type: 'line',
                     callback: () => {
-                        Celestial.container.selectAll('.fov-target').remove();
-                        Celestial.container.selectAll('.fov-target-mark').remove();
+                        const og = self._fovOverlayGroup();
+                        if (og) {
+                            og.selectAll('.fov-target').remove();
+                            og.selectAll('.fov-target-mark').remove();
+                        }
                     },
                     redraw: () => {
-                        Celestial.container.selectAll('.fov-target').remove();
-                        Celestial.container.selectAll('.fov-target-mark').remove();
+                        const og = self._fovOverlayGroup();
+                        if (!og) return;
+                        og.selectAll('.fov-target').remove();
+                        og.selectAll('.fov-target-mark').remove();
                         if (!self.aladinShowFov) return;
                         const c = self._skyMapCenter();
                         if (!c) return;
                         const g = self._buildFovRing(c.raHours, c.decDeg);
-                        Celestial.container.selectAll('.fov-target')
+                        og.selectAll('.fov-target')
                             .data(g.features).enter().append('path')
                             .attr('class', 'fov-target')
                             .attr('d', Celestial.map(g))

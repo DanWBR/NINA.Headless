@@ -147,7 +147,27 @@ app.Services.GetRequiredService<LiveStackTriggersService>();
 }
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+// CLST-2: the WASM AppBundle includes extensions ASP.NET Core's
+// default FileExtensionContentTypeProvider doesn't know about
+// (.dat for ICU data, .blat / .dll for Brotli-compressed managed
+// assemblies). Without these mappings the static-file middleware
+// returns 404, the browser's SRI check sees an empty body, and
+// the dotnet runtime fails to boot with cascading "integrity
+// checks failed" errors. ServeUnknownFileTypes scoped via a
+// custom content-type map is cleaner than blanket allowing
+// everything — keeps obscure extensions outside /js/wasm/ still 404.
+var contentTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+contentTypes.Mappings[".dat"] = "application/octet-stream";
+contentTypes.Mappings[".blat"] = "application/octet-stream";
+contentTypes.Mappings[".dll"] = "application/octet-stream";
+contentTypes.Mappings[".pdb"] = "application/octet-stream";
+contentTypes.Mappings[".webcil"] = "application/octet-stream";
+contentTypes.Mappings[".wasm"] = "application/wasm";
+contentTypes.Mappings[".br"] = "application/octet-stream";
+contentTypes.Mappings[".gz"] = "application/octet-stream";
+app.UseStaticFiles(new StaticFileOptions {
+    ContentTypeProvider = contentTypes
+});
 app.UseWebSockets();
 
 // ----- PH2X-7: /phd2-gui/* reverse-proxy → xpra HTML5 client -----

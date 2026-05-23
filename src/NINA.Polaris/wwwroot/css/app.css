@@ -127,15 +127,17 @@ html, body {
     color: transparent;
 }
 .brand-tag {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 1.5px;
-    color: var(--accent);
-    padding: 2px 6px;
-    border: 1px solid rgba(33, 150, 243, 0.4);
-    border-radius: 4px;
+    /* Match the N.I.N.A. wordmark — same gradient, smaller, no
+       background or border. Reads as a sub-name rather than a pill. */
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 2px;
     line-height: 1;
-    background: rgba(33, 150, 243, 0.08);
+    background: linear-gradient(90deg, #4fc3f7 0%, #2196f3 60%, #7e57c2 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
 }
 .brand-version {
     font-size: 10px;

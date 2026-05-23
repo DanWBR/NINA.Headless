@@ -1558,9 +1558,19 @@ function ninaApp() {
 
         updateFov() {
             const { sensorWidth: sw, sensorHeight: sh, focalLength: fl } = this.settings;
-            if (fl > 0) {
-                this.fov.width = 2 * Math.atan(sw / (2 * fl)) * (180 / Math.PI);
+            if (fl > 0 && sw > 0 && sh > 0) {
+                // Standard small-angle FOV from focal length + sensor:
+                //   FOV = 2 * atan(sensor / (2 * focal length))
+                // Result in radians, convert to degrees.
+                this.fov.width  = 2 * Math.atan(sw / (2 * fl)) * (180 / Math.PI);
                 this.fov.height = 2 * Math.atan(sh / (2 * fl)) * (180 / Math.PI);
+            }
+            // Push the new dimensions into the sky overlay so the
+            // rectangle resizes the moment the user edits focal length
+            // in the Main Telescope card or a new camera connects.
+            if (this.tab === 'sky' && this._celestialReady
+                && typeof this.updateSkyCameraFov === 'function') {
+                this.updateSkyCameraFov();
             }
         },
 
@@ -3766,8 +3776,8 @@ function ninaApp() {
                             .data(g.features).enter().append('path')
                             .attr('class', 'fov-mount')
                             .attr('d', Celestial.map(g))
-                            .style('stroke', '#3b82f6').style('stroke-width', 2)
-                            .style('fill', 'none');
+                            .style('stroke', '#3b82f6').style('stroke-width', 2.5)
+                            .style('fill', 'rgba(59,130,246,0.12)');
                         const a = self._fovMountAnchor;
                         if (a) self._drawFovCenterMarker(
                             'fov-mount-mark', a.ra, a.dec, '#3b82f6');
@@ -3789,9 +3799,9 @@ function ninaApp() {
                             .data(g.features).enter().append('path')
                             .attr('class', 'fov-target')
                             .attr('d', Celestial.map(g))
-                            .style('stroke', '#ef4444').style('stroke-width', 2)
-                            .style('stroke-dasharray', '4 3')
-                            .style('fill', 'none');
+                            .style('stroke', '#ef4444').style('stroke-width', 2.5)
+                            .style('stroke-dasharray', '5 3')
+                            .style('fill', 'rgba(239,68,68,0.10)');
                         const a = self._fovTargetAnchor;
                         if (a) self._drawFovCenterMarker(
                             'fov-target-mark', a.ra, a.dec, '#ef4444');
@@ -7643,6 +7653,13 @@ function ninaApp() {
                         this.settings.sensorWidth = eq.camera.sensorWidthMm;
                         this.settings.sensorHeight = eq.camera.sensorHeightMm;
                         this.updateFov();
+                        // Refresh the sky overlay so the rectangle resizes
+                        // immediately when a camera connects with a sensor
+                        // size different from the profile fallback.
+                        if (this.tab === 'sky'
+                            && typeof this.updateSkyCameraFov === 'function') {
+                            this.updateSkyCameraFov();
+                        }
                     }
                 }
                 // Sample temperature history at most once every 5s

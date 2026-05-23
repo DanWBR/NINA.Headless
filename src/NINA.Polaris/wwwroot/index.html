@@ -2395,7 +2395,7 @@
                         </span>
                     </label>
                     <label class="seq-dither-checkbox"
-                           title="Blue rectangle: mount's current pointing. Red dashed: planning target (the DSO you searched).">
+                           title="Blue rectangle: mount's current pointing. Red dashed: planning target (the DSO you searched). Size is computed from Main Telescope focal length + connected camera sensor.">
                         <input type="checkbox" x-model="aladinShowFov" @change="updateSkyCameraFov()">
                         Show camera FOV
                         <span x-show="aladinShowFov" class="text-muted" style="margin-left:6px;font-size:10px">
@@ -2404,6 +2404,10 @@
                             <span style="display:inline-block;width:10px;height:0;border-top:2px dashed #ef4444;vertical-align:middle"></span>
                             target
                         </span>
+                        <span x-show="aladinShowFov && fov.width > 0" class="text-muted"
+                              style="margin-left:6px;font-size:10px"
+                              :title="'sensor ' + (settings.sensorWidth?.toFixed(1) || '?') + '×' + (settings.sensorHeight?.toFixed(1) || '?') + ' mm · focal ' + (settings.focalLength || '?') + ' mm'"
+                              x-text="fov.width.toFixed(2) + '° × ' + fov.height.toFixed(2) + '°'"></span>
                     </label>
                     <button class="btn btn-sm" @click="skyGoToMount()" :disabled="!mount.connected">Center on mount</button>
                     <span class="muted" style="font-size:11px;margin-left:auto">

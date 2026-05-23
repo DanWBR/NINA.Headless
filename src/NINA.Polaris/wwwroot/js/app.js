@@ -1334,6 +1334,18 @@ function ninaApp() {
 
             gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
+            // One-shot diagnostic — captures the GL canvas dims +
+            // any pending error after the first real frame so we
+            // can confirm in DevTools that the GPU side actually
+            // ran (vs the bitmap being lost between drawArrays and
+            // the fan-out drawImage).
+            if (!this._loggedWebGLRender) {
+                this._loggedWebGLRender = true;
+                const err = gl.getError();
+                console.log('[Polaris] WebGL render OK · liveCanvas=' + canvas.width + 'x' + canvas.height
+                    + ' · srcTex=' + width + 'x' + height + ' · glError=0x' + err.toString(16));
+            }
+
             // GPU bitmap is ready in liveCanvas. Fan it out (with proper
             // scale-to-container) onto every visible canvas so the user
             // sees the colour-debayered + stretched result on whatever
@@ -1656,21 +1668,47 @@ function ninaApp() {
         _fanOutFrameToCanvases(src, srcW, srcH) {
             const targets = ['liveCanvas', 'previewCanvas', 'focusCanvas',
                              'videoCaptureCanvas', 'slewPreviewCanvas'];
+            const skipLive = (src && src.id === 'liveCanvas');   // src IS liveCanvas → don't blit-to-self
+            // Diagnostic accumulator — one log entry per fan-out the
+            // first time, then once per 60 fan-outs (so a video stream
+            // doesn't spam but we still get periodic confirmation).
+            const debugThisCall = !this._loggedFanout
+                || (++this._fanoutCounter % 60 === 0);
+            const report = debugThisCall ? [] : null;
+            this._loggedFanout = true;
+            this._fanoutCounter = this._fanoutCounter || 0;
+
             for (const id of targets) {
+                if (skipLive && id === 'liveCanvas') {
+                    if (report) report.push(id + '=src');
+                    continue;
+                }
                 const canvas = document.getElementById(id);
-                if (!canvas) continue;
+                if (!canvas) { if (report) report.push(id + '=missing'); continue; }
                 const container = canvas.parentElement;
-                if (!container) continue;
+                if (!container) { if (report) report.push(id + '=noparent'); continue; }
                 const cw = container.clientWidth;
                 const ch = container.clientHeight;
-                if (cw <= 0 || ch <= 0) continue;
+                if (cw <= 0 || ch <= 0) {
+                    if (report) report.push(id + '=hidden(' + cw + 'x' + ch + ')');
+                    continue;
+                }
                 const scale = Math.min(cw / srcW, ch / srcH, 1);
                 canvas.width  = Math.round(srcW * scale);
                 canvas.height = Math.round(srcH * scale);
-                const ctx = canvas.getContext('2d');
-                ctx.imageSmoothingEnabled = true;
-                ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+                try {
+                    const ctx = canvas.getContext('2d');
+                    ctx.imageSmoothingEnabled = true;
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+                    if (report) report.push(id + '=drew(' + canvas.width + 'x' + canvas.height + ')');
+                } catch (e) {
+                    if (report) report.push(id + '=err(' + e.message + ')');
+                }
+            }
+            if (report) {
+                console.log('[Polaris] fanout #' + this._fanoutCounter + ' src='
+                    + srcW + 'x' + srcH + ' → ' + report.join(' '));
             }
         },
 

@@ -4213,8 +4213,21 @@ function ninaApp() {
             if (!c) return;
             const steps = this.guider.recentSteps || [];
             c.data.labels = steps.map((_, i) => i);
-            c.data.datasets[0].data = steps.map(s => s.ra);
-            c.data.datasets[1].data = steps.map(s => s.dec);
+            // Coerce to numbers + filter NaN — protects against the
+            // chart silently going blank if a step arrives without
+            // raArcsec/decArcsec (e.g. before pixel scale is known).
+            c.data.datasets[0].data = steps.map(s => Number(s.ra) || 0);
+            c.data.datasets[1].data = steps.map(s => Number(s.dec) || 0);
+            // Defensive resize: when the chart was created the canvas
+            // was inside x-show="guider.connected" which started as
+            // display:none → Chart.js measured 0x0 and never auto-
+            // rescaled when the panel later became visible. Without
+            // this call the plot area stays at its initial size and
+            // the line traces fall outside the clip region (Y axis
+            // labels still render so it looks like a working but
+            // empty chart). resize() re-measures the parent and
+            // refits before the next draw.
+            c.resize();
             c.update('none');
         },
 

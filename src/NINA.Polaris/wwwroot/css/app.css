@@ -710,6 +710,12 @@ label select.input-sm {
     flex-direction: column;
     gap: 8px;
     min-width: 160px;
+    /* Cap so values don't stretch to the right edge of the viewport
+       on wide monitors — info-row uses justify-content: space-between,
+       so the strong value would otherwise float ~1500px from its label
+       and become hard to scan. 480px gives a comfortable two-column
+       read. */
+    max-width: 480px;
 }
 
 .info-row {

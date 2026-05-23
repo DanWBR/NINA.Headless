@@ -3770,9 +3770,12 @@ function ninaApp() {
             if (g.empty()) {
                 g = ctn.append('g').attr('class', 'fov-overlay-group');
             }
-            // raise() moves the element to the END of its parent's
-            // children list = top of paint order. Cheap, idempotent.
-            g.raise();
+            // Move to the END of parent's children = top of SVG paint
+            // order. d3-celestial ships with d3 v3 which lacks
+            // .raise() (added in v4), so do it DOM-level by re-
+            // appending the node — same effect, no version dep.
+            const node = g.node();
+            if (node && node.parentNode) node.parentNode.appendChild(node);
             return g;
         },
 

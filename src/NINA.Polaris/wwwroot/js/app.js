@@ -4205,12 +4205,33 @@ function ninaApp() {
             if (!this._charts.guide && !ready) return;
 
             const t = this._chartTheme();
-            const steps = (this.guider.recentSteps || []).filter(
-                s => Number.isFinite(Number(s.ra)) && Number.isFinite(Number(s.dec))
-            );
-            const raVals  = steps.map(s => Number(s.ra));
-            const decVals = steps.map(s => Number(s.dec));
-            const labels  = steps.map((_, i) => i);
+            // Build plain numeric arrays without going through .map()
+            // on Alpine's reactive proxy. .map() preserves the proxy
+            // chain on the new array's elements, and when Chart.js
+            // later iterates dataset.data each [i] read triggers
+            // Alpine's reactive get-trap. The trap then records a
+            // dependency on the currently-running effect (us), which
+            // re-runs us, which assigns again, ad infinitum →
+            // RangeError: Maximum call stack size exceeded +
+            // "Cannot set properties of undefined (setting 'fullSize')"
+            // from Chart.js's layout pass tripping over the unfinished
+            // assignment. Manual for-loop with primitives stays
+            // outside Alpine's reactivity graph.
+            const stepsRef = this.guider.recentSteps || [];
+            const raVals = [];
+            const decVals = [];
+            const labels = [];
+            for (let i = 0; i < stepsRef.length; i++) {
+                const s = stepsRef[i];
+                if (!s) continue;
+                const ra = Number(s.ra);
+                const dec = Number(s.dec);
+                if (Number.isFinite(ra) && Number.isFinite(dec)) {
+                    raVals.push(ra);
+                    decVals.push(dec);
+                    labels.push(i);
+                }
+            }
 
             let c = this._charts.guide;
             if (!c) {

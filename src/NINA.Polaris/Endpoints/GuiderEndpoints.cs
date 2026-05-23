@@ -169,12 +169,35 @@ public static class GuiderEndpoints {
         // ---- Profile management ----
 
         group.MapGet("/profiles", async (PHD2Client phd2) => {
-            if (!phd2.IsConnected) return Results.BadRequest(new { error = "PHD2 not connected" });
+            if (!phd2.IsConnected) {
+                // Match the connected-but-empty shape so the UI doesn't
+                // have to special-case "not connected" — empty list +
+                // null current is the right thing to show.
+                return Results.Ok(new {
+                    current = (PHD2Profile?)null,
+                    profiles = System.Array.Empty<PHD2Profile>(),
+                    warning = "PHD2 not connected"
+                });
+            }
             try {
                 var profiles = await phd2.GetProfilesAsync();
                 var current = await phd2.GetCurrentProfileAsync();
                 return Results.Ok(new { current, profiles });
-            } catch (Exception ex) { return Results.Problem(ex.Message); }
+            } catch (Exception ex) {
+                // PHD2 can transiently reject get_profile{,s} when busy
+                // (mid-calibration, equipment in flux). Don't turn that
+                // into a 500 — the frontend polls this on every WS
+                // false→true transition + on user actions, and a 500
+                // surfaces as a scary "Failed to load PHD2 profiles"
+                // toast even though the connection is fine. Return
+                // empty + warning instead so the dropdown shows blank
+                // and self-heals on the next successful fetch.
+                return Results.Ok(new {
+                    current = (PHD2Profile?)null,
+                    profiles = System.Array.Empty<PHD2Profile>(),
+                    warning = ex.Message
+                });
+            }
         });
 
         group.MapPost("/profile/{id:int}", async (int id, PHD2Client phd2) => {

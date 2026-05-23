@@ -115,6 +115,18 @@ html, body {
     filter: drop-shadow(0 0 4px rgba(33, 150, 243, 0.5));
     flex-shrink: 0;
 }
+/* Polaris mountain badge — bitmap version of the wordmark icon.
+   Sized to roughly match the SVG twinkle's optical weight in the
+   status bar. drop-shadow gives the same glow treatment so the
+   header has a consistent feel whether the bitmap or the SVG
+   fallback is rendered. */
+.brand-badge {
+    height: 28px;
+    width: auto;
+    border-radius: 4px;
+    flex-shrink: 0;
+    filter: drop-shadow(0 0 4px rgba(33, 150, 243, 0.4));
+}
 .brand-name {
     font-weight: 800;
     font-size: 17px;

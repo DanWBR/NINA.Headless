@@ -21,8 +21,16 @@
     <header class="status-bar">
         <div class="status-bar-left">
             <a href="#" @click.prevent="tab='home'" class="brand" title="Home">
-                <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
-                    <!-- Four-point star "twinkle" -->
+                <!-- Polaris mountain badge — drop into wwwroot/img/.
+                     SVG twinkle is the fallback when the image is
+                     missing (build hasn't shipped it yet, or 404). -->
+                <img class="brand-badge"
+                     src="img/polaris-badge.png"
+                     alt="N.I.N.A. Polaris"
+                     onerror="this.style.display='none';
+                              this.nextElementSibling.style.display='inline-block'">
+                <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"
+                     style="display:none">
                     <path d="M12 2 L13.5 10.5 L22 12 L13.5 13.5 L12 22 L10.5 13.5 L2 12 L10.5 10.5 Z"/>
                     <circle cx="19" cy="5" r="1.2" opacity="0.9"/>
                     <circle cx="5" cy="18" r="0.8" opacity="0.7"/>

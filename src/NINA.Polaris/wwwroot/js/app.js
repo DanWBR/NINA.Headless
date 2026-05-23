@@ -6989,7 +6989,12 @@ function ninaApp() {
         hostDeviceTooltip() {
             const d = this.host && this.host.device;
             if (!d) return '';
-            return d.model + '\n' + d.os + '\n' + d.architecture + ' · ' + d.cores + ' cores';
+            // model + OS + (arch + cores) + optional CPU brand line.
+            // CPU is null on hosts where /proc/cpuinfo or WMI failed
+            // — only render the line when we actually have it.
+            let s = d.model + '\n' + d.os + '\n' + d.architecture + ' · ' + d.cores + ' cores';
+            if (d.cpu) s += '\n' + d.cpu;
+            return s;
         },
         formatHostRam(usedMB, totalMB) {
             if (!totalMB || totalMB <= 0) return '— / —';

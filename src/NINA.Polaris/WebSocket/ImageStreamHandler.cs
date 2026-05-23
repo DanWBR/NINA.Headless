@@ -76,6 +76,38 @@ public static class ImageStreamHandler {
                 };
                 relay.SetClientMode(clientId, mode);
                 logger.LogInformation("Client {Id} requested {Mode} mode", clientId, mode);
+                return;
+            }
+
+            // Discriminated messages — capability handshake + per-
+            // frame metrics from the client-side WASM stacker. CLST-5.
+            if (root.TryGetProperty("type", out var typeProp)) {
+                var type = typeProp.GetString();
+                switch (type) {
+                    case "client-capability":
+                        var hasWasm = root.TryGetProperty("wasm", out var w) && w.ValueKind == JsonValueKind.True;
+                        string? ver = null;
+                        if (root.TryGetProperty("wasmVersion", out var verProp) && verProp.ValueKind == JsonValueKind.String) {
+                            ver = verProp.GetString();
+                        }
+                        relay.SetClientCapability(clientId, hasWasm, ver);
+                        break;
+
+                    case "client-stack-progress":
+                        // Logged at debug for now — the trigger
+                        // orchestrator still uses the server-side
+                        // StarDetector's metrics (which run in
+                        // MetricsOnly mode too) so we don't need to
+                        // wire these through. Useful for diagnosing
+                        // server-vs-client output divergence.
+                        if (root.TryGetProperty("frameCount", out var fc)
+                            && root.TryGetProperty("hfr", out var hfr)
+                            && root.TryGetProperty("starCount", out var sc)) {
+                            logger.LogDebug("Client {Id} integrated frame {N}: HFR={Hfr:F2} stars={Stars}",
+                                clientId, fc.GetInt32(), hfr.GetDouble(), sc.GetInt32());
+                        }
+                        break;
+                }
             }
         } catch (JsonException) {
             // Ignore malformed messages

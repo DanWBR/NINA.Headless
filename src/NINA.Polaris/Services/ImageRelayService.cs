@@ -60,8 +60,13 @@ public class ImageRelayService : IDisposable {
 
     public void UnregisterClient(string id) {
         if (_clients.TryRemove(id, out var entry)) {
+            var wasCapable = entry.WasmCapable;
             entry.SendLock.Dispose();
             _logger.LogInformation("Image stream client removed: {Id} (remaining: {Count})", id, _clients.Count);
+            // If we just lost our last WASM-capable client, the server
+            // should drop back to Full mode so capture clients without
+            // WASM keep getting the accumulated preview from us.
+            if (wasCapable) RaiseWasmCount();
         }
     }
 
@@ -201,6 +206,11 @@ public class ImageRelayService : IDisposable {
         public int FastFrameStreak { get; set; }
         public TimeSpan LastSendDuration { get; set; }
 
+        // CLST-5: client-reported WASM live-stack capability. Drives
+        // the server-side LiveStackingService.Mode switch.
+        public bool WasmCapable { get; set; }
+        public string? WasmVersion { get; set; }
+
         public ClientEntry(System.Net.WebSockets.WebSocket ws) => Ws = ws;
     }
 
@@ -213,6 +223,41 @@ public class ImageRelayService : IDisposable {
             entry.FastFrameStreak = 0;
             _logger.LogInformation("Client {Id} requested {Mode} stream mode", id, mode);
         }
+    }
+
+    /// <summary>CLST-5: record whether a client has the WASM
+    /// live-stack module loaded. Any change recomputes the aggregate
+    /// count and raises <see cref="WasmCapableCountChanged"/> so
+    /// LiveStackingService can flip into MetricsOnly mode when at
+    /// least one capable client connects.</summary>
+    public void SetClientCapability(string id, bool wasm, string? wasmVersion) {
+        if (_clients.TryGetValue(id, out var entry)) {
+            var wasCapable = entry.WasmCapable;
+            entry.WasmCapable = wasm;
+            entry.WasmVersion = wasmVersion;
+            if (wasCapable != wasm) {
+                _logger.LogInformation("Client {Id} WASM capability {Wasm} (version {Ver})",
+                    id, wasm, wasmVersion ?? "unknown");
+                RaiseWasmCount();
+            }
+        }
+    }
+
+    /// <summary>Number of currently-connected clients that have
+    /// reported wasm:true via the <c>client-capability</c> WS message.
+    /// The handshake in ImageStreamHandler routes incoming messages
+    /// to <see cref="SetClientCapability"/>.</summary>
+    public int WasmCapableClientCount => _clients.Values.Count(c => c.WasmCapable);
+
+    /// <summary>Fires when the aggregate WASM-capable client count
+    /// changes (registration, unregistration, or capability update).
+    /// LiveStackingService subscribes to flip its Mode property
+    /// between Full (count == 0) and MetricsOnly (count >= 1).</summary>
+    public event Action<int>? WasmCapableCountChanged;
+
+    private void RaiseWasmCount() {
+        try { WasmCapableCountChanged?.Invoke(WasmCapableClientCount); }
+        catch (Exception ex) { _logger.LogDebug(ex, "WasmCapableCountChanged handler threw"); }
     }
 
     private void ApplyAdaptiveLogic(string id, ClientEntry entry) {

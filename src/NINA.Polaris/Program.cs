@@ -111,6 +111,27 @@ app.Services.GetRequiredService<PHD2ProfileSyncService>();
 // / auto-recenter evaluation.
 app.Services.GetRequiredService<LiveStackTriggersService>();
 
+// CLST-5: flip LiveStackingService into MetricsOnly when at least
+// one image-stream client reports wasm:true (i.e. the WASM live-stack
+// module loaded and is ready to take the math), and back to Full
+// when the last WASM client disconnects. Done as a one-shot
+// subscription at app start; ImageRelayService raises the event
+// every time the aggregate count crosses 0/1.
+{
+    var liveStack = app.Services.GetRequiredService<LiveStackingService>();
+    var relay = app.Services.GetRequiredService<ImageRelayService>();
+    var liveStackLogger = app.Services.GetRequiredService<ILogger<LiveStackingService>>();
+    relay.WasmCapableCountChanged += (count) => {
+        var newMode = count > 0 ? StackMode.MetricsOnly : StackMode.Full;
+        if (liveStack.Mode != newMode) {
+            liveStack.Mode = newMode;
+            liveStackLogger.LogInformation(
+                "Live stacker mode -> {Mode} (wasm-capable clients: {Count})",
+                newMode, count);
+        }
+    };
+}
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseWebSockets();

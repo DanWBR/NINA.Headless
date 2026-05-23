@@ -589,7 +589,10 @@ function ninaApp() {
         skyClock: '',                    // displayed in the toolbar (HH:MM:SS UTC)
         locationLabel: '',               // "City, Country" if reverse-geocoded, else "5.18°S 37.36°W"
         _locationLastKey: '',            // memoise so we only reverse-geocode once per coord pair
-        aladinFov: 90,                  // initial FOV in degrees (wide field)
+        aladinFov: 45,                  // initial FOV in degrees — 90 was
+                                        // too wide (full-sky Aitoff looks
+                                        // distorted + camera FOV rectangle
+                                        // shrinks below 1 pixel)
         aladinShowFov: true,             // toggle camera-FOV overlay
 
         // OpenSeadragon image viewer
@@ -3709,18 +3712,54 @@ function ninaApp() {
             };
         },
 
+        // Project an (RA-deg, Dec-deg) celestial coord to screen pixels
+        // via d3-celestial's internal projection. Returns null when the
+        // point is off the visible hemisphere (back of the sphere).
+        _projectCelestial(raDeg, decDeg) {
+            try {
+                const pt = Celestial.mapProjection([raDeg, decDeg]);
+                if (!pt || !isFinite(pt[0]) || !isFinite(pt[1])) return null;
+                return pt;
+            } catch { return null; }
+        },
+
+        _drawFovCenterMarker(className, raHours, decDeg, color) {
+            const pt = this._projectCelestial(raHours * 15, decDeg);
+            if (!pt) return;
+            const [cx, cy] = pt;
+            const ctn = Celestial.container;
+            // Small crosshair + dot at the FOV center — always visible
+            // regardless of zoom, so the user can tell where the
+            // (possibly sub-pixel) FOV rectangle is anchored.
+            const g = ctn.append('g').attr('class', className);
+            g.append('circle').attr('cx', cx).attr('cy', cy).attr('r', 3)
+                .style('fill', color).style('stroke', '#fff')
+                .style('stroke-width', 0.5);
+            g.append('line').attr('x1', cx - 8).attr('y1', cy)
+                .attr('x2', cx + 8).attr('y2', cy)
+                .style('stroke', color).style('stroke-width', 1);
+            g.append('line').attr('x1', cx).attr('y1', cy - 8)
+                .attr('x2', cx).attr('y2', cy + 8)
+                .style('stroke', color).style('stroke-width', 1);
+        },
+
         _ensureFovLayers() {
             if (this._fovLayersRegistered) return;
             if (!this._celestialReady || typeof Celestial === 'undefined') return;
             const self = this;
             try {
-                // MOUNT-FOV layer — blue. Reads self._fovMountGeo on
-                // each redraw; if null, draws nothing.
+                // MOUNT-FOV layer — blue rectangle + cross+dot marker.
+                // Reads self._fovMountGeo + ._fovMountAnchor on each
+                // redraw; nulls hide it.
                 Celestial.add({
                     type: 'line',
-                    callback: () => Celestial.container.selectAll('.fov-mount').remove(),
+                    callback: () => {
+                        Celestial.container.selectAll('.fov-mount').remove();
+                        Celestial.container.selectAll('.fov-mount-mark').remove();
+                    },
                     redraw: () => {
                         Celestial.container.selectAll('.fov-mount').remove();
+                        Celestial.container.selectAll('.fov-mount-mark').remove();
                         const g = self._fovMountGeo;
                         if (!g) return;
                         Celestial.container.selectAll('.fov-mount')
@@ -3729,14 +3768,21 @@ function ninaApp() {
                             .attr('d', Celestial.map(g))
                             .style('stroke', '#3b82f6').style('stroke-width', 2)
                             .style('fill', 'none');
+                        const a = self._fovMountAnchor;
+                        if (a) self._drawFovCenterMarker(
+                            'fov-mount-mark', a.ra, a.dec, '#3b82f6');
                     }
                 });
-                // TARGET-FOV layer — red. Same pattern.
+                // TARGET-FOV layer — red dashed rectangle + marker.
                 Celestial.add({
                     type: 'line',
-                    callback: () => Celestial.container.selectAll('.fov-target').remove(),
+                    callback: () => {
+                        Celestial.container.selectAll('.fov-target').remove();
+                        Celestial.container.selectAll('.fov-target-mark').remove();
+                    },
                     redraw: () => {
                         Celestial.container.selectAll('.fov-target').remove();
+                        Celestial.container.selectAll('.fov-target-mark').remove();
                         const g = self._fovTargetGeo;
                         if (!g) return;
                         Celestial.container.selectAll('.fov-target')
@@ -3746,6 +3792,9 @@ function ninaApp() {
                             .style('stroke', '#ef4444').style('stroke-width', 2)
                             .style('stroke-dasharray', '4 3')
                             .style('fill', 'none');
+                        const a = self._fovTargetAnchor;
+                        if (a) self._drawFovCenterMarker(
+                            'fov-target-mark', a.ra, a.dec, '#ef4444');
                     }
                 });
                 this._fovLayersRegistered = true;
@@ -3756,25 +3805,31 @@ function ninaApp() {
             if (!this._celestialReady) return;
             this._ensureFovLayers();
             if (!this.aladinShowFov) {
-                this._fovMountGeo = null;
-                this._fovTargetGeo = null;
+                this._fovMountGeo = this._fovTargetGeo = null;
+                this._fovMountAnchor = this._fovTargetAnchor = null;
                 try { Celestial.redraw(); } catch {}
                 return;
             }
-            // Mount FOV (blue, solid) — live position.
+            // Mount FOV (blue, solid rectangle + cross+dot marker)
+            // anchored at the live mount RA/Dec.
             if (this.mount?.connected
                 && this.mount.ra != null && this.mount.dec != null) {
                 this._fovMountGeo = this._buildFovRing(this.mount.ra, this.mount.dec);
+                this._fovMountAnchor = { ra: this.mount.ra, dec: this.mount.dec };
             } else {
                 this._fovMountGeo = null;
+                this._fovMountAnchor = null;
             }
-            // Target FOV (red, dashed) — picked planning target.
+            // Target FOV (red dashed rectangle + marker) anchored at
+            // the picked planning target.
             const tRa = this.skyTarget?.ra ?? this.skyTarget?.raHours;
             const tDec = this.skyTarget?.dec ?? this.skyTarget?.decDeg;
             if (tRa != null && tDec != null) {
                 this._fovTargetGeo = this._buildFovRing(tRa, tDec);
+                this._fovTargetAnchor = { ra: tRa, dec: tDec };
             } else {
                 this._fovTargetGeo = null;
+                this._fovTargetAnchor = null;
             }
             try { Celestial.redraw(); } catch (e) {
                 console.warn('FOV redraw failed', e);

@@ -3091,6 +3091,13 @@ label select.input-sm {
 .tab-panel-sky {
     display: flex;
     flex-direction: column;
+    /* The activity bar (position:fixed, height 36px) floats over the
+       viewport bottom. The global .tab-panel padding-bottom is meant
+       to reserve space for it, but the sky tab packs its rows tight
+       to the bottom edge (sky-info-panel + control-row) and the last
+       action button row was sliding behind the activity bar. Add an
+       explicit extra cushion specifically here. */
+    padding-bottom: 48px !important;
 }
 
 /* Image History */

@@ -4362,6 +4362,15 @@ function ninaApp() {
 
         // Temperature chart: sensor temp + cooler power vs time
         updateTempChart() {
+            // Guard against Chart.js's "Cannot set properties of undefined
+            // (setting 'fullSize')" — fires when the canvas is in the DOM
+            // but its parent has zero measured size (initial paint pass,
+            // x-show transition). Wait until the canvas has real pixels.
+            const canvas = this.$refs.tempChart;
+            if (!canvas || typeof Chart === 'undefined') return;
+            if (!this._charts.temp
+                && (canvas.clientWidth < 10 || canvas.clientHeight < 10)) return;
+
             const t = this._chartTheme();
             const c = this._ensureChart('tempChart', 'temp', 'line', () => ({
                 type: 'line',

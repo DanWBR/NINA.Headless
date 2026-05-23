@@ -1238,7 +1238,7 @@
                         <span class="text-muted" x-show="guider.calibrateJob && !guider.calibrateJob.done"
                               x-text="'Phase: ' + (guider.calibrateJob?.phase || '')"></span>
                         <span class="text-ok" x-show="guider.calibrateJob?.phase === 'Ok'"
-                              x-text="'✓ Step ' + guider.calibrateJob.stepMs + 'ms'"></span>
+                              x-text="'✓ Step ' + (guider.calibrateJob?.stepMs ?? '--') + 'ms'"></span>
                         <span class="text-err" x-show="guider.calibrateJob?.phase === 'Fail'"
                               x-text="'✗ ' + (guider.calibrateJob?.error || 'Failed')"></span>
                     </div>

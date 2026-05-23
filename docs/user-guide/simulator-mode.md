@@ -82,21 +82,37 @@ install command.
    [ASCOMSimulators releases page](https://github.com/ASCOMInitiative/ASCOMSimulators/releases).
    It's a single .exe that exposes camera, telescope, focuser, etc.
    over a local Alpaca HTTP server (no ASCOM Platform install
-   required for the Alpaca side).
+   required for the Alpaca side). Install to the default location
+   (`C:\Program Files\ASCOM\OmniSimulators\`) so Polaris can find it.
 
-2. **Start the Omni Simulator** before opening Polaris (or after —
-   the chip refresh picks it up). It binds to port 32323 by
-   default.
+2. **Open Polaris → Settings → Equipment simulator** → click
+   ⟳ Re-detect → status shows "✓ Installed v1.x.x".
 
-3. **Open Polaris → Settings → Equipment simulator** → click
-   ⟳ Re-detect → status shows "✓ Installed" once the Omni Sim is
-   reachable.
+3. Click **▶ Launch simulators**. Polaris spawns `AlpacaOmniSimulator.exe`
+   minimized to the system tray. Within ~5 seconds the chip flips
+   to 🟢 Running. The management endpoint at
+   `http://localhost:32323/management/v1/configureddevices` returns
+   the device list.
 
 4. **RIGS tab** → in the Camera card, pick the **Alpaca** driver,
-   then **Detect** → "Camera (Omni Simulator)" appears, Connect.
+   then click **Detect** → "Alpaca Camera Sim" appears, Connect.
    Repeat for Mount / Focuser / Filter Wheel.
 
 5. The rest of the workflow is identical to Linux.
+
+**Caveat — no live add/remove on Windows.** The Omni Simulator
+serves every device type simultaneously; there's no equivalent to
+the INDI FIFO that lets us toggle drivers on a running server. The
+device-list checkboxes in the Settings panel hide their "live toggle"
+behaviour on Windows and show a banner saying so. To actually change
+which devices are available, you Stop the simulator and restart it.
+In practice this is rarely a problem — Omni Sim runs all device
+types out of the box, and you pick which to *connect* in RIGS.
+
+**Adopting an already-running Omni Sim** — if you started the
+Omni Simulator from the start menu before opening Polaris,
+Re-detect picks it up and Launch is a no-op success. Shutdown
+will close it cleanly.
 
 ## What's running, where
 

@@ -373,6 +373,10 @@ public class UserProfile {
     public bool SimulatorAutoStart { get; set; } = false;
     public List<string> SimulatorDevices { get; set; }
         = new() { "ccd", "telescope", "focus", "wheel" };
+    // INDI default; AscomSimulatorBackend overrides to 32323 (Alpaca
+    // Omni Sim default) when the active backend is "ascom". UI saves
+    // whatever the user picked, the backend uses its own default
+    // when the saved value doesn't make sense (0 / null).
     public int SimulatorPort { get; set; } = 7624;
 
     /// <summary>

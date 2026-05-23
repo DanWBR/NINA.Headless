@@ -3845,7 +3845,22 @@
                          list for the next Launch. -->
                     <div x-show="simulator.installed" style="margin-top: 12px;">
                         <div class="text-muted" style="font-size: 11px; margin-bottom: 4px;">
-                            Devices<span x-show="simulator.isRunning"> (toggle to add/remove live)</span>:
+                            Devices<span x-show="simulator.isRunning && simulator.kind === 'indi'"> (toggle to add/remove live)</span><span x-show="simulator.isRunning && simulator.kind === 'ascom'"> (all served simultaneously)</span>:
+                        </div>
+                        <!-- Windows / Alpaca Omni Sim caveat: the
+                             binary exposes every device type at once
+                             — there's no FIFO equivalent for runtime
+                             add/remove. Toggles only matter as hints
+                             for "which devices to pick in the RIGS
+                             tab"; they don't gate Omni Sim itself.
+                             Render an inline banner so the user
+                             isn't surprised by the no-op behaviour. -->
+                        <div x-show="simulator.kind === 'ascom' && simulator.isRunning"
+                             class="text-muted"
+                             style="font-size: 11px; padding: 6px 8px; background: rgba(96,165,250,0.08); border-left: 3px solid var(--accent); margin-bottom: 6px;">
+                            Alpaca Omni Simulator serves every device simultaneously — pick which to actually
+                            <a href="#" @click.prevent="tab = 'equip'">connect in RIGS</a>.
+                            Stop the simulator to release the port.
                         </div>
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px;">
                             <template x-for="dev in ['ccd','telescope','focus','wheel','guide','dome','weather']" :key="dev">

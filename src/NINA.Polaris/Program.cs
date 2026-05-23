@@ -51,8 +51,15 @@ builder.Services.AddHostedService<PHD2AutoStartService>();
 // orchestrator picks the supported one at startup via IsSupported.
 // AutoStart service handles the launch-on-boot toggle + periodic
 // health probe.
+// Both backends register; SimulatorService picks the first one that
+// reports IsSupported = true on the current OS. Order matters only
+// when two backends claim the same OS (none do today). Backends not
+// matching the host OS still construct but their IsSupported short-
+// circuits Launch / Detect into safe no-ops.
 builder.Services.AddSingleton<NINA.Polaris.Services.Simulator.ISimulatorBackend,
     NINA.Polaris.Services.Simulator.IndiSimulatorBackend>();
+builder.Services.AddSingleton<NINA.Polaris.Services.Simulator.ISimulatorBackend,
+    NINA.Polaris.Services.Simulator.AscomSimulatorBackend>();
 builder.Services.AddSingleton<NINA.Polaris.Services.Simulator.SimulatorService>();
 builder.Services.AddHostedService<NINA.Polaris.Services.Simulator.SimulatorAutoStartService>();
 // Listens to ProfileService.EquipmentProfileActivated; keep singleton so

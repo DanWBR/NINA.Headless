@@ -142,7 +142,33 @@ public class CameraStreamService : IDisposable {
                 // Convert to loop mode as a graceful fallback so the user
                 // still gets video, just slower.
                 Mode = "loop";
-                _ = Task.Run(() => RunLoop(cam, ct));
+                _loopTask = Task.Run(() => RunLoop(cam, ct));
+                return;
+            }
+
+            // Some drivers (notably indi_asi_ccd) accept the
+            // CCD_VIDEO_STREAM toggle, then fire BLOBs that aren't
+            // actually parseable FITS — IndiCamera.OnBlobReceived
+            // guards those out as "empty" so OnStreamFrame never gets
+            // called. Symptom: stream "starts" but FrameCount stays
+            // at 0 and the canvas stays black. Give native 2 seconds
+            // to produce at least one usable frame; if not, drop
+            // CCD_VIDEO_STREAM and switch to loop mode (per-exposure
+            // CaptureAsync — which the ASI driver DOES service correctly).
+            try { await Task.Delay(TimeSpan.FromSeconds(2), ct); }
+            catch (OperationCanceledException) { return; }
+            if (FrameCount == 0 && !ct.IsCancellationRequested) {
+                _logger.LogWarning(
+                    "Native CCD_VIDEO_STREAM produced no usable frames in 2s — falling back to loop mode");
+                LastError = "Driver did not deliver parseable video stream BLOBs; using loop fallback.";
+                try { await cam.StopVideoStreamAsync(CancellationToken.None); }
+                catch (Exception ex) {
+                    _logger.LogDebug(ex, "Stopping native stream during fallback failed (continuing)");
+                }
+                _nativeSubscription?.Dispose();
+                _nativeSubscription = null;
+                Mode = "loop";
+                _loopTask = Task.Run(() => RunLoop(cam, ct));
             }
         }, ct);
     }

@@ -17,6 +17,13 @@ public class IndiCamera : ICamera {
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, Action<IImageData>> _streamSubscribers = new();
     private int _nextSubscriberId;
     private volatile bool _isStreaming;
+    // Counter of stream BLOBs that parsed as empty (FITSReader returned
+    // Width=0 / Height=0 — typically a driver that doesn't actually
+    // emit FITS under CCD_VIDEO_STREAM). CameraStreamService reads this
+    // to decide whether native streaming is producing usable frames or
+    // whether it should bail out to loop mode.
+    private int _emptyStreamFrameCount;
+    public int EmptyStreamFrameCount => _emptyStreamFrameCount;
 
     public string DeviceName { get; }
     public bool IsConnected => _client.IsConnected;
@@ -157,6 +164,7 @@ public class IndiCamera : ICamera {
             await TrySetGainAsync(g, ct);
         }
 
+        Interlocked.Exchange(ref _emptyStreamFrameCount, 0);
         _isStreaming = true;
         await _client.SetSwitchAsync(DeviceName, "CCD_VIDEO_STREAM",
             new Dictionary<string, bool> { ["STREAM_ON"] = true, ["STREAM_OFF"] = false }, ct);
@@ -273,6 +281,33 @@ public class IndiCamera : ICamera {
 
             try {
                 var imageData = FITSReader.Read(element.Data);
+
+                // Some INDI drivers (notably indi_asi_ccd under
+                // CCD_VIDEO_STREAM mode) emit BLOBs that aren't a
+                // proper FITS file — just a raw uint16 buffer. The
+                // reader doesn't throw on those; it returns a
+                // BaseImageData with Width=0 / Height=0 / no pixels.
+                // Dispatching that downstream means CameraStreamService
+                // happily fires "frames" at 5fps, ImageRelayService
+                // broadcasts header-only 24-byte WS messages, and the
+                // browser canvas stays black even though every counter
+                // says video is working. Treat zero-sized parses as
+                // failures so the streaming-fallback logic in
+                // CameraStreamService kicks in.
+                if (imageData.Properties.Width <= 0
+                    || imageData.Properties.Height <= 0
+                    || imageData.Data == null
+                    || imageData.Data.Length == 0) {
+                    if (_isStreaming) {
+                        Interlocked.Increment(ref _emptyStreamFrameCount);
+                    } else {
+                        _exposureTcs?.TrySetException(
+                            new InvalidDataException(
+                                $"INDI BLOB from {DeviceName} parsed as empty " +
+                                $"(driver may not emit FITS under CCD_VIDEO_STREAM)"));
+                    }
+                    continue;
+                }
 
                 imageData.MetaData.Camera.Name = DeviceName;
                 imageData.MetaData.Camera.Temperature = Temperature;

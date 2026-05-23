@@ -53,17 +53,31 @@
                       x-text="alpaca.servers.length"
                       style="margin-left:4px;opacity:0.85"></span>
             </span>
+            <!-- PHD2 badge: tracks the JSON-RPC connection + live
+                 AppState (not just the OS process running flag, which
+                 can be true while the RPC client is still disconnected).
+                 Shows the same state the GUIDE-tab Control panel sees:
+                   • disconnected → "PHD2 OFF" (grey)
+                   • guiding      → "PHD2 GUIDING (0.65\"")" (green)
+                   • calibrating  → "PHD2 CAL"   (amber)
+                   • looping      → "PHD2 LOOP"  (amber)
+                   • selected/lost→ "PHD2 LOST"/etc (amber/error)
+                   • connected but idle → "PHD2 ON" (amber) -->
             <span class="status-indicator"
-                  :class="phd2Process.running
-                          ? (phd2EquipmentConnected ? 'ok' : 'warn')
-                          : 'off'"
+                  :class="!guider.connected ? 'off'
+                          : (guider.guiding ? 'ok'
+                          : (guider.appState === 'LostLock' ? 'error' : 'warn'))"
                   @click="tab='guide'"
-                  :title="phd2Process.running
-                          ? (phd2EquipmentConnected
-                             ? 'PHD2 running, equipment connected — click for Guider'
-                             : 'PHD2 running, no equipment connected — click for Guider')
-                          : 'PHD2 not running — click for Guider'">
-                <span x-text="phd2Process.running ? 'PHD2' : 'PHD2 OFF'"></span>
+                  :title="!guider.connected
+                          ? 'PHD2 not connected — click for Guider'
+                          : (guider.guiding
+                             ? ('Guiding — RMS ' + (guider.rmsTotal?.toFixed(2) || '--') + '\"')
+                             : ('PHD2 ' + (guider.appState || 'connected') + ' — click for Guider'))">
+                <span x-show="!guider.connected">PHD2 OFF</span>
+                <span x-show="guider.connected && guider.guiding"
+                      x-text="'PHD2 GUIDING (' + (guider.rmsTotal?.toFixed(2) || '--') + '\")'"></span>
+                <span x-show="guider.connected && !guider.guiding"
+                      x-text="'PHD2 ' + (guider.appState === 'Stopped' ? 'ON' : (guider.appState || 'ON').toUpperCase())"></span>
             </span>
             <span class="status-chip" x-show="cameraTemp !== null">
                 <span class="chip-icon">T</span>

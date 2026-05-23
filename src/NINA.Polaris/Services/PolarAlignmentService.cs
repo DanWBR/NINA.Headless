@@ -214,13 +214,17 @@ public class PolarAlignmentService {
 
             // 3. Compute polar error ----------------------------------------
             SetPhase(job, PolarAlignmentPhase.Computing);
-            // PA-3 plugs in PolarAlignmentMath.ComputeError here. Until
-            // then the job lands with zeroed errors — the UI still
-            // shows the 3 solved points and the phase transitions,
-            // just no arrow.
-            job.AzErrorArcsec = 0;
-            job.AltErrorArcsec = 0;
-            job.TotalErrorArcsec = 0;
+            var userProfile = _profiles.Active;
+            if (userProfile.Latitude == 0 && userProfile.Longitude == 0) {
+                Fail(job, "Site latitude/longitude not set. Configure your location in Settings before running polar alignment.");
+                return;
+            }
+            var (azErr, altErr) = PolarAlignmentMath.ComputeError(
+                job.Points[0], job.Points[1], job.Points[2],
+                userProfile.Latitude, userProfile.Longitude);
+            job.AzErrorArcsec = azErr;
+            job.AltErrorArcsec = altErr;
+            job.TotalErrorArcsec = PolarAlignmentMath.TotalErrorArcsec(azErr, altErr);
 
             // 4. Cosmetic slew home -----------------------------------------
             SetPhase(job, PolarAlignmentPhase.SlewingHome);

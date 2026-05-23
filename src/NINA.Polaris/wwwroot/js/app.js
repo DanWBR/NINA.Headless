@@ -350,6 +350,7 @@ function ninaApp() {
         guideChartW: 600,
         guideChartH: 160,
         guideChartScale: 2.0, // arcsec range each direction (auto-expands)
+        guideChartTickCount: 0, // visible heartbeat for the guide chart
         guiderEquipment: { camera: null, mount: null, auxMount: null, ao: null },
 
         // PHD2 management state
@@ -4265,6 +4266,9 @@ function ninaApp() {
             // numbers. Default is safe + fast since we set
             // animation: false above.
             c.update();
+            // Visible heartbeat — increments even if line shape barely
+            // changed, so the user can verify the chart is alive.
+            this.guideChartTickCount = (this.guideChartTickCount || 0) + 1;
         },
 
         // Auto-Focus V-curve: HFR vs Position, scatter + fit overlay

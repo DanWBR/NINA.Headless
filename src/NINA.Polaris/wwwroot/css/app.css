@@ -300,6 +300,28 @@ html, body {
     height: 100%;
 }
 
+/* GUIDE tab — give the content sensible horizontal breathing room.
+   Without this every row (info-row, settle inputs, control buttons,
+   smart-calibrate block) hugged the left edge of the viewport on wide
+   monitors. We don't pad .tab-panel globally because some tabs
+   (SKY, AUTORUN, STUDIO) manage their own gutters. */
+.tab-panel-guide > .panel-header,
+.tab-panel-guide > .guide-tabstrip,
+.tab-panel-guide > div > .phd2-mgmt,
+.tab-panel-guide > div > .guide-info,
+.tab-panel-guide > div > .guide-chart,
+.tab-panel-guide > div > .guide-settle-row,
+.tab-panel-guide > div > .control-row,
+.tab-panel-guide > div > .phd2-smart-block,
+.tab-panel-guide > div > .guide-connect-row,
+.tab-panel-guide > div > .warn-banner,
+.tab-panel-guide > div > .phd2-gui-banner,
+.tab-panel-guide > div > .phd2-gui-empty,
+.tab-panel-guide > div > .phd2-gui-frame-wrap {
+    padding-left: 18px;
+    padding-right: 18px;
+}
+
 .panel-header {
     padding: 12px 16px;
     font-size: 15px;

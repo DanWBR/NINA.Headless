@@ -1056,7 +1056,7 @@
             </div>
 
             <!-- GUIDER (PHD2) -->
-            <div x-show="tab === 'guide'" class="tab-panel">
+            <div x-show="tab === 'guide'" class="tab-panel tab-panel-guide">
                 <div class="panel-header">
                     Guider (PHD2)
                     <span class="status-indicator-sm" :class="guider.connected ? (guider.guiding ? 'ok' : 'warn') : 'error'"
@@ -1187,6 +1187,12 @@
                         <span><span class="legend-dot" style="background:#e57373;"></span>RA</span>
                         <span><span class="legend-dot" style="background:#64b5f6;"></span>Dec</span>
                         <span class="text-muted" x-text="(guider.recentSteps?.length || 0) + ' samples'"></span>
+                        <!-- Visible heartbeat so the user can verify the
+                             chart is alive even if the wave shape barely
+                             changes between ticks. Increments once per
+                             updateGuideChart() call. -->
+                        <span class="text-muted" style="margin-left:auto"
+                              x-text="'tick ' + (guideChartTickCount || 0)"></span>
                     </div>
                 </div>
 

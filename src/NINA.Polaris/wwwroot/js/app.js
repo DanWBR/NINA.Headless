@@ -1442,6 +1442,22 @@ function ninaApp() {
                 }));
             }
 
+            // If the stacker didn't actually integrate this frame
+            // (frameCount didn't tick — alignment failed, no stars
+            // detected, frame rejected), the accumulator is still
+            // empty / unchanged. Returning GetStackedResult here
+            // would hand back a zero-filled buffer the right size,
+            // and the outer renderer would happily paint a black
+            // canvas over the user's actual scene. Falling back to
+            // the raw incoming pixels keeps short-exposure planetary
+            // video, snap previews of dim fields, and any other
+            // "stacker can't use this frame" case visible. Live
+            // stacking still works because frameCount > 0 once the
+            // first usable frame lands.
+            if (!frameCount || frameCount <= 0) {
+                return pixels;
+            }
+
             // Pull the accumulated stack out for display. The
             // GetStackedResult export returns int[] (JSExport doesn't
             // marshal ushort[]); widen back to Uint16Array via the
@@ -1500,8 +1516,17 @@ function ninaApp() {
             // raw frames it relays are ALREADY the accumulated stack,
             // so feeding them to WASM again would compound — only run
             // the WASM path when the server is opted into metrics-only.
+            //
+            // Additionally gate on liveStackRunning — without it, a
+            // WASM-capable client would route EVERY frame through the
+            // accumulator (snap previews, video stream frames, focus
+            // captures) even when the user isn't live-stacking. That
+            // turned the VIDEO tab into a black canvas because the
+            // star matcher rejects every short-exposure planetary
+            // frame, leaving the accumulator empty.
             const serverMode = this.liveStackStatus?.mode || 'full';
             if (this.wasmReady && serverMode === 'metricsonly'
+                && this.liveStackEnabled
                 && globalThis.NINA?.Polaris?.Wasm?.Interop) {
                 try {
                     pixels = this._stackViaWasm(pixels, width, height);

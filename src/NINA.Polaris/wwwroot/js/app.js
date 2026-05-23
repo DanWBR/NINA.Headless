@@ -1225,6 +1225,65 @@ function ninaApp() {
         },
 
         // Raw LZ4 mode: parse header, decompress, auto-stretch, render (WebGL when possible)
+        // CLST-6: upload the WASM-accumulated stack to the server as a
+        // FITS. Reads the latest cached raw frame for dimensions +
+        // metadata; the actual pixels come from the WASM module's
+        // GetStackedResult (NOT the cached frame — those might be a
+        // single frame's worth, not the accumulator).
+        async saveClientStack() {
+            if (!this.wasmReady) {
+                this.toast('WASM not ready yet — wait for the live-stack module to load.', 'warn');
+                return;
+            }
+            const interop = globalThis.NINA?.Polaris?.Wasm?.Interop;
+            if (!interop) { this.toast('WASM Interop missing.', 'error'); return; }
+
+            const [w, h] = interop.GetDimensions();
+            if (w === 0 || h === 0) {
+                this.toast('No frames stacked yet.', 'warn');
+                return;
+            }
+            const stackedInt32 = interop.GetStackedResult();
+            if (!stackedInt32 || stackedInt32.length === 0) {
+                this.toast('Stack is empty.', 'warn');
+                return;
+            }
+
+            // Pack int[] → uint16 LE bytes for the POST body.
+            const bytes = new Uint8Array(stackedInt32.length * 2);
+            const dv = new DataView(bytes.buffer);
+            for (let i = 0; i < stackedInt32.length; i++) {
+                dv.setUint16(i * 2, stackedInt32[i] & 0xFFFF, /* littleEndian */ true);
+            }
+
+            const target = (this.seqStatus?.currentTarget
+                            || this.skyTarget?.name
+                            || 'live-stack').replace(/[^A-Za-z0-9_\-]/g, '_');
+            const frameCount = this.liveStackFrames || 0;
+            const bitDepth = this._lastRawFrame?.bitDepth || 16;
+            const url = `/api/livestack/upload-result?width=${w}&height=${h}`
+                      + `&bitDepth=${bitDepth}&target=${encodeURIComponent(target)}`
+                      + `&frameCount=${frameCount}`;
+
+            this.toast('Uploading stack...', 'info');
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/octet-stream' },
+                    body: bytes
+                });
+                if (!resp.ok) {
+                    const err = await resp.text();
+                    throw new Error(`HTTP ${resp.status}: ${err}`);
+                }
+                const data = await resp.json();
+                this.toast(`Stack saved: ${data.savedPath}`, 'success');
+            } catch (e) {
+                console.error('saveClientStack failed', e);
+                this.toast('Save failed: ' + (e.message || e), 'error');
+            }
+        },
+
         // CLST-4: feed a raw uint16 frame to the WASM stacker and
         // return the running-mean accumulator for display. Side
         // effect: posts a 'client-stack-progress' message back to the

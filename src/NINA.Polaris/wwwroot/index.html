@@ -349,6 +349,19 @@
                             <span x-text="liveStackEnabled ? 'Stack ON (' + liveStackFrames + ')' : 'Stack'"></span>
                         </button>
                         <button class="btn" @click="resetLiveStack()" x-show="liveStackEnabled">Reset</button>
+                        <!-- CLST-6: save the client-accumulated stack as a FITS
+                             on the server. Only shown when the server is in
+                             metricsonly mode (the WASM module owns the
+                             accumulator) and there's at least one frame
+                             integrated. Server-side stacking already saves
+                             via the regular capture path. -->
+                        <button class="btn"
+                                @click="saveClientStack()"
+                                x-show="liveStackStatus?.mode === 'metricsonly' && wasmReady"
+                                :disabled="!_lastRawFrame"
+                                title="Upload the WASM-accumulated stack as a FITS into integrated/{target}/">
+                            💾 Save current stack
+                        </button>
                         <button class="btn" @click="openImageViewer()" :disabled="!selectedCamera" title="Full-resolution zoom/pan viewer">⛶ View</button>
                     </div>
 

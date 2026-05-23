@@ -1,3 +1,4 @@
+using NINA.Image.ImageData;
 using NINA.Polaris.Services;
 
 namespace NINA.Polaris.Endpoints;
@@ -60,5 +61,77 @@ public static class LiveStackEndpoints {
             await triggers.FireRecenterNowAsync();
             return Results.Ok(new { fired = true });
         });
+
+        // ----- CLST-6: persist a client-stacked result as FITS -----
+        //
+        // When live-stacking happens in the browser (server is in
+        // MetricsOnly mode), the accumulated buffer never reaches the
+        // server. This endpoint lets the client POST the running mean
+        // up so we can write it as a FITS into the rig's integrated/
+        // directory and surface it in STUDIO via FrameLibraryService.
+        //
+        // Wire format (kept simple — no multipart, no JSON-encoded
+        // pixels):
+        //   POST /api/livestack/upload-result
+        //     ?width=W&height=H&bitDepth=16&target=NAME&frameCount=N
+        //   Content-Type: application/octet-stream
+        //   Body: uint16 LE pixels (width*height*2 bytes)
+        group.MapPost("/upload-result", async (HttpContext ctx,
+                                               ImageWriterService writer) => {
+            var q = ctx.Request.Query;
+            if (!int.TryParse(q["width"], out var width) || width <= 0 ||
+                !int.TryParse(q["height"], out var height) || height <= 0) {
+                return Results.BadRequest(new { error = "width + height query parameters required and must be positive integers" });
+            }
+            var bitDepth = int.TryParse(q["bitDepth"], out var bd) ? bd : 16;
+            var target = q["target"].ToString();
+            if (string.IsNullOrWhiteSpace(target)) target = "live-stack";
+            var frameCount = int.TryParse(q["frameCount"], out var fc) ? fc : 0;
+
+            // Read uint16 LE body. Cap at a sane size to avoid OOM if a
+            // malicious client claims a huge frame.
+            const long maxBytes = 512L * 1024 * 1024;  // 512 MB; > full-frame uint16
+            var expected = (long)width * height * 2;
+            if (expected > maxBytes) {
+                return Results.BadRequest(new { error = $"frame too large ({expected} bytes > {maxBytes})" });
+            }
+
+            using var ms = new MemoryStream(capacity: (int)Math.Min(expected, int.MaxValue));
+            await ctx.Request.Body.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            if (bytes.Length != expected) {
+                return Results.BadRequest(new {
+                    error = $"body size {bytes.Length} doesn't match width*height*2={expected}"
+                });
+            }
+
+            // Reinterpret as ushort[] — same on-wire format the server
+            // uses in raw-mode broadcasts, just travelling the other
+            // direction now.
+            var pixels = new ushort[width * height];
+            Buffer.BlockCopy(bytes, 0, pixels, 0, bytes.Length);
+
+            var props = new ImageProperties {
+                Width = width,
+                Height = height,
+                BitDepth = bitDepth
+            };
+            var image = new BaseImageData(pixels, props, new ImageMetaData {
+                Target = new ImageMetaData.TargetInfo { Name = target }
+            });
+
+            // imageType="MASTER" routes through ImageWriterService's
+            // BuildSubDir to integrated/{target}/{filter}/ — same place
+            // STUDIO ST-5 batch stacks land. From there
+            // FrameLibraryService picks it up on next rescan.
+            var saved = writer.SaveImage(image, targetName: target,
+                                          imageType: "MASTER", gain: 0);
+            if (saved == null) {
+                return Results.Problem(
+                    detail: "ImageOutputDir not configured on the active profile.",
+                    statusCode: 500);
+            }
+            return Results.Ok(new { savedPath = saved, frameCount });
+        }).DisableAntiforgery();
     }
 }

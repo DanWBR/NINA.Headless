@@ -172,12 +172,20 @@ public class PHD2Client : IDisposable {
         }
     }
 
+    /// <summary>Update AppState + fire the change event if it actually
+    /// flipped. Centralised so every event that implies a state
+    /// transition can route through one place.</summary>
+    private void SetAppState(string newState) {
+        if (AppState == newState) return;
+        AppState = newState;
+        AppStateChanged?.Invoke(newState);
+    }
+
     private void HandleEvent(string eventName, JsonElement msg) {
         switch (eventName) {
             case "AppState":
                 if (msg.TryGetProperty("State", out var st) && st.ValueKind == JsonValueKind.String) {
-                    AppState = st.GetString() ?? "Stopped";
-                    AppStateChanged?.Invoke(AppState);
+                    SetAppState(st.GetString() ?? "Stopped");
                 }
                 break;
 
@@ -199,6 +207,12 @@ public class PHD2Client : IDisposable {
                     DecDirection = TryGetString(msg, "DECDirection")
                 };
                 AddStep(step);
+                // A GuideStep arriving means PHD2 is actively guiding —
+                // PHD2 doesn't reliably emit an AppState event after
+                // every transition, so derive it from the step stream.
+                // Without this, the UI showed "Stopped" + 0 samples
+                // even though PHD2 was guiding fine in its own window.
+                SetAppState("Guiding");
                 GuideStepReceived?.Invoke(step);
                 break;
             }
@@ -245,18 +259,43 @@ public class PHD2Client : IDisposable {
                 });
                 break;
 
-            case "GuidingStopped":
+            // PHD2 doesn't always re-emit an AppState event after these
+            // transitions (verified empirically — see
+            // https://github.com/OpenPHDGuiding/phd2/wiki/EventMonitoring
+            // for the canonical state mapping). Drive AppState directly
+            // off the transition event so the UI stays in sync.
             case "StartGuiding":
+                SetAppState("Guiding");
+                break;
+            case "GuidingStopped":
+                SetAppState("Stopped");
+                break;
             case "Paused":
+                SetAppState("Paused");
+                break;
             case "Resumed":
+                SetAppState("Guiding");
+                break;
             case "LoopingExposures":
+                SetAppState("Looping");
+                break;
             case "LoopingExposuresStopped":
+                SetAppState("Stopped");
+                break;
+            case "StartCalibration":
+                SetAppState("Calibrating");
+                break;
             case "CalibrationFailed":
+                SetAppState("Stopped");
+                _logger.LogWarning("PHD2 calibration failed");
+                break;
             case "StarSelected":
+                // "Selected" = star locked, no longer Looping but not yet Guiding
+                if (AppState == "Looping") SetAppState("Selected");
+                break;
             case "StarLost":
             case "LockPositionLost":
-                // State updates handled via subsequent AppState event
-                _logger.LogDebug("PHD2 event: {Event}", eventName);
+                SetAppState("LostLock");
                 break;
 
             case "Version":

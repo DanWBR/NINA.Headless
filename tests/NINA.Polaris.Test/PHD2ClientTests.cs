@@ -122,6 +122,70 @@ public class PHD2ClientTests {
         Assert.That(_sut.RmsTotal, Is.EqualTo(0));
     }
 
+    // --- State-transition events (PHD2 doesn't reliably re-emit
+    //     AppState after every transition, so we derive it from the
+    //     transition event itself — see PHD2Client.HandleEvent).
+
+    [Test]
+    public void HandleMessage_GuideStep_ImpliesAppStateGuiding() {
+        // Regression for: PHD2 was actively guiding (West step 4, dist=11.7
+        // in PHD2's own window) but Polaris UI showed "Stopped" + 0 samples
+        // because we waited for a separate AppState event that PHD2 doesn't
+        // send. A GuideStep arriving IS the signal that guiding is active.
+        Assert.That(_sut.AppState, Is.EqualTo("Stopped"));   // default
+        Feed("""{"Event":"GuideStep","RADistanceRaw":0.5,"DECDistanceRaw":-0.3}""");
+        Assert.That(_sut.AppState, Is.EqualTo("Guiding"));
+        Assert.That(_sut.IsGuiding, Is.True);
+    }
+
+    [Test]
+    public void HandleMessage_StartGuiding_UpdatesAppState() {
+        Feed("""{"Event":"StartGuiding"}""");
+        Assert.That(_sut.AppState, Is.EqualTo("Guiding"));
+    }
+
+    [Test]
+    public void HandleMessage_GuidingStopped_UpdatesAppState() {
+        Feed("""{"Event":"StartGuiding"}""");
+        Feed("""{"Event":"GuidingStopped"}""");
+        Assert.That(_sut.AppState, Is.EqualTo("Stopped"));
+    }
+
+    [Test]
+    public void HandleMessage_PauseResume_RoundTrips() {
+        Feed("""{"Event":"StartGuiding"}""");
+        Feed("""{"Event":"Paused"}""");
+        Assert.That(_sut.AppState, Is.EqualTo("Paused"));
+        Feed("""{"Event":"Resumed"}""");
+        Assert.That(_sut.AppState, Is.EqualTo("Guiding"));
+    }
+
+    [Test]
+    public void HandleMessage_LoopingExposures_UpdatesAppState() {
+        Feed("""{"Event":"LoopingExposures"}""");
+        Assert.That(_sut.AppState, Is.EqualTo("Looping"));
+        Feed("""{"Event":"LoopingExposuresStopped"}""");
+        Assert.That(_sut.AppState, Is.EqualTo("Stopped"));
+    }
+
+    [Test]
+    public void HandleMessage_StarLost_TransitionsToLostLock() {
+        Feed("""{"Event":"StartGuiding"}""");
+        Feed("""{"Event":"StarLost"}""");
+        Assert.That(_sut.AppState, Is.EqualTo("LostLock"));
+    }
+
+    [Test]
+    public void HandleMessage_AppStateChanged_FiresOnlyOnActualChange() {
+        // Sanity check on SetAppState: redundant transitions don't spam.
+        int fires = 0;
+        _sut.AppStateChanged += _ => fires++;
+        Feed("""{"Event":"StartGuiding"}""");
+        Feed("""{"Event":"GuideStep","RADistanceRaw":0.1,"DECDistanceRaw":0.1}""");
+        Feed("""{"Event":"GuideStep","RADistanceRaw":0.2,"DECDistanceRaw":0.2}""");
+        Assert.That(fires, Is.EqualTo(1));   // only Stopped → Guiding
+    }
+
     // --- Settling / SettleDone ---
 
     [Test]

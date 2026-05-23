@@ -1251,6 +1251,14 @@ function ninaApp() {
 
             // Size canvas to container while preserving aspect ratio
             const container = canvas.parentElement;
+            // Bail out to the 2D fallback when the LIVE tab is hidden —
+            // its container collapses to 0 width and we'd render the
+            // bitmap into a 0×0 canvas that the fan-out can't recover
+            // from (WebGL output isn't drawable via drawImage once
+            // sized to 0).
+            if (!container || container.clientWidth <= 0 || container.clientHeight <= 0) {
+                return false;
+            }
             const scale = Math.min(container.clientWidth / width, container.clientHeight / height, 1);
             canvas.width = Math.round(width * scale);
             canvas.height = Math.round(height * scale);
@@ -1474,24 +1482,21 @@ function ninaApp() {
                 return;
             }
 
-            // Render to canvas
-            const canvas = document.getElementById('liveCanvas');
-            if (!canvas) return;
-
-            const container = canvas.parentElement;
-            const containerW = container.clientWidth;
-            const containerH = container.clientHeight;
-            const scale = Math.min(containerW / width, containerH / height, 1);
-            canvas.width = Math.round(width * scale);
-            canvas.height = Math.round(height * scale);
-
-            const ctx = canvas.getContext('2d');
-            const imgData = ctx.createImageData(width, height);
+            // Build a native-resolution offscreen bitmap once, then fan
+            // out to every visible canvas. Previously this drew only
+            // into liveCanvas, which is display:none whenever the user
+            // is on PREVIEW / FOCUS / VIDEO — its container had 0
+            // width, canvas got sized 0×0, image disappeared. By
+            // rendering to an offscreen first and then drawImage()ing
+            // into each target, whichever tab is open shows the frame.
+            const offscreen = document.createElement('canvas');
+            offscreen.width = width;
+            offscreen.height = height;
+            const oCtx = offscreen.getContext('2d');
+            const imgData = oCtx.createImageData(width, height);
             const data = imgData.data;
-
             for (let i = 0; i < pixels.length; i++) {
                 const normalized = Math.max(0, (pixels[i] - shadow) * scaleFactor);
-                // MTF stretch curve
                 const mtf = normalized > 0 ? (normalized * 0.25) / ((0.25 - 1) * normalized + 1) : 0;
                 const val = Math.min(255, Math.round(mtf * 255));
                 const j = i * 4;
@@ -1500,21 +1505,37 @@ function ninaApp() {
                 data[j + 2] = val;
                 data[j + 3] = 255;
             }
+            oCtx.putImageData(imgData, 0, 0);
 
-            // If canvas is scaled, draw via offscreen canvas
-            if (scale < 1) {
-                const offscreen = document.createElement('canvas');
-                offscreen.width = width;
-                offscreen.height = height;
-                offscreen.getContext('2d').putImageData(imgData, 0, 0);
+            this._fanOutFrameToCanvases(offscreen, width, height);
+            this.redrawOverlay();
+        },
+
+        // Shared helper used by the raw + JPEG render paths. Draws the
+        // source bitmap (an HTMLCanvasElement or HTMLImageElement) into
+        // every known display canvas, sizing each from its OWN visible
+        // parent. Skips canvases whose parent is collapsed (display:
+        // none on a hidden tab) — the next tab switch will pick up the
+        // bitmap via the existing mirror call.
+        _fanOutFrameToCanvases(src, srcW, srcH) {
+            const targets = ['liveCanvas', 'previewCanvas', 'focusCanvas',
+                             'videoCaptureCanvas', 'slewPreviewCanvas'];
+            for (const id of targets) {
+                const canvas = document.getElementById(id);
+                if (!canvas) continue;
+                const container = canvas.parentElement;
+                if (!container) continue;
+                const cw = container.clientWidth;
+                const ch = container.clientHeight;
+                if (cw <= 0 || ch <= 0) continue;
+                const scale = Math.min(cw / srcW, ch / srcH, 1);
+                canvas.width  = Math.round(srcW * scale);
+                canvas.height = Math.round(srcH * scale);
+                const ctx = canvas.getContext('2d');
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
-            } else {
-                ctx.putImageData(imgData, 0, 0);
+                ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
             }
-
-            this.redrawOverlay();
         },
 
         // Fallback: fetch JPEG preview via REST endpoint

@@ -4185,49 +4185,78 @@ function ninaApp() {
             return this._charts[key];
         },
 
-        // Guider chart: RA (red) + Dec (blue) vs sample index
+        // Guider chart: RA (red) + Dec (blue) vs sample index.
+        // The canvas lives inside x-show="guider.connected" which starts
+        // as display:none, so Chart.js used to measure 0x0 at first
+        // create and never re-fit. We now (a) defer instance creation
+        // until the canvas actually has a non-zero size, and
+        // (b) destroy + recreate if a tab switch leaves the canvas
+        // measuring different — both safer than relying on resize()
+        // alone, which doesn't always recompute scales correctly.
         updateGuideChart() {
+            const canvas = this.$refs.guideChart;
+            if (!canvas || typeof Chart === 'undefined') return;
+            // Wait until the canvas has actual pixels before creating
+            // the chart — its parent may still be display:none on the
+            // first WS tick.
+            if (canvas.clientWidth < 10 || canvas.clientHeight < 10) return;
+
             const t = this._chartTheme();
-            const c = this._ensureChart('guideChart', 'guide', 'line', () => ({
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [
-                        { label: 'RA', data: [], borderColor: '#e57373', backgroundColor: 'transparent',
-                          tension: 0.2, pointRadius: 0, borderWidth: 1.5 },
-                        { label: 'Dec', data: [], borderColor: '#64b5f6', backgroundColor: 'transparent',
-                          tension: 0.2, pointRadius: 0, borderWidth: 1.5 }
-                    ]
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    animation: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        x: { display: false, grid: { color: t.grid } },
-                        y: { ticks: { color: t.tick, font: { size: 10 } }, grid: { color: t.grid },
-                             title: { display: true, text: 'arcsec', color: t.tick, font: { size: 10 } } }
+            const steps = (this.guider.recentSteps || []).filter(
+                s => Number.isFinite(Number(s.ra)) && Number.isFinite(Number(s.dec))
+            );
+            const raVals  = steps.map(s => Number(s.ra));
+            const decVals = steps.map(s => Number(s.dec));
+            const labels  = steps.map((_, i) => i);
+
+            // Detect a stale chart whose canvas was sized 0 at creation
+            // — Chart.js exposes width/height once it has measured.
+            const existing = this._charts.guide;
+            if (existing && (existing.width < 10 || existing.canvas !== canvas)) {
+                try { existing.destroy(); } catch {}
+                this._charts.guide = null;
+            }
+
+            let c = this._charts.guide;
+            if (!c) {
+                c = new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [
+                            { label: 'RA', data: raVals, borderColor: '#e57373',
+                              backgroundColor: 'transparent', tension: 0.2,
+                              pointRadius: 0, borderWidth: 1.5 },
+                            { label: 'Dec', data: decVals, borderColor: '#64b5f6',
+                              backgroundColor: 'transparent', tension: 0.2,
+                              pointRadius: 0, borderWidth: 1.5 }
+                        ]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        animation: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { display: false, grid: { color: t.grid } },
+                            // Symmetric y so positive + negative excursions
+                            // are both visible — auto-fit would otherwise
+                            // anchor at 0 when all samples sit on one side.
+                            y: {
+                                ticks: { color: t.tick, font: { size: 10 } },
+                                grid:  { color: t.grid },
+                                title: { display: true, text: 'arcsec',
+                                         color: t.tick, font: { size: 10 } },
+                                suggestedMin: -2, suggestedMax: 2
+                            }
+                        }
                     }
-                }
-            }));
-            if (!c) return;
-            const steps = this.guider.recentSteps || [];
-            c.data.labels = steps.map((_, i) => i);
-            // Coerce to numbers + filter NaN — protects against the
-            // chart silently going blank if a step arrives without
-            // raArcsec/decArcsec (e.g. before pixel scale is known).
-            c.data.datasets[0].data = steps.map(s => Number(s.ra) || 0);
-            c.data.datasets[1].data = steps.map(s => Number(s.dec) || 0);
-            // Defensive resize: when the chart was created the canvas
-            // was inside x-show="guider.connected" which started as
-            // display:none → Chart.js measured 0x0 and never auto-
-            // rescaled when the panel later became visible. Without
-            // this call the plot area stays at its initial size and
-            // the line traces fall outside the clip region (Y axis
-            // labels still render so it looks like a working but
-            // empty chart). resize() re-measures the parent and
-            // refits before the next draw.
-            c.resize();
+                });
+                this._charts.guide = c;
+                return;   // already painted with current data
+            }
+            c.data.labels = labels;
+            c.data.datasets[0].data = raVals;
+            c.data.datasets[1].data = decVals;
             c.update('none');
         },
 
@@ -7496,6 +7525,17 @@ function ninaApp() {
                         this.guider.recentSteps = [];
                     }
                 } else {
+                    // First time we learn PHD2 is connected (typically
+                    // after a page refresh while PHD2 was already up):
+                    // fetch the management state the user would normally
+                    // get by clicking Connect — profile list, exposure,
+                    // dec mode, equipment-connected flag, algo presets,
+                    // algo params, guide-camera/mount snapshot. Without
+                    // this the GUIDE-tab Control surface was blank
+                    // (empty profile dropdown, no algo preset buttons,
+                    // "Connect equipment" stuck even when guiding).
+                    const wasDisconnected = !this.guider.connected;
+                    if (wasDisconnected) this.fetchGuiderEquipment();
                     this.guider = {
                         connected: true,
                         host: g.host || this.guider.host,

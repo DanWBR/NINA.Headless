@@ -32,18 +32,14 @@ public class MdnsService : IHostedService, IDisposable {
         try {
             var port = _config.GetValue("Mdns:Port", 5000);
             var hostname = Environment.MachineName;
-            // Default instance name is the literal "polaris" when
-            // possible — friendly http://polaris.local on most LANs.
-            // To avoid colliding with another device the user already
-            // gave that name (e.g. a Raspberry Pi running a separate
-            // mDNS responder claiming polaris.local), suffix with the
-            // sanitized machine hostname when we can derive one. So a
-            // workstation called ASUSPROART resolves on first run as
-            // http://polaris-asusproart.local without any setup.
-            // Explicit Mdns:InstanceName in appsettings still wins
-            // for users who want the bare "polaris".
-            var defaultInstance = BuildDefaultInstanceName(hostname);
-            var instanceName = _config.GetValue("Mdns:InstanceName", defaultInstance)!;
+            // Default instance name = "polaris-app" — discoverable as
+            // http://polaris-app.local:<port> on any LAN with mDNS /
+            // Bonjour. The bare "polaris" was avoided because a lot
+            // of users already have a Pi or other gadget claiming
+            // polaris.local; the -app suffix keeps the URL friendly
+            // while preventing collisions. Override via
+            // Mdns:InstanceName in appsettings for a custom name.
+            var instanceName = _config.GetValue("Mdns:InstanceName", "polaris-app")!;
 
             _mdns = new MulticastService();
             _discovery = new ServiceDiscovery(_mdns);
@@ -99,25 +95,5 @@ public class MdnsService : IHostedService, IDisposable {
 
     public void Dispose() {
         _discovery?.Dispose();
-    }
-
-    /// <summary>
-    /// "polaris-{sanitizedHostname}" when we have a hostname, plain
-    /// "polaris" otherwise. Sanitizes to mDNS-safe characters: lowercase
-    /// letters, digits, hyphens. Anything else collapses to a hyphen
-    /// (then runs of hyphens are coalesced and trimmed). Caps the
-    /// suffix at 24 chars so the whole instance name stays well under
-    /// the 63-char DNS label limit.
-    /// </summary>
-    private static string BuildDefaultInstanceName(string hostname) {
-        if (string.IsNullOrWhiteSpace(hostname)) return "polaris";
-        var chars = hostname.ToLowerInvariant().Select(c =>
-            (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ? c : '-').ToArray();
-        var sanitized = new string(chars);
-        // Collapse runs of hyphens and trim leading/trailing.
-        while (sanitized.Contains("--")) sanitized = sanitized.Replace("--", "-");
-        sanitized = sanitized.Trim('-');
-        if (sanitized.Length > 24) sanitized = sanitized.Substring(0, 24).Trim('-');
-        return string.IsNullOrEmpty(sanitized) ? "polaris" : $"polaris-{sanitized}";
     }
 }

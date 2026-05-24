@@ -34,7 +34,7 @@
 (function () {
     'use strict';
 
-    var BRIDGE_VERSION = '0.5.3-swe5';
+    var BRIDGE_VERSION = '0.5.4-swe5';
 
     // -----------------------------------------------------------------
     // CRITICAL: stellarium-web-engine's emscripten layer can't resolve
@@ -311,22 +311,28 @@
             centre.widthDeg, centre.heightDeg, centre.rotationDeg || 0);
         // stellarium-web-engine's geojson parser only knows: stroke,
         // fill (both #RRGGBB), stroke-width, stroke-opacity,
-        // fill-opacity, stroke-glow (bool). No stroke-dasharray — so
-        // we lean on stroke-glow:true for the target rectangle to give
-        // it visual differentiation from the solid mount rectangle
-        // when both happen to draw at the same RA/Dec (e.g. mount
-        // sitting on the planned target).
+        // fill-opacity, stroke-glow (bool). No stroke-dasharray.
+        //
+        // The engine multiplies feature_color by painter_->color
+        // (atmosphere brightness etc.), which washes the rectangles
+        // out badly during daytime renders. Compensate with:
+        //   * stroke-glow on both — engine adds a halo that survives
+        //     the painter multiply
+        //   * stroke-width 5 — thick enough to read at typical zooms
+        //   * fill-opacity 0 — fill gets washed to near-transparent
+        //     anyway; cleaner to just rely on stroke + glow for the
+        //     visual.
         return {
             type: 'FeatureCollection',
             features: [{
                 type: 'Feature',
                 properties: {
                     stroke: color,
-                    'stroke-width': glow ? 4 : 3,
+                    'stroke-width': 5,
                     'stroke-opacity': 1,
-                    'stroke-glow': !!glow,
+                    'stroke-glow': true,
                     fill: color,
-                    'fill-opacity': 0.12
+                    'fill-opacity': glow ? 0.0 : 0.08
                 },
                 geometry: { type: 'Polygon', coordinates: [ring] }
             }]
@@ -705,6 +711,36 @@
                 // set-time tick typically fires within the first second
                 // of page load, well before the engine onReady completes).
                 skyDrainPending();
+                // SWE-5: emit an initial 'center' so the parent can
+                // seed its skyTarget unconditionally — without this,
+                // the change-hook never fires unless observer.yaw/pitch
+                // mutate (which they don't on a fresh boot before any
+                // look-at), so skyTarget stays null and the red target
+                // rectangle is never drawn. Retry a few times in case
+                // the engine's coords aren't valid right at onReady.
+                var initialCentreTries = 0;
+                var emitInitialCentre = function () {
+                    var c = skyGetCenter();
+                    if (c) {
+                        postToParent({
+                            type: 'center',
+                            center: c,
+                            fromDrag: true,
+                            __from: 'sky-bridge'
+                        });
+                        console.log('[Sky] initial centre emitted: RA='
+                            + c.raDeg.toFixed(2) + '° Dec=' + c.decDeg.toFixed(2)
+                            + '° FOV=' + c.fovDeg.toFixed(2) + '°');
+                        return;
+                    }
+                    initialCentreTries++;
+                    if (initialCentreTries < 10) {
+                        setTimeout(emitInitialCentre, 100);
+                    } else {
+                        console.warn('[Sky] gave up trying to emit initial centre after 10 tries');
+                    }
+                };
+                setTimeout(emitInitialCentre, 50);
             }
 
             var modulePromise = window.StelWebEngine({

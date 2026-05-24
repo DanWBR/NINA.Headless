@@ -8766,13 +8766,18 @@ function ninaApp() {
                 if (!this.equipMountChoice && eq.telescope.name) {
                     this.equipMountChoice = eq.telescope.name;
                 }
-                // Mount-anchored FOV overlay needs to track the new
-                // RA/Dec. Skip when a skyTarget is selected (that path
-                // anchors the FOV on the target, not the mount) or
-                // when the position didn't change (don't churn d3-
-                // celestial on every 1Hz tick if the mount is parked
-                // or perfectly still).
-                if (this.tab === 'sky' && !this.skyTarget
+                // Blue mount-anchored FOV overlay needs to track the
+                // new RA/Dec on every status push so the user sees the
+                // scope walk across the sky during a slew. The
+                // !skyTarget gate from the d3-celestial era is gone —
+                // with the new screen-anchored red target, skyTarget
+                // is always set (it tracks the engine centre), so that
+                // gate would prevent ALL updates. The bridge has its
+                // own per-push dedup (3-decimal RA/Dec hash) that
+                // skips pointless redraws when the mount is parked
+                // and ra/dec actually didn't change, so we don't need
+                // to debounce here.
+                if (this.tab === 'sky'
                     && this.aladinShowFov
                     && (prevRa !== this.mount.ra || prevDec !== this.mount.dec)
                     && typeof this.updateSkyCameraFov === 'function') {

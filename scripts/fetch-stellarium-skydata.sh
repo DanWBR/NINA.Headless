@@ -131,11 +131,34 @@ done
 ELAPSED=$(( $(date +%s) - START ))
 TOTAL_SIZE=$(du -sh "${OUTPUT_DIR}" 2>/dev/null | cut -f1)
 echo ""
-echo "✓ Skydata mirror complete in ${ELAPSED}s — total size ${TOTAL_SIZE}"
-echo "  Path: ${OUTPUT_DIR}"
+
+# HiPS pyramids on CloudFront don't expose directory indices, so
+# neither wget --recursive nor curl can walk them. This script
+# currently only mirrors top-level metadata (properties files +
+# fixed-name files like mpcorb.dat). A 36KB-ish total is the sign
+# you hit this path — the heavy lifting (HEALPix tile pyramids)
+# isn't covered.
+if [ "${FETCHER}" = "curl" ] || [ "$(du -sb "${OUTPUT_DIR}" 2>/dev/null | cut -f1)" -lt 100000 ]; then
+    echo "⚠ Only metadata mirrored (~${TOTAL_SIZE}). The HiPS tile pyramids"
+    echo "  (~500MB-1GB of actual data) are NOT downloaded — neither wget's"
+    echo "  recursive nor curl can crawl CloudFront's directory tree."
+    echo ""
+    echo "  For now, sky-bridge.js defaults to fetching tiles direct from the"
+    echo "  Stellarium Web CDN — the browser caches them after first hit, so"
+    echo "  the second observing session is effectively offline."
+    echo ""
+    echo "  A true offline mirror needs a HiPS-aware crawler (walks each"
+    echo "  Norder level + HEALPix tile index from the properties files)."
+    echo "  Filed as a future enhancement."
+else
+    echo "✓ Skydata mirror complete in ${ELAPSED}s — total size ${TOTAL_SIZE}"
+    echo "  Path: ${OUTPUT_DIR}"
+    echo ""
+    echo "  Switch sky-bridge.js to local mode by setting"
+    echo "  window.__skyDataBase = 'data/skydata/' before the iframe loads"
+    echo "  (or edit the SKYDATA_BASE default in sky-bridge.js)."
+fi
 echo ""
-echo "Reload Polaris and open the SKY tab → the iframe should now render"
-echo "stars / DSOs / Milky Way (peek by un-hiding the iframe in DevTools:"
+echo "Peek at the iframe in DevTools:"
 echo "  document.getElementById('skyFrame').style.cssText="
 echo "    'position:static; width:100%; height:600px; visibility:visible;'"
-echo "  )"

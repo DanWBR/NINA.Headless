@@ -64,6 +64,29 @@ html, body {
     -webkit-tap-highlight-color: transparent;
 }
 
+/* Mobile/small-screen global UI scale-down. The codebase uses
+   pixel units almost exclusively (no rem-based scale), so dialing
+   the root font-size does nothing. The CSS `zoom` property scales
+   every descendant including layout dimensions and absolutely-
+   positioned overlays, supported in Chromium, Safari, Edge and
+   modern Firefox.
+
+   Applied to <body> rather than <html> so fixed-position elements
+   (activity bar pinned to viewport bottom) keep their relationship
+   to the actual viewport instead of being scaled out of place.
+
+   Two breakpoints:
+   - tablets / large phones in portrait (≤960 px): 0.85 — pulls in
+     about 15% so the cards fit two-up instead of stretching.
+   - phones (≤640 px): 0.75 — comfortable density for thumb reach.
+   Numbers are conservative so tap targets stay finger-sized. */
+@media (max-width: 960px) {
+    body { zoom: 0.85; }
+}
+@media (max-width: 640px) {
+    body { zoom: 0.75; }
+}
+
 /* Always-show-all exposure preset popover (replaces the browser
    native <datalist> dropdown — see <script> in index.html above
    the body for the controller). Glassy panel anchored under the

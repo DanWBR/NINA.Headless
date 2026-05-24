@@ -297,6 +297,16 @@
                 <svg viewBox="0 0 24 24" width="22" height="22"><rect x="3" y="4" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="11" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 17l6-5 4 3 5-4 3 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <span class="nav-label">Studio</span>
             </button>
+            <!-- Editor: Lightroom-style non-destructive editor for masters,
+                 raster files, and uploads. Lives next to STUDIO because
+                 it's the natural last step of the post-processing flow. -->
+            <button class="nav-btn" :class="{ active: tab === 'editor' }" @click="tab = 'editor'; editorTabOpened()" title="Editor (Lightroom-style)">
+                <svg viewBox="0 0 24 24" width="22" height="22">
+                    <path d="M4 16l8-8 4 4-8 8H4v-4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                    <path d="M14 6l3-3 4 4-3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+                <span class="nav-label">Editor</span>
+            </button>
             <button class="nav-btn" :class="{ active: tab === 'tonight' }" @click="tab = 'tonight'; loadTonightsBest()" title="Tonight's Best">
                 <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 2 L13.5 10.5 L22 12 L13.5 13.5 L12 22 L10.5 13.5 L2 12 L10.5 10.5 Z" fill="currentColor"/></svg>
                 <span class="nav-label">Tonight</span>
@@ -3081,6 +3091,223 @@
                     </svg>
                     Camera
                 </button>
+            </div>
+
+            <!-- EDITOR — Lightroom-style non-destructive image editor.
+                 Three sources:
+                  • Open a master from the STUDIO Library (via the Library
+                    button in this panel's source picker)
+                  • Pick a file from FILES (via the "Open in editor"
+                    button there — populates editorState.sourcePath)
+                  • Drag-and-drop / upload directly into this tab.
+                 Edits live in editorState.edits and persist via the
+                 /api/editor/sidecar endpoint as {source}.edit.json.
+                 The preview <img> is bound to a Blob URL built from
+                 the latest /api/editor/preview response so slider drags
+                 update without flicker. -->
+            <div x-show="tab === 'editor'" class="tab-panel editor-panel">
+                <div class="panel-header">
+                    Editor
+                    <span class="status-indicator-sm"
+                          :class="editorState.session ? 'ok' : 'idle'"
+                          x-text="editorState.session ? 'session active' : 'no file open'"></span>
+                    <span class="muted" style="font-size:11px;margin-left:auto"
+                          x-show="editorState.session"
+                          x-text="editorState.width + '×' + editorState.height + ' · ' + (editorState.channels === 3 ? 'RGB' : 'mono')"></span>
+                    <button class="btn btn-sm" @click="editorReset()" :disabled="!editorState.session"
+                            title="Reset all sliders to defaults">↺ Reset</button>
+                    <button class="btn btn-sm" @click="editorSaveSidecar()" :disabled="!editorState.session || !editorState.dirty"
+                            title="Save current edits to .edit.json sidecar">💾 Save edits</button>
+                    <button class="btn btn-sm btn-primary" @click="editorOpenExportModal()" :disabled="!editorState.session"
+                            title="Export the final image">↓ Export…</button>
+                </div>
+
+                <!-- Source picker — only visible when no session yet -->
+                <div class="editor-source-picker" x-show="!editorState.session">
+                    <div class="editor-source-card editor-source-dropzone"
+                         @dragover.prevent
+                         @drop.prevent="editorHandleDrop($event)"
+                         @click="$refs.editorFileInput.click()">
+                        <h3>Open file</h3>
+                        <p class="hint">Drag a FITS / XISF / PNG / JPG / TIFF here,
+                           or click to pick from your computer.</p>
+                        <input type="file" x-ref="editorFileInput"
+                               accept=".fits,.fit,.fts,.xisf,.png,.jpg,.jpeg,.tif,.tiff"
+                               style="display:none"
+                               @change="editorHandleUpload($event.target.files[0])">
+                    </div>
+                    <div class="editor-source-card">
+                        <h3>From server path</h3>
+                        <p class="hint">Type or paste the absolute path of a file
+                           already on the Polaris host.</p>
+                        <div class="editor-path-row">
+                            <input type="text" class="input-md" x-model="editorState.pathInput"
+                                   placeholder="/home/dan/astro/M31_master.fits"
+                                   @keyup.enter="editorLoad(editorState.pathInput)">
+                            <button class="btn btn-sm btn-primary"
+                                    @click="editorLoad(editorState.pathInput)"
+                                    :disabled="!editorState.pathInput || editorState.loading">Open</button>
+                        </div>
+                    </div>
+                    <div class="editor-source-card">
+                        <h3>From Studio Library</h3>
+                        <p class="hint">Jump to STUDIO, pick a master, then click
+                           "Open in editor" on its preview.</p>
+                        <button class="btn btn-sm" @click="tab = 'studio'; loadStudio()">→ Go to Studio</button>
+                    </div>
+                </div>
+                <div class="editor-load-error" x-show="editorState.error" x-text="editorState.error"></div>
+
+                <!-- Active editing surface -->
+                <div class="editor-workspace" x-show="editorState.session">
+                    <!-- Left rail: preview + histogram -->
+                    <div class="editor-preview-col">
+                        <div class="editor-preview-toolbar">
+                            <span class="muted" style="flex:1; font-size:11px"
+                                  x-text="editorState.sourcePath"></span>
+                            <button class="btn btn-sm"
+                                    @mousedown="editorState.showOriginal = true"
+                                    @mouseup="editorState.showOriginal = false"
+                                    @mouseleave="editorState.showOriginal = false"
+                                    title="Hold to see the original (no edits applied)">👁 Hold to compare</button>
+                            <button class="btn btn-sm" @click="editorClose()"
+                                    title="Close editor and free the session">✕ Close</button>
+                        </div>
+                        <div class="editor-preview-wrap">
+                            <img class="editor-preview-img" :src="editorState.previewUrl"
+                                 x-show="editorState.previewUrl && !editorState.showOriginal" alt="preview">
+                            <img class="editor-preview-img" :src="editorState.originalUrl"
+                                 x-show="editorState.showOriginal && editorState.originalUrl" alt="original">
+                            <div class="editor-preview-spinner" x-show="editorState.rendering">⌛</div>
+                        </div>
+                        <canvas id="editorHistogram" class="editor-histogram"
+                                width="512" height="80"></canvas>
+                    </div>
+
+                    <!-- Right rail: collapsible sliders panels (Lightroom-mobile layout) -->
+                    <div class="editor-controls-col">
+
+                        <!-- LUZ / LIGHT -->
+                        <details class="editor-section" open>
+                            <summary>Light</summary>
+                            <template x-for="s in editorLightSliders" :key="s.key">
+                                <label class="editor-slider-row">
+                                    <span class="editor-slider-label" x-text="s.label"></span>
+                                    <input type="range" :min="s.min" :max="s.max" :step="s.step"
+                                           :value="editorState.edits.light?.[s.key] ?? 0"
+                                           @input="editorSetLight(s.key, +$event.target.value)">
+                                    <span class="editor-slider-value"
+                                          x-text="(editorState.edits.light?.[s.key] ?? 0).toFixed(s.dp || 2)"></span>
+                                </label>
+                            </template>
+                        </details>
+
+                        <!-- COR / COLOR -->
+                        <details class="editor-section" open>
+                            <summary>Color</summary>
+                            <label class="editor-slider-row">
+                                <span class="editor-slider-label">Temp</span>
+                                <input type="range" min="2000" max="15000" step="50"
+                                       :value="editorState.edits.whiteBalance?.tempK ?? 6500"
+                                       @input="editorSetWB('tempK', +$event.target.value)">
+                                <span class="editor-slider-value"
+                                      x-text="(editorState.edits.whiteBalance?.tempK ?? 6500) + ' K'"></span>
+                            </label>
+                            <label class="editor-slider-row">
+                                <span class="editor-slider-label">Tint</span>
+                                <input type="range" min="-1" max="1" step="0.01"
+                                       :value="editorState.edits.whiteBalance?.tint ?? 0"
+                                       @input="editorSetWB('tint', +$event.target.value)">
+                                <span class="editor-slider-value"
+                                      x-text="(editorState.edits.whiteBalance?.tint ?? 0).toFixed(2)"></span>
+                            </label>
+                            <template x-for="s in editorColorSliders" :key="s.key">
+                                <label class="editor-slider-row">
+                                    <span class="editor-slider-label" x-text="s.label"></span>
+                                    <input type="range" :min="s.min" :max="s.max" :step="s.step"
+                                           :value="editorState.edits.color?.[s.key] ?? 0"
+                                           @input="editorSetColor(s.key, +$event.target.value)">
+                                    <span class="editor-slider-value"
+                                          x-text="(editorState.edits.color?.[s.key] ?? 0).toFixed(s.dp || 2)"></span>
+                                </label>
+                            </template>
+                        </details>
+
+                        <!-- EFEITOS / EFFECTS -->
+                        <details class="editor-section">
+                            <summary>Effects</summary>
+                            <template x-for="s in editorEffectsSliders" :key="s.key">
+                                <label class="editor-slider-row">
+                                    <span class="editor-slider-label" x-text="s.label"></span>
+                                    <input type="range" :min="s.min" :max="s.max" :step="s.step"
+                                           :value="editorState.edits.effects?.[s.key] ?? 0"
+                                           @input="editorSetEffects(s.key, +$event.target.value)">
+                                    <span class="editor-slider-value"
+                                          x-text="(editorState.edits.effects?.[s.key] ?? 0).toFixed(s.dp || 2)"></span>
+                                </label>
+                            </template>
+                        </details>
+
+                        <!-- DETALHE / DETAIL -->
+                        <details class="editor-section">
+                            <summary>Detail</summary>
+                            <template x-for="s in editorDetailSliders" :key="s.key">
+                                <label class="editor-slider-row">
+                                    <span class="editor-slider-label" x-text="s.label"></span>
+                                    <input type="range" :min="s.min" :max="s.max" :step="s.step"
+                                           :value="editorState.edits.detail?.[s.key] ?? (s.default ?? 0)"
+                                           @input="editorSetDetail(s.key, +$event.target.value)">
+                                    <span class="editor-slider-value"
+                                          x-text="(editorState.edits.detail?.[s.key] ?? (s.default ?? 0)).toFixed(s.dp || 2)"></span>
+                                </label>
+                            </template>
+                        </details>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Export modal — quality + format + resize. ED-5. -->
+            <div class="modal-backdrop" x-show="editorState.exportModal" x-cloak
+                 @click.self="editorState.exportModal = false">
+                <div class="modal editor-export-modal">
+                    <h3>Export</h3>
+                    <label class="editor-export-row">
+                        <span>Format</span>
+                        <select x-model="editorState.export.format">
+                            <option value="jpg">JPEG (lossy, smaller)</option>
+                            <option value="png">PNG (lossless)</option>
+                            <option value="tif">TIFF (lossless)</option>
+                        </select>
+                    </label>
+                    <label class="editor-export-row" x-show="editorState.export.format === 'jpg'">
+                        <span>Quality</span>
+                        <input type="range" min="1" max="100" step="1" x-model.number="editorState.export.quality">
+                        <span class="muted" x-text="editorState.export.quality + '%'"></span>
+                    </label>
+                    <label class="editor-export-row">
+                        <span>Resize</span>
+                        <select x-model="editorState.export.resizeMode" @change="editorSyncResizeFromMode()">
+                            <option value="none">Original</option>
+                            <option value="long">Long side (px)</option>
+                            <option value="pct">Percent</option>
+                        </select>
+                        <input type="number" x-show="editorState.export.resizeMode !== 'none'"
+                               class="input-sm" x-model.number="editorState.export.resizeValue"
+                               min="1" :max="editorState.export.resizeMode === 'pct' ? 200 : 16384">
+                        <span class="muted" x-show="editorState.export.resizeMode === 'pct'">%</span>
+                    </label>
+                    <p class="hint">
+                        Output: <code x-text="editorExportOutputPreview()"></code>
+                    </p>
+                    <div class="modal-actions">
+                        <button class="btn" @click="editorState.exportModal = false">Cancel</button>
+                        <button class="btn btn-primary" @click="editorDoExport()"
+                                :disabled="editorState.exporting">
+                            <span x-show="!editorState.exporting">Export</span>
+                            <span x-show="editorState.exporting">Exporting…</span>
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <!-- TONIGHT'S BEST -->

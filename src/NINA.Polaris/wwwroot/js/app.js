@@ -625,6 +625,65 @@ function ninaApp() {
             lastFetched: null, filter: 'all', fitsFovOnly: false,
             thumbs: {}      // { [name]: { url, title, credit, missing } }
         },
+
+        // ── Editor (Lightroom-style) state. The .edits subtree mirrors
+        // the EditParams record on the server; we always send it whole on
+        // every preview call so the pipeline doesn't have to remember
+        // anything between requests. previewUrl + originalUrl are Blob
+        // URLs we revoke when superseded — important on a long session
+        // (otherwise the browser leaks ~100 MB per few minutes of slider
+        // drags). Debounce timer keeps preview requests at ~10/s max
+        // regardless of how fast the slider fires "input" events.
+        editorState: {
+            session:  null,        // sessionId from /api/editor/load
+            sourcePath: '',
+            width:    0,
+            height:   0,
+            channels: 1,
+            pathInput: '',         // text in the "open by path" field
+            loading:  false,
+            rendering: false,
+            error:    '',
+            edits:    {},          // EditParams shape
+            dirty:    false,       // edits changed since last sidecar save
+            previewUrl: '',        // current edited preview blob URL
+            originalUrl: '',       // unedited preview blob URL (for compare)
+            showOriginal: false,
+            exportModal: false,
+            exporting: false,
+            export: {
+                format: 'jpg',
+                quality: 92,
+                resizeMode: 'none',  // 'none' | 'long' | 'pct'
+                resizeValue: 100
+            }
+        },
+        _editorPreviewTimer: null,
+        _editorPendingPreview: false,
+        editorLightSliders: [
+            { key: 'exposure',   label: 'Exposure',   min: -5,   max: 5,   step: 0.05, dp: 2 },
+            { key: 'contrast',   label: 'Contrast',   min: -1,   max: 1,   step: 0.01, dp: 2 },
+            { key: 'highlights', label: 'Highlights', min: -1,   max: 1,   step: 0.01, dp: 2 },
+            { key: 'shadows',    label: 'Shadows',    min: -1,   max: 1,   step: 0.01, dp: 2 },
+            { key: 'whites',     label: 'Whites',     min: -1,   max: 1,   step: 0.01, dp: 2 },
+            { key: 'blacks',     label: 'Blacks',     min: -1,   max: 1,   step: 0.01, dp: 2 },
+        ],
+        editorColorSliders: [
+            { key: 'vibrance',   label: 'Vibrance',   min: -1,   max: 1,   step: 0.01, dp: 2 },
+            { key: 'saturation', label: 'Saturation', min: -1,   max: 1,   step: 0.01, dp: 2 },
+            { key: 'hue',        label: 'Hue',        min: -180, max: 180, step: 1,    dp: 0 },
+        ],
+        editorEffectsSliders: [
+            { key: 'texture',         label: 'Texture',  min: -1,   max: 1,   step: 0.01, dp: 2 },
+            { key: 'clarity',         label: 'Clarity',  min: -1,   max: 1,   step: 0.01, dp: 2 },
+            { key: 'dehaze',          label: 'Dehaze',   min: -1,   max: 1,   step: 0.01, dp: 2 },
+            { key: 'vignetteAmount',  label: 'Vignette', min: -1,   max: 1,   step: 0.01, dp: 2 },
+        ],
+        editorDetailSliders: [
+            { key: 'sharpenAmount',   label: 'Sharpen',  min: 0,    max: 1,   step: 0.01, dp: 2 },
+            { key: 'sharpenRadius',   label: 'Radius',   min: 0.5,  max: 5,   step: 0.1,  dp: 1, default: 1 },
+            { key: 'noiseReduce',     label: 'Noise red.', min: 0,  max: 1,   step: 0.01, dp: 2 },
+        ],
         _tonightLastKey: '',
 
         // --- FILES tab state ---
@@ -3921,6 +3980,338 @@ function ninaApp() {
             })
             .sort((a, b) => b._rank - a._rank)
             .slice(0, 3);
+        },
+
+        // ─── Editor (Lightroom-style; ED-4 server-mode, ED-6 adds WASM) ───
+        // The state lives in `editorState`; helpers below own the
+        // load/preview/export/sidecar lifecycle. previewUrl is a Blob URL
+        // we rotate on every render so the <img> swaps to a fresh src
+        // (and we revoke the previous URL to avoid the browser leaking
+        // ~1MB per slider tick of dragging).
+
+        editorTabOpened() {
+            // Called when the sidebar tab activates. Nothing to load
+            // upfront — user picks a file via dropzone, path field, or
+            // by jumping to STUDIO/FILES and clicking "Open in editor".
+            // Hook here in case we later want recent-files etc.
+        },
+
+        async editorLoad(path) {
+            if (!path) return;
+            this._editorTeardownBlobs();
+            this.editorState.loading = true;
+            this.editorState.error = '';
+            try {
+                const r = await fetch('/api/editor/load', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path })
+                });
+                if (!r.ok) {
+                    const e = await r.json().catch(() => null);
+                    throw new Error(e?.error || `HTTP ${r.status}`);
+                }
+                const info = await r.json();
+                this.editorState.session = info.sessionId;
+                this.editorState.sourcePath = info.sourcePath;
+                this.editorState.width = info.width;
+                this.editorState.height = info.height;
+                this.editorState.channels = info.channels;
+                // Hydrate sidecar edits if present, else defaults.
+                this.editorState.edits = info.edits || this._editorDefaultEdits();
+                this.editorState.dirty = false;
+                // Render initial preview + an unedited reference for the
+                // "Hold to compare" button.
+                await this._editorRenderOriginal();
+                this._editorSchedulePreview();
+            } catch (e) {
+                this.editorState.error = 'Open failed: ' + (e.message || 'unknown');
+                this.editorState.session = null;
+            } finally {
+                this.editorState.loading = false;
+            }
+        },
+
+        async editorHandleUpload(file) {
+            if (!file) return;
+            this.editorState.loading = true;
+            this.editorState.error = '';
+            try {
+                const fd = new FormData();
+                fd.append('file', file);
+                const r = await fetch('/api/editor/upload', { method: 'POST', body: fd });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const j = await r.json();
+                await this.editorLoad(j.path);
+            } catch (e) {
+                this.editorState.error = 'Upload failed: ' + (e.message || 'unknown');
+            } finally {
+                this.editorState.loading = false;
+            }
+        },
+
+        editorHandleDrop(ev) {
+            const f = ev.dataTransfer?.files?.[0];
+            if (f) this.editorHandleUpload(f);
+        },
+
+        editorReset() {
+            if (!this.editorState.session) return;
+            this.editorState.edits = this._editorDefaultEdits();
+            this.editorState.dirty = true;
+            this._editorSchedulePreview();
+        },
+
+        editorClose() {
+            if (this.editorState.session) {
+                // Fire-and-forget — server reaps on idle anyway, but
+                // freeing now is cheaper.
+                fetch('/api/editor/release', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: this.editorState.session })
+                }).catch(() => { /* ignore */ });
+            }
+            this._editorTeardownBlobs();
+            this.editorState.session = null;
+            this.editorState.sourcePath = '';
+            this.editorState.edits = {};
+            this.editorState.dirty = false;
+            this.editorState.error = '';
+        },
+
+        async editorSaveSidecar() {
+            if (!this.editorState.session) return;
+            try {
+                const r = await fetch('/api/editor/sidecar', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        path: this.editorState.sourcePath,
+                        edits: this.editorState.edits
+                    })
+                });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const j = await r.json();
+                this.editorState.dirty = false;
+                this.toast('Edits saved → ' + j.sidecarPath, 'ok');
+            } catch (e) {
+                this.toast('Save failed: ' + (e.message || ''), 'error');
+            }
+        },
+
+        editorOpenExportModal() {
+            this.editorState.exportModal = true;
+        },
+
+        editorSyncResizeFromMode() {
+            const m = this.editorState.export.resizeMode;
+            if (m === 'long') {
+                this.editorState.export.resizeValue =
+                    Math.max(this.editorState.width, this.editorState.height);
+            } else if (m === 'pct') {
+                this.editorState.export.resizeValue = 100;
+            }
+        },
+
+        editorExportOutputPreview() {
+            const fmt = this.editorState.export.format;
+            const ext = fmt === 'png' ? '.png' : fmt === 'tif' ? '.tif' : '.jpg';
+            const stem = (this.editorState.sourcePath || '').split(/[\\/]/).pop()
+                ?.replace(/\.[^.]+$/, '') || 'image';
+            return `…/edited/${stem}__edited_*${ext}`;
+        },
+
+        async editorDoExport() {
+            if (!this.editorState.session) return;
+            const ex = this.editorState.export;
+            let tw = null, th = null;
+            if (ex.resizeMode === 'long') {
+                const long = Math.max(this.editorState.width, this.editorState.height);
+                const scale = ex.resizeValue / long;
+                tw = Math.round(this.editorState.width  * scale);
+                th = Math.round(this.editorState.height * scale);
+            } else if (ex.resizeMode === 'pct') {
+                tw = Math.round(this.editorState.width  * ex.resizeValue / 100);
+                th = Math.round(this.editorState.height * ex.resizeValue / 100);
+            }
+            this.editorState.exporting = true;
+            try {
+                const r = await fetch('/api/editor/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: this.editorState.session,
+                        edits: this.editorState.edits,
+                        format: ex.format,
+                        quality: ex.quality,
+                        targetWidth: tw,
+                        targetHeight: th
+                    })
+                });
+                if (!r.ok) {
+                    const e = await r.json().catch(() => null);
+                    throw new Error(e?.error || `HTTP ${r.status}`);
+                }
+                const j = await r.json();
+                this.editorState.exportModal = false;
+                this.toast('Exported → ' + j.path, 'ok');
+            } catch (e) {
+                this.toast('Export failed: ' + (e.message || ''), 'error');
+            } finally {
+                this.editorState.exporting = false;
+            }
+        },
+
+        editorSetLight(key, val) { this._editorPatch('light', key, val); },
+        editorSetColor(key, val) { this._editorPatch('color', key, val); },
+        editorSetEffects(key, val) { this._editorPatch('effects', key, val); },
+        editorSetDetail(key, val) { this._editorPatch('detail', key, val); },
+        editorSetWB(key, val)    { this._editorPatch('whiteBalance', key, val); },
+
+        _editorPatch(section, key, val) {
+            if (!this.editorState.session) return;
+            const e = this.editorState.edits;
+            if (!e[section]) e[section] = {};
+            e[section][key] = val;
+            this.editorState.dirty = true;
+            this._editorSchedulePreview();
+        },
+
+        // Debounced render — every input pings, but we coalesce to one
+        // request in flight + one queued. Prevents the server from
+        // queueing 100 stale requests while the user is mid-drag.
+        _editorSchedulePreview() {
+            if (this._editorPreviewTimer) clearTimeout(this._editorPreviewTimer);
+            this._editorPreviewTimer = setTimeout(() => this._editorRunPreview(), 80);
+        },
+
+        async _editorRunPreview() {
+            if (!this.editorState.session) return;
+            if (this.editorState.rendering) {
+                // Already a request in flight — flag pending and bail.
+                this._editorPendingPreview = true;
+                return;
+            }
+            this.editorState.rendering = true;
+            try {
+                const r = await fetch('/api/editor/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: this.editorState.session,
+                        edits: this.editorState.edits,
+                        maxDim: 1600,
+                        quality: 85
+                    })
+                });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const blob = await r.blob();
+                const url = URL.createObjectURL(blob);
+                if (this.editorState.previewUrl) URL.revokeObjectURL(this.editorState.previewUrl);
+                this.editorState.previewUrl = url;
+                // Schedule histogram refresh on idle (don't bother
+                // computing on every slider tick — fire after 250 ms
+                // of quiet)
+                clearTimeout(this._editorHistTimer);
+                this._editorHistTimer = setTimeout(() => this._editorRenderHistogram(), 250);
+            } catch (e) {
+                console.warn('[Editor] preview failed', e);
+            } finally {
+                this.editorState.rendering = false;
+                if (this._editorPendingPreview) {
+                    this._editorPendingPreview = false;
+                    this._editorSchedulePreview();
+                }
+            }
+        },
+
+        async _editorRenderOriginal() {
+            // Fetches a one-shot unedited preview for the "Hold to compare"
+            // button. Cached for the life of the session.
+            if (!this.editorState.session) return;
+            try {
+                const r = await fetch('/api/editor/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: this.editorState.session,
+                        edits: this._editorDefaultEdits(),
+                        maxDim: 1600,
+                        quality: 85
+                    })
+                });
+                if (!r.ok) return;
+                const blob = await r.blob();
+                if (this.editorState.originalUrl) URL.revokeObjectURL(this.editorState.originalUrl);
+                this.editorState.originalUrl = URL.createObjectURL(blob);
+            } catch { /* non-fatal */ }
+        },
+
+        async _editorRenderHistogram() {
+            if (!this.editorState.session) return;
+            try {
+                const r = await fetch('/api/editor/histogram', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: this.editorState.session,
+                        edits: this.editorState.edits
+                    })
+                });
+                if (!r.ok) return;
+                const hist = await r.json();
+                this._editorDrawHistogram(hist);
+            } catch { /* non-fatal */ }
+        },
+
+        _editorDrawHistogram(hist) {
+            const canvas = document.getElementById('editorHistogram');
+            if (!canvas || !hist) return;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const isRgb = hist.length === 768;
+            const channels = isRgb
+                ? [
+                    { off: 0,   color: 'rgba(248, 113, 113, 0.7)' },  // R
+                    { off: 256, color: 'rgba(74,  222, 128, 0.7)' },  // G
+                    { off: 512, color: 'rgba(96,  165, 250, 0.7)' }   // B
+                  ]
+                : [{ off: 0, color: 'rgba(229, 231, 235, 0.85)' }];
+            // Normalise each channel's max so colours don't drown each other.
+            for (const ch of channels) {
+                let max = 0;
+                for (let i = 0; i < 256; i++) if (hist[ch.off + i] > max) max = hist[ch.off + i];
+                if (max <= 0) continue;
+                ctx.fillStyle = ch.color;
+                ctx.beginPath();
+                ctx.moveTo(0, canvas.height);
+                for (let i = 0; i < 256; i++) {
+                    const x = i / 255 * canvas.width;
+                    const y = canvas.height - (hist[ch.off + i] / max) * (canvas.height - 4);
+                    ctx.lineTo(x, y);
+                }
+                ctx.lineTo(canvas.width, canvas.height);
+                ctx.closePath();
+                ctx.fill();
+            }
+        },
+
+        _editorDefaultEdits() {
+            // Empty record-of-records — all sections null/missing means
+            // "defaults" on the server (EditParams.IsDefault per section).
+            return {};
+        },
+
+        _editorTeardownBlobs() {
+            if (this.editorState.previewUrl) {
+                URL.revokeObjectURL(this.editorState.previewUrl);
+                this.editorState.previewUrl = '';
+            }
+            if (this.editorState.originalUrl) {
+                URL.revokeObjectURL(this.editorState.originalUrl);
+                this.editorState.originalUrl = '';
+            }
         },
 
         // ─── Tonight's Best (/api/sky/tonights-best) ─────────────────────

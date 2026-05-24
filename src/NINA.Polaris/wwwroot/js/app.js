@@ -2300,7 +2300,24 @@ function ninaApp() {
 
         useBrowserGeolocation() {
             if (!navigator.geolocation) {
-                this.locSetup.error = 'Browser geolocation API not available';
+                this.locSetup.error = 'Browser geolocation API not available.';
+                return;
+            }
+            // iOS Safari + most modern browsers refuse Geolocation on
+            // non-HTTPS pages outside of localhost — Polaris over the
+            // LAN at http://polaris-app.local hits exactly that wall.
+            // Detect proactively so the user sees an actionable error
+            // instead of the silent permission-denied callback that
+            // iOS produces a few seconds later.
+            const isSecure = window.isSecureContext
+                || location.protocol === 'https:'
+                || ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+            if (!isSecure) {
+                this.locSetup.error =
+                    'Browser location needs HTTPS (or localhost). Type the coordinates ' +
+                    'manually below, or search by address. Tip: opening Polaris on ' +
+                    'iOS/Android from a phone usually means HTTPS isn\'t set up — ' +
+                    'one-tap address search above does the same job.';
                 return;
             }
             this.locSetup.locating = true;
@@ -2316,7 +2333,14 @@ function ninaApp() {
                 },
                 (err) => {
                     this.locSetup.locating = false;
-                    this.locSetup.error = err.message || 'Geolocation request denied';
+                    // PERMISSION_DENIED (1), POSITION_UNAVAILABLE (2),
+                    // TIMEOUT (3). The default err.message on iOS is
+                    // unhelpful; surface the code too.
+                    const codes = { 1: 'permission denied', 2: 'position unavailable', 3: 'timeout' };
+                    const label = codes[err.code] || 'failed';
+                    this.locSetup.error =
+                        `Geolocation ${label}. Use the address search above, or type the ` +
+                        `coordinates manually below.`;
                 },
                 { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
             );

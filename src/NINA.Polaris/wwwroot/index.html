@@ -5017,17 +5017,22 @@
                 meridian-flip timing, and twilight calculations. You can change this any time in Settings.
             </p>
 
-            <!-- Address search (OpenStreetMap / Nominatim) -->
-            <div class="location-search-row">
-                <input type="text" placeholder="🔍 Search city, address, observatory..."
+            <!-- Address search (OpenStreetMap / Nominatim) — wrapped
+                 in a real <form> so iOS Safari's on-screen 'Go' key
+                 dispatches submit (the iOS soft keyboard doesn't
+                 reliably fire keyup.enter on bare inputs). -->
+            <form class="location-search-row" @submit.prevent="geocodeAddress()">
+                <input type="search" placeholder="🔍 Search city, address, observatory..."
                        x-model="locSetup.searchQuery"
-                       @keyup.enter="geocodeAddress()"
+                       inputmode="search"
+                       enterkeyhint="search"
+                       autocomplete="off"
                        @input="locSetup.searchResults = []">
-                <button class="btn btn-sm" @click="geocodeAddress()"
+                <button type="submit" class="btn btn-sm"
                         :disabled="locSetup.searching || !locSetup.searchQuery">
                     <span x-text="locSetup.searching ? 'Searching…' : 'Search'"></span>
                 </button>
-            </div>
+            </form>
             <div class="location-search-results" x-show="locSetup.searchResults.length > 0" x-cloak>
                 <template x-for="r in locSetup.searchResults" :key="r.displayName">
                     <div class="location-search-result" @click="pickGeocodeResult(r)">

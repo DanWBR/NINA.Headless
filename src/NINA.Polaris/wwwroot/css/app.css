@@ -1668,7 +1668,8 @@ label select.input-sm {
     margin: 14px 0 4px;
 }
 
-.location-search-row input[type="text"] {
+.location-search-row input[type="text"],
+.location-search-row input[type="search"] {
     flex: 1;
     padding: 6px 8px;
     background: var(--bg-secondary);
@@ -1676,6 +1677,10 @@ label select.input-sm {
     border: 1px solid var(--border);
     border-radius: 4px;
     font-size: 13px;
+    /* iOS Safari shows a native rounded-rectangle for input[type=search]
+       by default that clashes with our dark theme — strip the chrome. */
+    -webkit-appearance: none;
+    appearance: none;
 }
 
 .location-search-results {

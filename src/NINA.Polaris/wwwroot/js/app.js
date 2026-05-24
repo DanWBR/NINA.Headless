@@ -107,6 +107,16 @@ function ninaApp() {
         skySearch: '',
         skyTarget: null,
 
+        // User toggle: when ON, picking a target (map click, search
+        // hit, Stellarium import) smoothly pans the sky engine to
+        // the chosen object via _skyLookAt. When OFF, the same picks
+        // still populate skyTarget + the skyInfo card, but the
+        // engine view stays exactly where the user left it — useful
+        // for browsing without losing the current framing.
+        // Persisted in localStorage so it survives reloads. Default
+        // ON to match the previous behaviour.
+        skyAutoCenterOnSelect: true,
+
         // SWE-5: object-info card overlay on the sky map. Populated
         // when the bridge emits a map-click with a rich object payload
         // (the user clicked on a recognised star/DSO/planet rather
@@ -815,6 +825,16 @@ function ninaApp() {
                 this.nightMode = true;
                 document.documentElement.setAttribute('data-theme', 'night');
             }
+
+            // Sky auto-center toggle is its own localStorage key so it
+            // doesn't get bundled with server-side profile settings.
+            const autoCenterSaved = localStorage.getItem('nina-sky-autocenter');
+            if (autoCenterSaved !== null) {
+                this.skyAutoCenterOnSelect = autoCenterSaved !== '0';
+            }
+            this.$watch('skyAutoCenterOnSelect', (v) => {
+                localStorage.setItem('nina-sky-autocenter', v ? '1' : '0');
+            });
 
             // Re-render the cached frame whenever the user switches
             // tabs. Fixes the classic "last snap painted on PREVIEW,
@@ -8121,14 +8141,14 @@ function ninaApp() {
                     ra: obj.raDeg / 15,
                     dec: obj.decDeg
                 };
-                // Smooth-pan the engine view to the picked object.
-                // _skyLookAt with an objectName resolves via the
-                // engine's stel.getObj → stel.pointAndLock path,
-                // which animates the centre over a few hundred ms
-                // (much nicer than the instant yaw/pitch jump that
-                // the coord-only fallback does). Keep the engine's
-                // current fov so we don't yank the user's zoom.
-                this._skyLookAt(obj.raDeg / 15, obj.decDeg, undefined, obj.name);
+                // Smooth-pan the engine view to the picked object,
+                // gated by the user's "Auto-center on select" toggle.
+                // When off, the card still opens and skyTarget is
+                // still set (so Slew & Center / Slew Only buttons
+                // work normally), but the engine view stays put.
+                if (this.skyAutoCenterOnSelect) {
+                    this._skyLookAt(obj.raDeg / 15, obj.decDeg, undefined, obj.name);
+                }
             }
 
             // Async fetch the thumbnail from the Tonight's Best image

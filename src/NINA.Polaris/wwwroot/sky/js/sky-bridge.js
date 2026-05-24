@@ -34,7 +34,7 @@
 (function () {
     'use strict';
 
-    var BRIDGE_VERSION = '0.8.4-swe5';
+    var BRIDGE_VERSION = '0.8.5-swe5';
 
     // -----------------------------------------------------------------
     // CRITICAL: stellarium-web-engine's emscripten layer can't resolve
@@ -499,30 +499,16 @@
         var labelText = 'Scope ' + w.toFixed(2) + 'x' + h.toFixed(2)
             + ' rot ' + rotPositive.toFixed(1);
         var midTop = [(ring[2][0] + ring[3][0]) / 2, (ring[2][1] + ring[3][1]) / 2];
-        // Apparent on-screen rotation of the rectangle depends on TWO
-        // parallactic angles: the one at the rectangle's own RA/Dec
-        // (sets how the rect's "celestial-north up" maps to its
-        // local zenith-up) AND the one at the projection center
-        // (sets which way "up" runs on the screen overall, because
-        // the projection's vertical axis is the centre's zenith).
-        //
-        // When the rectangle is right at the screen centre the two
-        // parallactics are equal and cancel, leaving the on-screen
-        // rotation = rot. When the user pans, the centre parallactic
-        // changes — so the screen-rotation of the off-centre rect
-        // rotates by the same amount even though its OWN parallactic
-        // is unchanged. Subtracting the centre parallactic keeps the
-        // label glued to the rect's top edge under any pan.
-        //
+        var parallactic = skyParallacticAt(raDeg, decDeg);
         // The engine parses text-rotate as `-degrees * DD2R`
         // (geojson_parser.c line 402) → positive input rotates the
         // text counter-clockwise on screen. CSS `rotate(Xdeg)` is
         // clockwise. Negate here so the mount label tilts in the
         // SAME visible direction as the rectangle (and as the CSS-
-        // rotated target label).
-        var parallacticRect   = skyParallacticAt(raDeg, decDeg);
-        var parallacticCentre = skyParallacticAngleDeg();
-        var textRotate = -(rot + parallacticRect - parallacticCentre);
+        // rotated target label). Live-rebuild from the change hook
+        // (see skyRebuildMountGeoJson) keeps the text-rotate fresh
+        // as time advances and parallactic at the rect evolves.
+        var textRotate = -(rot + parallactic);
         var labelProps = {
             stroke: color,
             'stroke-opacity': 1,

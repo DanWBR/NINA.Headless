@@ -2490,6 +2490,11 @@
                             :class="showAtlasFilters ? 'btn-active' : ''">Filters</button>
                     <button class="btn btn-sm" @click="getFromStellarium()"
                             title="Use currently-selected object in Stellarium as target">🔭 Stellarium</button>
+                    <label class="sky-autocenter-toggle"
+                           title="When on, picking a target (click on the map, search hit, or Stellarium import) smoothly pans the map to the object. Turn off if you want to keep your current framing while inspecting picks.">
+                        <input type="checkbox" x-model="skyAutoCenterOnSelect">
+                        Auto-center on select
+                    </label>
                 </div>
 
                 <!-- Sky Atlas filters -->

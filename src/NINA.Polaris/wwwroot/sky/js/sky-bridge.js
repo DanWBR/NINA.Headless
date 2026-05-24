@@ -34,7 +34,7 @@
 (function () {
     'use strict';
 
-    var BRIDGE_VERSION = '0.7.1-swe5';
+    var BRIDGE_VERSION = '0.7.2-swe5';
 
     // -----------------------------------------------------------------
     // CRITICAL: stellarium-web-engine's emscripten layer can't resolve
@@ -434,12 +434,13 @@
             + ' rot ' + rotPositive.toFixed(1);
         var midTop = [(ring[2][0] + ring[3][0]) / 2, (ring[2][1] + ring[3][1]) / 2];
         var parallactic = skyParallacticAt(raDeg, decDeg);
-        var textRotate = rot + parallactic;
-        // Engine parses text-rotate as -degrees * DD2R, so positive
-        // here rotates text counter-clockwise on screen. Match the
-        // visible rectangle orientation by negating the parallactic
-        // contribution if the rectangle visibly tilts the other way
-        // — adjust the sign here if testing shows it's reversed.
+        // The engine parses text-rotate as `-degrees * DD2R`
+        // (geojson_parser.c line 402) → positive input rotates the
+        // text counter-clockwise on screen. CSS `rotate(Xdeg)` is
+        // clockwise. Negate here so the mount label tilts in the
+        // SAME visible direction as the rectangle (and as the CSS-
+        // rotated target label).
+        var textRotate = -(rot + parallactic);
         var labelProps = {
             stroke: color,
             'stroke-opacity': 1,
@@ -449,6 +450,10 @@
             title: labelText,
             'text-anchor': 'bottom',
             'text-offset': [0, -6],
+            // Smaller than the engine's default (FONT_SIZE_BASE ≈ 14px)
+            // so the mount label matches the CSS .fov-label sizing
+            // (11px) and doesn't tower over the rectangle.
+            'text-size': 11,
             'text-rotate': textRotate
         };
         return {

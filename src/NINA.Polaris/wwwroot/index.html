@@ -18,6 +18,19 @@
 </head>
 <body x-data="ninaApp()" x-init="init()">
 
+    <!-- Shared exposure preset dropdown. Any <input type="number"
+         list="exposure-presets" ...> across the UI inherits the same
+         combobox: typeable + dropdown of astrophoto-standard values
+         from the camera's minimum supported exposure up to 1000s.
+         Single source of truth — tweak the EXPOSURE_PRESETS_ALL
+         array in app.js and every exposure field in the app picks
+         up the new list. -->
+    <datalist id="exposure-presets">
+        <template x-for="v in exposurePresets()" :key="v">
+            <option :value="v"></option>
+        </template>
+    </datalist>
+
     <!-- Status Bar -->
     <header class="status-bar">
         <div class="status-bar-left">
@@ -343,7 +356,7 @@
                 </div>
                 <div class="quick-controls">
                     <div class="control-row">
-                        <label>Exp<input type="number" x-model.number="exposure" step="1" min="0.001" class="input-sm"> s</label>
+                        <label>Exp<input type="number" x-model.number="exposure" list="exposure-presets" step="any" min="0" class="input-sm"> s</label>
                         <label>Gain<input type="number" x-model.number="gain" step="10" min="0" class="input-sm"></label>
                         <label>Bin<select x-model="binning" class="input-sm">
                             <option value="1">1x1</option>
@@ -464,7 +477,8 @@
                                            @change="saveLiveStackTriggers()" class="input-sm" style="width:60px">
                                 </label>
                                 <label>Exposure (s)
-                                    <input type="number" min="0.1" step="0.5"
+                                    <input type="number" min="0" step="any"
+                                           list="exposure-presets"
                                            x-model.number="liveStackTriggers.refocusRequest.exposureSeconds"
                                            @change="saveLiveStackTriggers()" class="input-sm" style="width:70px">
                                 </label>
@@ -674,7 +688,8 @@
                                    :disabled="polar.isActive">
                         </label>
                         <label>Exposure (s)
-                            <input type="number" class="input-sm" min="0.1" max="60" step="0.5"
+                            <input type="number" class="input-sm" min="0" step="any"
+                                   list="exposure-presets"
                                    x-model.number="polar.exposureSec"
                                    @change="savePolarRigSettings()"
                                    :disabled="polar.isActive">
@@ -830,7 +845,8 @@
                                    :disabled="autoFocus.state === 'running'">
                         </label>
                         <label>Exposure (s)
-                            <input type="number" x-model.number="afParams.exposureSeconds" min="0.1" step="0.5" class="input-sm"
+                            <input type="number" x-model.number="afParams.exposureSeconds"
+                                   list="exposure-presets" min="0" step="any" class="input-sm"
                                    :disabled="autoFocus.state === 'running'">
                         </label>
                         <label>Min Stars
@@ -929,7 +945,7 @@
                     <div class="control-row">
                         <label>Exp
                             <input type="number" x-model.number="preview.exposure"
-                                   step="0.5" min="0.001" class="input-sm"
+                                   list="exposure-presets" step="any" min="0" class="input-sm"
                                    :disabled="preview.busy"> s
                         </label>
                         <label>Gain
@@ -1056,7 +1072,7 @@
                         <div class="control-row">
                             <label>Exposure (s)
                                 <input type="number" x-model.number="video.exposure"
-                                       step="0.005" min="0.001" class="input-sm"
+                                       list="exposure-presets" step="any" min="0" class="input-sm"
                                        :disabled="cameraStream.running || videoRecording.recording">
                             </label>
                             <label>Gain
@@ -3004,7 +3020,7 @@
                                 </div>
                                 <div class="seq-item-params">
                                     <label>Exp<input type="number" class="seq-input seq-input-num"
-                                        x-model.number="item.exposure" step="1" min="0"
+                                        x-model.number="item.exposure" list="exposure-presets" step="any" min="0"
                                         :disabled="seqState === 'running' || item.imageType === 'BIAS'">s</label>
                                     <label>x<input type="number" class="seq-input seq-input-num"
                                         x-model.number="item.count" step="1" min="1"
@@ -4549,7 +4565,7 @@
             <div class="field-row" style="display:flex;gap:12px">
                 <div class="field" style="flex:1">
                     <label>Exposure (s)</label>
-                    <input type="number" min="0.1" step="1" x-model.number="mosaic.req.exposureSeconds">
+                    <input type="number" min="0" step="any" list="exposure-presets" x-model.number="mosaic.req.exposureSeconds">
                 </div>
                 <div class="field" style="flex:1">
                     <label>Frames per panel</label>

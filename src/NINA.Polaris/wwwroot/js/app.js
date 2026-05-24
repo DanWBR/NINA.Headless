@@ -12,6 +12,21 @@ const _polarisCharts = {
     guide: null, af: null, hfr: null, temp: null, hist: null, alt: null
 };
 
+// Astrophoto exposure ladder (seconds). Roughly geometric — covers
+// the typical span: planetary lucky-imaging frame times (~50µs upwards
+// on modern CMOS), narrowband sub-exposures (300-600s), and the
+// rare "leave it on for 1000s" case the user asked for as the upper
+// bound. Used by the global #exposure-presets <datalist> so every
+// numeric exposure input across the UI shows the same dropdown.
+const EXPOSURE_PRESETS_ALL = [
+    0.00003, 0.00005, 0.0001, 0.0002, 0.0005,
+    0.001, 0.002, 0.005, 0.01, 0.02, 0.05,
+    0.1, 0.2, 0.5,
+    1, 2, 3, 5, 8, 10, 15, 20, 30, 45,
+    60, 90, 120, 180, 240, 300,
+    420, 600, 900, 1000
+];
+
 function ninaApp() {
     return {
         tab: 'home',
@@ -912,6 +927,22 @@ function ninaApp() {
         async apiGet(url, opts = {}) {
             const resp = await this.apiFetch(url, opts);
             return resp.json();
+        },
+
+        // ---- Exposure preset dropdown source --------------------------
+        // Returns the global ladder filtered to >= camera's minimum
+        // supported exposure when the connected camera reports one
+        // (equipCameraInfo.minExposure — plumbed through the camera
+        // DTO when the backend grows that field), otherwise 0.0001s
+        // as a safe default that doesn't clip modern CMOS lower bounds.
+        // Consumed by the single <datalist id="exposure-presets">; all
+        // exposure inputs across the UI carry list="exposure-presets"
+        // so any future tweak (per-camera min, log/linear hybrid, etc.)
+        // touches one place.
+        exposurePresets() {
+            const min = (this.equipCameraInfo && this.equipCameraInfo.minExposure)
+                || 0.0001;
+            return EXPOSURE_PRESETS_ALL.filter(v => v >= min);
         },
 
         // Toast notification (auto-dismiss)

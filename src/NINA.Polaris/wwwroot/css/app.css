@@ -2516,8 +2516,13 @@ label select.input-sm {
    same so the layout doesn't shift. */
 .home-hero {
     position: relative;
-    min-height: 320px;
-    padding: 60px 40px;
+    /* Trimmed top/bottom padding (was 60 px each) and dropped the
+       320 px floor — the hero text + clock row only need ~180 px
+       of vertical room. Old values wasted ~80 px above the title
+       and another ~80 px between the clock row and the status
+       cards below. Horizontal 40 px stays for the gutter. */
+    min-height: 180px;
+    padding: 24px 40px;
     display: flex; align-items: center;
     background: linear-gradient(180deg,
         rgba(5, 8, 16, 0.55) 0%,

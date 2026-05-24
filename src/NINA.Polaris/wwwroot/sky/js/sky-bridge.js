@@ -34,7 +34,7 @@
 (function () {
     'use strict';
 
-    var BRIDGE_VERSION = '0.5.6-swe5';
+    var BRIDGE_VERSION = '0.6.0-swe5';
 
     // -----------------------------------------------------------------
     // CRITICAL: stellarium-web-engine's emscripten layer can't resolve
@@ -339,6 +339,50 @@
         };
     }
 
+    // SWE-5: target FOV as a screen-anchored CSS box (#sky-target-fov
+    // in the iframe HTML). Sized by the ratio of camera FOV to the
+    // engine's current core.fov, mapped to the canvas pixel dimensions.
+    // Always at viewport centre — that's the whole point ("the planning
+    // rectangle is wherever the user is looking right now").
+    function skyUpdateTargetFovBox(target) {
+        __lastTargetFov = target || null;
+        var el = document.getElementById('sky-target-fov');
+        if (!el) return;
+        if (!target || !(target.widthDeg > 0)) {
+            el.style.display = 'none';
+            return;
+        }
+        var canvas = document.getElementById('stel-canvas');
+        if (!canvas) { el.style.display = 'none'; return; }
+        var viewW = canvas.clientWidth || canvas.width;
+        var viewH = canvas.clientHeight || canvas.height;
+        var engineFovDeg = 60; // safe default if read fails
+        try {
+            if (window.__stel && window.__stel.core
+                && typeof window.__stel.core.fov === 'number'
+                && isFinite(window.__stel.core.fov)) {
+                engineFovDeg = window.__stel.core.fov / window.__stel.D2R;
+            }
+        } catch (e) { /* fall through to default */ }
+        if (engineFovDeg <= 0) engineFovDeg = 60;
+        // Engine fov is the viewport's *narrower* dimension worth of
+        // sky in degrees. Use the shorter screen edge as the reference
+        // to get px-per-deg, then size the box from camera FOV.
+        var refPx = Math.min(viewW, viewH);
+        var pxPerDeg = refPx / engineFovDeg;
+        var wPx = target.widthDeg * pxPerDeg;
+        var hPx = target.heightDeg * pxPerDeg;
+        // Apply rotation if any (camera roll angle from plate-solve).
+        var rotDeg = target.rotationDeg || 0;
+        el.style.width = wPx + 'px';
+        el.style.height = hPx + 'px';
+        el.style.transform = 'translate(-50%, -50%) rotate(' + rotDeg + 'deg)';
+        el.style.display = 'block';
+        console.log('[Sky] target FOV box: ' + wPx.toFixed(0) + '×' + hPx.toFixed(0)
+            + 'px (engineFov=' + engineFovDeg.toFixed(2) + '°, cam='
+            + target.widthDeg.toFixed(2) + '°)');
+    }
+
     function skyRemoveObj(slot) {
         var obj = __skyFovObjs[slot];
         if (!obj || !__skyFovLayer) return;
@@ -355,29 +399,27 @@
         if (!stel) return;
         skyEnsureFovLayer();
         if (!__skyFovLayer) return;
-        // Always recreate — engine geojson is immutable per-instance.
+        // Mount stays as a celestial-anchored geojson (engine renders
+        // it where the scope is pointing, even if user drags away).
+        // Mosaic likewise.
+        // Target: SCREEN-anchored — pure CSS overlay sized by camera
+        // FOV ratio to engine fov. Always at viewport centre, always
+        // visible, doesn't need any engine round-trip.
         skyRemoveObj('mount');
-        skyRemoveObj('target');
         skyRemoveObj('mosaic');
         console.log('[Sky] set-fov-overlays mount=', mount, 'target=', target);
         try {
             if (mount && mount.widthDeg > 0) {
                 __skyFovObjs.mount = stel.createObj('geojson', {
-                    data: skyFovGeoJson(mount, '#1e40af', false)  // dark blue, solid
+                    data: skyFovGeoJson(mount, '#1e40af', false)  // dark blue
                 });
                 __skyFovLayer.add(__skyFovObjs.mount);
                 console.log('[Sky] mount FOV rect created at RA=' + mount.raDeg.toFixed(2)
                     + '° Dec=' + mount.decDeg.toFixed(2) + '° size=' + mount.widthDeg.toFixed(2)
                     + '°×' + mount.heightDeg.toFixed(2) + '°');
             }
-            if (target && target.widthDeg > 0) {
-                __skyFovObjs.target = stel.createObj('geojson', {
-                    data: skyFovGeoJson(target, '#ef4444', true)  // red, glow
-                });
-                __skyFovLayer.add(__skyFovObjs.target);
-                console.log('[Sky] target FOV rect created at RA=' + target.raDeg.toFixed(2)
-                    + '° Dec=' + target.decDeg.toFixed(2) + '° (glow)');
-            }
+            // Update the screen-anchored target FOV CSS box.
+            skyUpdateTargetFovBox(target);
             if (mosaic && mosaic.tiles && mosaic.tiles.length) {
                 // Mosaic grid: one polygon per tile, yellow.
                 var features = mosaic.tiles.map(function (t) {
@@ -419,6 +461,12 @@
                 if (!attr) return;
                 if (attr !== 'observer.yaw' && attr !== 'observer.pitch'
                     && attr !== 'core.fov') return;
+                // core.fov change → resize the screen-anchored target
+                // box. Cheap: just re-measures DOM and reapplies CSS,
+                // doesn't talk to the engine for centre.
+                if (attr === 'core.fov' && __lastTargetFov) {
+                    skyUpdateTargetFovBox(__lastTargetFov);
+                }
                 var now = Date.now();
                 if (now - lastEmit < 100) return;
                 lastEmit = now;
@@ -432,7 +480,17 @@
         } catch (e) {
             console.warn('[Sky] change-hook install failed:', e);
         }
+        // Window resize also requires re-measuring the target box —
+        // canvas dimensions changed.
+        window.addEventListener('resize', function () {
+            if (__lastTargetFov) skyUpdateTargetFovBox(__lastTargetFov);
+        });
     }
+
+    // Cache the most recently received target so engine fov / window
+    // resize callbacks can re-render the box without an extra
+    // postMessage round-trip from the parent.
+    var __lastTargetFov = null;
 
     // -----------------------------------------------------------------
     // Incoming message router (parent → iframe).

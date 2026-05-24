@@ -75,10 +75,44 @@
             pointer-events: auto;
         }
         #sky-footer a { color: inherit; }
+
+        /* SWE-5: target FOV overlay — ALWAYS at viewport centre.
+           Bridge updates width/height in pixels via setProperty when
+           the parent sends set-fov-overlays (computed from camera FOV
+           ratio to current engine fov). pointer-events:none so drag
+           on the canvas underneath still works. */
+        #sky-target-fov {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            border: 2px solid #ef4444;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.8),
+                        inset 0 0 8px rgba(239, 68, 68, 0.4);
+            pointer-events: none;
+            display: none;
+            border-radius: 2px;
+            box-sizing: border-box;
+        }
+        #sky-target-fov::before,
+        #sky-target-fov::after {
+            content: '';
+            position: absolute;
+            background: #ef4444;
+        }
+        #sky-target-fov::before {
+            left: 50%; top: -4px; bottom: -4px; width: 1px;
+            transform: translateX(-50%);
+        }
+        #sky-target-fov::after {
+            top: 50%; left: -4px; right: -4px; height: 1px;
+            transform: translateY(-50%);
+        }
     </style>
 </head>
 <body>
     <canvas id="stel-canvas"></canvas>
+    <div id="sky-target-fov"></div>
     <div id="sky-status"><div class="msg">Loading sky engine…</div></div>
     <div id="sky-footer">
         Powered by <a href="https://github.com/Stellarium/stellarium-web-engine"

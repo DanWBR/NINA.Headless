@@ -4532,16 +4532,14 @@ function ninaApp() {
                 };
             }
 
-            let target = null;
-            if (this.skyTarget
-                && Number.isFinite(this.skyTarget.ra)
-                && Number.isFinite(this.skyTarget.dec)) {
-                target = {
-                    raDeg: this.skyTarget.ra * 15,
-                    decDeg: this.skyTarget.dec,
-                    widthDeg: w, heightDeg: h, rotationDeg: rot
-                };
-            }
+            // SWE-5: target rectangle is SCREEN-anchored (always at
+            // viewport centre). Bridge renders it as a CSS overlay
+            // sized from widthDeg/heightDeg + engine fov. No RA/Dec
+            // needed; the rectangle's "celestial position" IS the
+            // current map centre, which the user is dragging around.
+            const target = {
+                widthDeg: w, heightDeg: h, rotationDeg: rot
+            };
 
             // Skip when nothing actually changed since last push.
             // The mount status WS push fires several times per second
@@ -4554,8 +4552,9 @@ function ninaApp() {
             const key = JSON.stringify({
                 m: mount && { r: mount.raDeg.toFixed(3), d: mount.decDeg.toFixed(3),
                               w: mount.widthDeg.toFixed(3), rot: (mount.rotationDeg||0).toFixed(2) },
-                t: target && { r: target.raDeg.toFixed(3), d: target.decDeg.toFixed(3),
-                              w: target.widthDeg.toFixed(3), rot: (target.rotationDeg||0).toFixed(2) }
+                t: target && { w: target.widthDeg.toFixed(3),
+                              h: target.heightDeg.toFixed(3),
+                              rot: (target.rotationDeg||0).toFixed(2) }
             });
             if (key === this._lastFovOverlayKey) return;
             this._lastFovOverlayKey = key;
@@ -4565,8 +4564,7 @@ function ninaApp() {
             // and why (e.g. mount: false because mount.connected is false).
             console.log('[Polaris] _pushSkyFovOverlays mount=',
                 mount ? `${mount.raDeg.toFixed(2)}°/${mount.decDeg.toFixed(2)}°` : 'null',
-                'target=',
-                target ? `${target.raDeg.toFixed(2)}°/${target.decDeg.toFixed(2)}°` : 'null',
+                'target=screen-centred',
                 'fov=', w.toFixed(2) + '°×' + h.toFixed(2) + '°');
 
             this._skySendMessage({ type: 'set-fov-overlays', mount, target });

@@ -44,15 +44,20 @@ public class MdnsService : IHostedService, IDisposable {
             _mdns = new MulticastService();
             _discovery = new ServiceDiscovery(_mdns);
 
-            // Use the 3-arg ServiceProfile constructor so HostName lands
-            // as `{instanceName}.local` — the 4-arg one that accepts an
-            // address list builds HostName as
-            // `{instanceName}.{servicePrefix}.local` instead
-            // (so polaris-app + _nina._tcp came out as
-            // `polaris-app.nina.local`, which is not what users type
-            // into a browser). Then we attach A/AAAA records to that
-            // HostName manually with the routable local IPs.
+            // Both ServiceProfile constructors (3-arg AND 4-arg) build
+            // HostName as `{instance}.{servicePrefix}.local` — so for
+            // service "_nina._tcp" we got `polaris-app.nina.local` in
+            // the wild, confirmed in the user's startup log. Override
+            // HostName explicitly to the URL we WANT the browser to
+            // resolve, then patch the SRV record the constructor
+            // added (it still points at the old HostName) and add A /
+            // AAAA records that map the new HostName to our local IPs.
             var profile = new ServiceProfile(instanceName, "_nina._tcp", (ushort)port);
+            var desiredHost = new DomainName($"{instanceName}.local");
+            profile.HostName = desiredHost;
+            foreach (var srv in profile.Resources.OfType<SRVRecord>()) {
+                srv.Target = desiredHost;
+            }
 
             var addresses = MulticastService.GetIPAddresses()
                 .Where(addr =>
@@ -63,11 +68,11 @@ public class MdnsService : IHostedService, IDisposable {
             foreach (var ip in addresses) {
                 if (ip.AddressFamily == AddressFamily.InterNetwork) {
                     profile.Resources.Add(new ARecord {
-                        Name = profile.HostName, Address = ip
+                        Name = desiredHost, Address = ip
                     });
                 } else {
                     profile.Resources.Add(new AAAARecord {
-                        Name = profile.HostName, Address = ip
+                        Name = desiredHost, Address = ip
                     });
                 }
             }

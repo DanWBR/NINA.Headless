@@ -2698,6 +2698,13 @@ label select.input-sm {
     z-index: 5;
     padding: 14px 32px;
     border-top: 1px solid var(--border, #334155);
+    /* On narrow viewports (≤640 px ≈ phones) the GitHub + Donate
+       footer eats vertical real-estate that's better spent on the
+       hero CTAs. Hide entirely on mobile — both links are still
+       reachable from the README / About modal. */
+}
+@media (max-width: 640px) {
+    .home-footer { display: none; }
     color: var(--text-muted, #94a3b8);
     font-size: 12.5px;
     display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;

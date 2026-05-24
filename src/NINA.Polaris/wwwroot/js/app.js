@@ -2225,6 +2225,15 @@ function ninaApp() {
                         // 2009 — that's what the unconfigured engine
                         // starts at).
                         this._skyPushObserverAndTime();
+                        // SWE-5: push the FOV overlay state too. The
+                        // Show camera FOV checkbox defaults to checked
+                        // and updateSkyCameraFov() may have fired before
+                        // the bridge was ready — that call queued the
+                        // postMessage, but the bridge couldn't draw
+                        // anything until __stel existed. Re-pushing now
+                        // guarantees the blue mount rectangle + red
+                        // target rectangle paint on first paint.
+                        this._pushSkyFovOverlays();
                         break;
                     case 'webgl-unavailable':
                         this._skyWebGLAvailable = false;
@@ -4268,7 +4277,19 @@ function ninaApp() {
             const ra  = this.mount?.ra  ?? (this.skyTarget?.ra)  ?? 0;
             const dec = this.mount?.dec ?? (this.skyTarget?.dec) ?? 0;
             const decClamped = Math.max(-89.5, Math.min(89.5, dec));
-            this._skyLookAt(ra, decClamped, undefined, null);
+            // Tighter FOV so the camera's mount rectangle is actually
+            // visible — default 45° wide-field view dwarfs typical
+            // 1-3° camera FOVs. Zoom to ~4× the camera width so the
+            // blue rectangle takes a comfortable fraction of the
+            // viewport without losing context.
+            let fovDeg = undefined;
+            if (this.fov && this.fov.width > 0) {
+                fovDeg = Math.max(this.fov.width * 4, 1);
+            }
+            this._skyLookAt(ra, decClamped, fovDeg, null);
+            // Re-push the FOV overlays so the blue mount rectangle and
+            // red target rectangle are anchored on the new centre.
+            this._pushSkyFovOverlays();
         },
 
         // ASIAIR-style two-FOV overlay on the sky map:

@@ -79,6 +79,21 @@ docker run --rm \
         # pip --user installs into ~/.local/bin which isn't on
         # PATH by default for the non-root user inside the image.
         export PATH=\"\$HOME/.local/bin:\$PATH\"
+        # Upstream tools/*.py scripts use '#!/usr/bin/python3' which
+        # only resolves on Debian-style images. emscripten/emsdk has
+        # python3 elsewhere on PATH (typically /emsdk/python/...).
+        # Patch the shebangs to '#!/usr/bin/env python3' so the
+        # kernel finds the interpreter no matter where it lives.
+        # Without this the build dies with a misleading
+        # 'FileNotFoundError: ./tools/make-assets.py' from SCons —
+        # Linux returns ENOENT for the script when the interpreter
+        # is missing, not the script itself.
+        echo '→ Patching shebangs in tools/*.py'
+        for f in tools/*.py; do
+            if [ -f \"\$f\" ] && head -1 \"\$f\" | grep -q '^#!/usr/bin/python3\$'; then
+                sed -i '1s|^#!/usr/bin/python3\$|#!/usr/bin/env python3|' \"\$f\"
+            fi
+        done
         echo '→ Configuring Emscripten environment'
         source /emsdk/emsdk_env.sh
         echo '→ Cleaning previous build artefacts'

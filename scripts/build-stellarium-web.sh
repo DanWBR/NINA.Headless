@@ -61,11 +61,6 @@ echo "→ Pulling ${EMSDK_IMAGE} (first run only, ~500MB) ..."
 docker pull "${EMSDK_IMAGE}"
 
 echo "→ Building stellarium-web-engine (this takes 3-10 minutes)..."
-# Mount the submodule read-write so SCons can write its build artefacts.
-# UID/GID match keeps the resulting files owned by the host user instead
-# of root (Linux gotcha; harmless on Windows/macOS Docker Desktop).
-HOST_UID="$(id -u 2>/dev/null || echo 1000)"
-HOST_GID="$(id -g 2>/dev/null || echo 1000)"
 
 # Disable MSYS POSIX-path translation when running under Git Bash on
 # Windows. Otherwise the `-w /src` arg gets rewritten to
@@ -76,8 +71,15 @@ HOST_GID="$(id -g 2>/dev/null || echo 1000)"
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
+# Don't override the container's default user with --user 1000:1000.
+# emscripten/emsdk's image already runs as 'emscripten' (UID 1000) with
+# HOME=/home/emscripten, so `pip install --user` writes to a real
+# user-owned dir. Passing the host UID (which on Git Bash returns the
+# Windows user's huge SID-derived number) creates a phantom user with
+# HOME=/ → 'Permission denied: /.local'. On Linux this would also
+# matter for output file ownership; Docker Desktop on Windows/macOS
+# handles host↔container ownership through its VM layer regardless.
 docker run --rm \
-    --user "${HOST_UID}:${HOST_GID}" \
     -v "${SUBMODULE_DIR}:/src" \
     -w /src \
     "${EMSDK_IMAGE}" \

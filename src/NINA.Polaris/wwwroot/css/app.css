@@ -1044,7 +1044,11 @@ label select.input-sm {
     position: fixed;
     z-index: 89;
     right: 16px;
-    bottom: 16px;
+    /* Lifted off the bottom so the pill sits INSIDE the sky map
+       instead of straddling the legend row + activity bar at the
+       viewport edge. 36 px activity bar + ~28 px sky-survey-row
+       (mount/target legend) + a little breathing room ≈ 90 px. */
+    bottom: 90px;
     display: inline-flex;
     align-items: center;
     gap: 6px;

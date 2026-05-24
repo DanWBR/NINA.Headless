@@ -127,11 +127,46 @@
                 transparent 8px
             );
         }
+        /* SWE-5: ASIAIR-style edge labels on the target rectangle.
+           - .fov-label-corner    → "Target" at bottom-left corner
+           - .fov-label-edge-vert → "Rotation XXX.X°" along the LEFT
+             edge, rotated -90° so text reads upward
+           - .fov-label-edge-horz → "W° × H°" along the BOTTOM edge */
+        .fov-label {
+            position: absolute;
+            font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+            font-size: 11px;
+            font-weight: 600;
+            color: #fca5a5;
+            text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+            white-space: nowrap;
+            pointer-events: none;
+            letter-spacing: 0.5px;
+        }
+        #sky-target-fov .fov-label-corner {
+            left: 4px;
+            bottom: 4px;
+        }
+        #sky-target-fov .fov-label-edge-vert {
+            left: -6px;
+            top: 50%;
+            transform-origin: 0 0;
+            transform: translateY(-50%) rotate(-90deg) translateY(-100%);
+        }
+        #sky-target-fov .fov-label-edge-horz {
+            bottom: -18px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
     </style>
 </head>
 <body>
     <canvas id="stel-canvas"></canvas>
-    <div id="sky-target-fov"></div>
+    <div id="sky-target-fov">
+        <span class="fov-label fov-label-corner">Target</span>
+        <span class="fov-label fov-label-edge-vert" id="sky-target-rotlabel">Rotation 0.0°</span>
+        <span class="fov-label fov-label-edge-horz" id="sky-target-sizelabel">0° × 0°</span>
+    </div>
     <div id="sky-status"><div class="msg">Loading sky engine…</div></div>
     <div id="sky-footer">
         Powered by <a href="https://github.com/Stellarium/stellarium-web-engine"

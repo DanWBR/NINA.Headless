@@ -34,7 +34,7 @@
 (function () {
     'use strict';
 
-    var BRIDGE_VERSION = '0.6.5-swe5';
+    var BRIDGE_VERSION = '0.6.6-swe5';
 
     // -----------------------------------------------------------------
     // CRITICAL: stellarium-web-engine's emscripten layer can't resolve
@@ -390,7 +390,8 @@
         var rot = centre.rotationDeg || 0;
         var ring = skyFovRect(raDeg, decDeg, w, h, rot);
         // Engine geojson parser only knows: stroke, fill, stroke-width,
-        // stroke-opacity, fill-opacity, stroke-glow.
+        // stroke-opacity, fill-opacity, stroke-glow. Plus title +
+        // text-anchor + text-offset on Point features.
         var props = {
             stroke: color,
             'stroke-width': 2,
@@ -403,11 +404,8 @@
         // midpoint to edge midpoint, matching the rotation of the
         // rectangle. Built with the same tangent-plane helper so the
         // dec scaling stays consistent with the perimeter ring.
-        var crossH = skyFovRect(raDeg, decDeg, w, 0, rot); // horizontal line at mid-height
-        var crossV = skyFovRect(raDeg, decDeg, 0, h, rot); // vertical line at mid-width
-        // skyFovRect returns 5-pt closed polygons; for a 0-height /
-        // 0-width "rectangle" the first two points are the line we
-        // want. Take points 0 and 1.
+        var crossH = skyFovRect(raDeg, decDeg, w, 0, rot);
+        var crossV = skyFovRect(raDeg, decDeg, 0, h, rot);
         var hLine = [crossH[0], crossH[1]];
         var vLine = [crossV[0], crossV[1]];
         var crossProps = {
@@ -416,6 +414,32 @@
             'stroke-opacity': 0.35,
             'stroke-glow': false
         };
+        // ASIAIR-style edge labels. Use Point features with title +
+        // text-offset (engine renders title text near the point).
+        //   - "Scope" at the corner ring[0] (bottom-left of unrotated)
+        //   - "Rotation XXX.X°" at the midpoint of the left edge
+        //   - "W° × H°" at the midpoint of the bottom edge
+        var rotPositive = ((rot % 360) + 360) % 360;
+        var rotText = 'Rotation ' + rotPositive.toFixed(1) + '°';
+        var sizeText = w.toFixed(2) + '° × ' + h.toFixed(2) + '°';
+        // Midpoints of two edges (averaged corners). ring is the
+        // closed-polygon list [p0,p1,p2,p3,p0].
+        var midLeft = [(ring[0][0] + ring[3][0]) / 2, (ring[0][1] + ring[3][1]) / 2];
+        var midBottom = [(ring[0][0] + ring[1][0]) / 2, (ring[0][1] + ring[1][1]) / 2];
+        var labelStyle = {
+            fill: color,
+            'fill-opacity': 1,
+            'stroke-opacity': 0
+        };
+        function labelFeature(coord, text, anchor) {
+            var p = Object.assign({}, labelStyle, {
+                title: text,
+                'text-anchor': anchor || 'center',
+                'text-offset': [0, 0]
+            });
+            return { type: 'Feature', properties: p,
+                geometry: { type: 'Point', coordinates: coord } };
+        }
         return {
             type: 'FeatureCollection',
             features: [
@@ -424,7 +448,10 @@
                 { type: 'Feature', properties: crossProps,
                   geometry: { type: 'LineString', coordinates: hLine } },
                 { type: 'Feature', properties: crossProps,
-                  geometry: { type: 'LineString', coordinates: vLine } }
+                  geometry: { type: 'LineString', coordinates: vLine } },
+                labelFeature(ring[0], 'Scope', 'bottom'),
+                labelFeature(midLeft, rotText, 'bottom'),
+                labelFeature(midBottom, sizeText, 'top')
             ]
         };
     }
@@ -523,6 +550,17 @@
         el.style.height = hPx + 'px';
         el.style.transform = 'translate(-50%, -50%) rotate(' + rotDeg.toFixed(2) + 'deg)';
         el.style.display = 'block';
+
+        // SWE-5: ASIAIR-style edge labels. Rotation reads positive in
+        // [0, 360) for consistency with how the ASIAIR / N.I.N.A. solver
+        // report frame angles.
+        var rotPositive = ((rotDeg % 360) + 360) % 360;
+        var rotLabel = document.getElementById('sky-target-rotlabel');
+        if (rotLabel) rotLabel.textContent = 'Rotation ' + rotPositive.toFixed(1) + '°';
+        var sizeLabel = document.getElementById('sky-target-sizelabel');
+        if (sizeLabel) sizeLabel.textContent =
+            target.widthDeg.toFixed(2) + '° × ' + target.heightDeg.toFixed(2) + '°';
+
         console.log('[Sky] target FOV box: ' + wPx.toFixed(0) + '×' + hPx.toFixed(0)
             + 'px (engineFov=' + engineFovDeg.toFixed(2) + '°, cam='
             + target.widthDeg.toFixed(2) + '°, rot=' + rotDeg.toFixed(1)

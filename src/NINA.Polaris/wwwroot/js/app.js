@@ -2225,14 +2225,37 @@ function ninaApp() {
                         // 2009 — that's what the unconfigured engine
                         // starts at).
                         this._skyPushObserverAndTime();
-                        // SWE-5: push the FOV overlay state too. The
-                        // Show camera FOV checkbox defaults to checked
-                        // and updateSkyCameraFov() may have fired before
-                        // the bridge was ready — that call queued the
-                        // postMessage, but the bridge couldn't draw
-                        // anything until __stel existed. Re-pushing now
-                        // guarantees the blue mount rectangle + red
-                        // target rectangle paint on first paint.
+                        // SWE-5: ASIAIR-style initial framing. If the
+                        // mount is connected, centre the view on
+                        // mount.ra/dec at FOV=15° so the user lands
+                        // looking at what the scope sees rather than
+                        // some default sky region. The bridge's
+                        // change-hook will then emit a 'center' event
+                        // whose fromCentre handler sets skyTarget =
+                        // current map centre, which keeps the red
+                        // target rectangle glued to whatever the user
+                        // is looking at as they drag.
+                        if (this.mount?.connected
+                            && Number.isFinite(this.mount.ra)
+                            && Number.isFinite(this.mount.dec)) {
+                            this._skyLookAt(this.mount.ra, this.mount.dec, 15);
+                            // Pre-seat skyTarget so the very first
+                            // overlay push has a valid centre to draw
+                            // the red target rectangle at — otherwise
+                            // we'd render a stale skyTarget from a
+                            // previous session.
+                            this.skyTarget = {
+                                name: 'Centre',
+                                ra: this.mount.ra,
+                                dec: this.mount.dec
+                            };
+                        } else {
+                            // No mount → clear any stale skyTarget so
+                            // the red rectangle starts at whatever the
+                            // engine's default centre is, then the
+                            // change-hook seeds it.
+                            this.skyTarget = null;
+                        }
                         this._pushSkyFovOverlays();
                         break;
                     case 'webgl-unavailable':
@@ -2257,27 +2280,25 @@ function ninaApp() {
                             this._skyCenterPending = null;
                             try { cb(msg.center); } catch (e) { console.warn(e); }
                         }
-                        // SWE-5: ASIAIR-style drag-to-frame. When the
-                        // user pans the sky in the iframe, the bridge
-                        // emits {fromDrag:true} center updates ~10 Hz.
-                        // Treat that as "set this point as the planning
-                        // target" so the red target FOV rectangle
-                        // follows the drag and Slew & Center will go
-                        // there. Skip if no center payload or the drag
-                        // was actually a programmatic look-at echo (a
-                        // look-at we just sent ourselves).
+                        // SWE-5: ASIAIR-style "target rectangle always
+                        // at map centre". The bridge fires {fromDrag:true}
+                        // on every observer.yaw/pitch change — that
+                        // covers user drag AND programmatic look-at
+                        // echoes, both of which should update the
+                        // planning target to whatever's now centred.
+                        // Throttled 10 Hz at the bridge.
                         if (msg.fromDrag && msg.center
                             && Number.isFinite(msg.center.raDeg)
                             && Number.isFinite(msg.center.decDeg)) {
                             const c = msg.center;
                             this.skyTarget = {
-                                name: 'Drag ' + c.raDeg.toFixed(2) + ',' + c.decDeg.toFixed(2),
+                                name: 'Centre ' + c.raDeg.toFixed(2) + '°,' + c.decDeg.toFixed(2) + '°',
                                 ra: c.raDeg / 15,
                                 dec: c.decDeg
                             };
-                            // Update the target FOV rectangle without
-                            // mounting a redraw loop — _pushSkyFovOverlays
-                            // is the cheap end-to-end refresh.
+                            // Re-push so the red target rectangle
+                            // re-anchors at the new centre. Mount
+                            // rectangle stays at mount.ra/dec.
                             this._pushSkyFovOverlays();
                         }
                         break;

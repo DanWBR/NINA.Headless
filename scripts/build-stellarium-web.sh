@@ -26,7 +26,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SUBMODULE_DIR="${REPO_ROOT}/external/stellarium-web-engine"
 OUTPUT_DIR="${REPO_ROOT}/src/NINA.Polaris/wwwroot/sky/js/wasm"
-EMSDK_IMAGE="emscripten/emsdk:3.1.45"
+# Pinned Emscripten version. Stellarium-web-engine's SConscript
+# passes linker-only flags (MODULARIZE, ALLOW_MEMORY_GROWTH,
+# EXPORT_NAME, ...) on every per-file compile invocation. Emscripten
+# 3.1+ promotes the resulting "unused command-line argument" warning
+# to a hard error under -Werror, breaking the build. 3.0.x is the
+# last permissive series; pin to that until upstream cleans the
+# flag separation (or until we maintain a fork that does).
+EMSDK_IMAGE="emscripten/emsdk:3.0.1"
 
 # ---------- preflight ----------
 

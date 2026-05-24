@@ -2832,6 +2832,37 @@
                             Center on mount
                         </button>
                     </div>
+
+                    <!-- Top-centre progress + STOP overlay. Always
+                         visible during any mount motion (either a
+                         Slew & Center job in flight OR a raw mount
+                         slew triggered by Slew Only / Go to). One
+                         red Stop button hits both pathways at once
+                         so the user has a single panic-stop affordance
+                         without having to remember which kind of slew
+                         is running. -->
+                    <div class="sky-map-overlay-status"
+                         x-show="slewCenterJobId || mount.slewing"
+                         x-cloak>
+                        <span class="sky-map-status-text">
+                            <template x-if="slewCenterJobId">
+                                <span>
+                                    <strong x-text="(slewCenterStatus?.state || '…').toUpperCase()"></strong>
+                                    <span x-show="(slewCenterStatus?.iteration || 0) > 0">
+                                        · iter <span x-text="slewCenterStatus?.iteration"></span>
+                                    </span>
+                                    <span x-show="slewCenterStatus?.errorArcsec">
+                                        · err
+                                        <span x-text="(slewCenterStatus?.errorArcsec || 0).toFixed(1) + '&quot;'"></span>
+                                    </span>
+                                </span>
+                            </template>
+                            <template x-if="!slewCenterJobId && mount.slewing">
+                                <span><strong>SLEWING</strong></span>
+                            </template>
+                        </span>
+                        <button class="btn btn-sm btn-danger" @click="stopAnySlew()">⛔ Stop</button>
+                    </div>
                 </div>
                 <!-- SWE-5 cleanup: dropped the FOV input + Show-camera-FOV
                      checkbox. Engine FOV is controlled by the user's

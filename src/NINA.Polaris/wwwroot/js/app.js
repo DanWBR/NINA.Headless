@@ -8591,6 +8591,20 @@ function ninaApp() {
             } catch (e) { }
         },
 
+        // Unified panic-stop: kills whatever mount motion is in
+        // flight. Cancels an active Slew & Center job (which itself
+        // now also aborts the mount), AND posts /telescope/abort
+        // unconditionally so a raw Slew Only / Go to that doesn't
+        // have a slewCenterJobId also halts immediately.
+        async stopAnySlew() {
+            if (this.slewCenterJobId) {
+                try { await this.cancelSlewCenter(); }
+                catch (e) { /* fall through to telescope abort below */ }
+            }
+            try { await this.apiPost('/api/telescope/abort'); }
+            catch (e) { this.toast('Mount abort failed: ' + (e.message || ''), 'error'); }
+        },
+
         async cancelSlewCenter() {
             if (!this.slewCenterJobId) return;
             try {

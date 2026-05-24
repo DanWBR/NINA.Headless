@@ -31,7 +31,13 @@ public class MdnsService : IHostedService, IDisposable {
         try {
             var port = _config.GetValue("Mdns:Port", 5000);
             var hostname = Environment.MachineName;
-            var instanceName = _config.GetValue("Mdns:InstanceName", $"nina-{hostname}".ToLowerInvariant())!;
+            // Default instance name = "polaris" so the discoverable
+            // URL is the friendly http://polaris.local:<port> on any
+            // LAN that supports mDNS / Bonjour. Override via
+            // Mdns:InstanceName when running multiple Polaris
+            // instances on the same network (then second instance
+            // collides and Bonjour appends a numeric suffix).
+            var instanceName = _config.GetValue("Mdns:InstanceName", "polaris")!;
 
             _mdns = new MulticastService();
             _discovery = new ServiceDiscovery(_mdns);

@@ -2225,6 +2225,32 @@ label select.input-sm {
     white-space: nowrap;
 }
 
+/* Top-centre overlay used as the panic-stop affordance during any
+   mount motion. Same glass treatment as the actions overlay so the
+   two read as a matched set; sits well clear of the canvas centre
+   where the target rectangle lives. */
+.sky-map-overlay-status {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px;
+    background: rgba(8, 12, 22, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 999px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 6;
+    pointer-events: auto;
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+.sky-map-status-text { font-variant-numeric: tabular-nums; }
+
 .sky-info-chart-wrap {
     /* Compact altitude track strip between the stats table and the
        action buttons. 110 px tall is enough to read peak/trough

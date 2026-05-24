@@ -63,6 +63,18 @@ public class SlewCenterService {
         if (_jobs.TryGetValue(jobId, out var job)) {
             job.Cts?.Cancel();
             job.State = SlewCenterState.Cancelled;
+            // Also yank the mount itself. Just cancelling the CTS
+            // unwinds the C# pipeline but leaves a SlewAsync that's
+            // already in flight on the wire running to completion —
+            // the user clicking Cancel almost always means STOP THE
+            // SCOPE NOW, not "finish what you started, then stop
+            // bothering with the plate solve". Best-effort: log and
+            // swallow if the abort itself fails, the CTS path still
+            // brings the orchestrator to rest.
+            try { _equip.Telescope?.AbortSlewAsync(); }
+            catch (Exception ex) {
+                _logger.LogWarning(ex, "AbortSlew during CancelJob failed");
+            }
         }
     }
 

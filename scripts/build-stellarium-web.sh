@@ -67,6 +67,15 @@ echo "→ Building stellarium-web-engine (this takes 3-10 minutes)..."
 HOST_UID="$(id -u 2>/dev/null || echo 1000)"
 HOST_GID="$(id -g 2>/dev/null || echo 1000)"
 
+# Disable MSYS POSIX-path translation when running under Git Bash on
+# Windows. Otherwise the `-w /src` arg gets rewritten to
+# `C:/Program Files/Git/src` and docker bombs with "working directory
+# is invalid, it needs to be an absolute path". `MSYS_NO_PATHCONV=1`
+# is the documented escape hatch; harmless on Linux/macOS (the var
+# isn't read by any other shell).
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+
 docker run --rm \
     --user "${HOST_UID}:${HOST_GID}" \
     -v "${SUBMODULE_DIR}:/src" \

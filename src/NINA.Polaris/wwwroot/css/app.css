@@ -386,6 +386,20 @@ html, body {
     padding-right: 18px;
 }
 
+/* POLAR tab — same horizontal gutters as GUIDE so the TPPA
+   parameter row, action buttons, progress bar, result block and
+   solved-points table don't hug the viewport edge. .panel-header
+   already carries its own padding, so skip it here. */
+.tab-panel-polar > .quick-controls,
+.tab-panel-polar > .af-progress,
+.tab-panel-polar > .stats-bar,
+.tab-panel-polar > .hint,
+.tab-panel-polar > p,
+.tab-panel-polar > div:not(.panel-header):not(.tab-panel-canvas-wrap) {
+    padding-left: 18px;
+    padding-right: 18px;
+}
+
 .panel-header {
     padding: 12px 16px;
     font-size: 15px;

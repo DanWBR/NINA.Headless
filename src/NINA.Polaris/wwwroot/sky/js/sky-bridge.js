@@ -34,7 +34,7 @@
 (function () {
     'use strict';
 
-    var BRIDGE_VERSION = '0.5.4-swe5';
+    var BRIDGE_VERSION = '0.5.5-swe5';
 
     // -----------------------------------------------------------------
     // CRITICAL: stellarium-web-engine's emscripten layer can't resolve
@@ -659,6 +659,24 @@
             function onEngineReady(stel) {
                 if (window.__stel) return;       // idempotent — engine may try twice
                 window.__stel = stel;            // exposed for SWE-4 RPC handlers
+
+                // SWE-5: turn off atmosphere + ground landscape. Polaris
+                // is a planning tool — the user always wants to see
+                // stars, not the engine's simulated daytime sky tint or
+                // the guereins horizon panorama covering the lower half.
+                // Side benefit: atmosphere multiplies painter colour by
+                // brightness, which was washing the FOV rectangles out
+                // during daytime. With it off the #1e40af mount blue
+                // and #ef4444 target red render at full saturation.
+                try {
+                    if (stel.core.atmosphere) stel.core.atmosphere.visible = false;
+                    if (stel.core.landscapes) stel.core.landscapes.visible = false;
+                    // refraction also off so RA/Dec ↔ altaz conversions
+                    // match the catalog values shown elsewhere in Polaris.
+                    if (stel.core.observer) stel.core.observer.refraction = false;
+                } catch (envErr) {
+                    console.warn('[Sky] could not disable atmosphere/landscape:', envErr);
+                }
 
                 try {
                     var core = stel.core;

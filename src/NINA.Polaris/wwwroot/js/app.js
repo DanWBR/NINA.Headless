@@ -659,6 +659,24 @@ function ninaApp() {
             wasmLoaded:  false,    // true once the working buffer is
                                    // sitting in the WASM heap for the
                                    // current session
+
+            // Zoom + pan state. CSS transform on .editor-preview-stage:
+            // translate(panX, panY) scale(zoom). Reset = fit-to-window
+            // (zoom 1, pan 0). Mouse wheel zooms toward the cursor;
+            // click-drag pans when zoomed > 1.
+            zoom: 1,
+            panX: 0,
+            panY: 0,
+            panning: false,
+            _panStartX: 0, _panStartY: 0,
+            _panOriginX: 0, _panOriginY: 0,
+
+            // Non-destructive undo/redo. Stack holds JSON-serialised
+            // snapshots of `edits`; index points to the current entry.
+            // Pushing while index < stack.length-1 truncates the
+            // redo tail (matches Lightroom/PixInsight behaviour).
+            history: { stack: [{}], index: 0 },
+
             export: {
                 format: 'jpg',
                 quality: 92,
@@ -4028,6 +4046,7 @@ function ninaApp() {
                     this.editorState.computeMode = 'server';
                 }
             } catch { /* private mode */ }
+            this._editorBindKeyHandlers();
         },
 
         // Flip between server-mode and WASM-mode. When entering WASM
@@ -4094,6 +4113,10 @@ function ninaApp() {
                 // Hydrate sidecar edits if present, else defaults.
                 this.editorState.edits = info.edits || this._editorDefaultEdits();
                 this.editorState.dirty = false;
+                // Reset zoom/pan + history so each new source starts
+                // fresh — undo doesn't reach into a prior session.
+                this.editorZoomReset();
+                this._editorResetHistory(this.editorState.edits);
                 // Mark WASM buffer stale — new source needs a fresh
                 // EditorLoad before the next ApplyEdit.
                 this.editorState.wasmLoaded = false;
@@ -4141,6 +4164,9 @@ function ninaApp() {
             this.editorState.edits = this._editorDefaultEdits();
             this.editorState.dirty = true;
             this._editorSchedulePreview();
+            // Reset is itself an undoable step — push immediately
+            // instead of waiting for the slider-idle timer.
+            this._editorPushHistory();
         },
 
         editorClose() {
@@ -4263,6 +4289,168 @@ function ninaApp() {
             e[section][key] = val;
             this.editorState.dirty = true;
             this._editorSchedulePreview();
+            this._editorScheduleHistoryPush();
+        },
+
+        // ─── Undo / redo (history of edits snapshots) ───────────────────
+        // Snapshot semantics: every slider movement schedules a push 500ms
+        // after the last input. A continuous drag is therefore one
+        // undoable step instead of dozens. Snapshots are JSON-serialised
+        // (cheap; the edits tree is tiny) so undo restores via parse.
+
+        _editorScheduleHistoryPush() {
+            clearTimeout(this._editorHistoryTimer);
+            this._editorHistoryTimer = setTimeout(
+                () => this._editorPushHistory(), 500);
+        },
+
+        _editorPushHistory() {
+            const h = this.editorState.history;
+            const snap = JSON.stringify(this.editorState.edits || {});
+            // Skip if identical to current (e.g. slider released without
+            // moving the value).
+            if (h.stack[h.index] === snap) return;
+            // Truncate the redo tail if we branched off mid-history.
+            if (h.index < h.stack.length - 1) {
+                h.stack = h.stack.slice(0, h.index + 1);
+            }
+            h.stack.push(snap);
+            // Cap stack length to keep memory bounded on long sessions.
+            const MAX = 200;
+            if (h.stack.length > MAX) {
+                h.stack.splice(0, h.stack.length - MAX);
+            }
+            h.index = h.stack.length - 1;
+        },
+
+        editorCanUndo() {
+            return this.editorState.session != null
+                   && this.editorState.history.index > 0;
+        },
+        editorCanRedo() {
+            const h = this.editorState.history;
+            return this.editorState.session != null
+                   && h.index < h.stack.length - 1;
+        },
+
+        editorUndo() {
+            if (!this.editorCanUndo()) return;
+            // Flush any pending push so the current edits become an
+            // undo step before we move backwards.
+            if (this._editorHistoryTimer) {
+                clearTimeout(this._editorHistoryTimer);
+                this._editorHistoryTimer = null;
+                this._editorPushHistory();
+            }
+            const h = this.editorState.history;
+            h.index--;
+            this.editorState.edits = JSON.parse(h.stack[h.index]);
+            this.editorState.dirty = true;
+            this._editorSchedulePreview();
+        },
+
+        editorRedo() {
+            if (!this.editorCanRedo()) return;
+            const h = this.editorState.history;
+            h.index++;
+            this.editorState.edits = JSON.parse(h.stack[h.index]);
+            this.editorState.dirty = true;
+            this._editorSchedulePreview();
+        },
+
+        _editorResetHistory(initialEdits) {
+            const snap = JSON.stringify(initialEdits || {});
+            this.editorState.history = { stack: [snap], index: 0 };
+            if (this._editorHistoryTimer) {
+                clearTimeout(this._editorHistoryTimer);
+                this._editorHistoryTimer = null;
+            }
+        },
+
+        // ─── Zoom + pan ───────────────────────────────────────────────
+        // CSS transform on .editor-preview-stage. Mouse wheel zooms
+        // around the cursor; click-drag pans when zoomed > 1. Double-
+        // click = reset to fit-to-window.
+
+        editorZoomIn()  { this._editorZoomBy(1.25); },
+        editorZoomOut() { this._editorZoomBy(1 / 1.25); },
+        editorZoomReset() {
+            this.editorState.zoom = 1;
+            this.editorState.panX = 0;
+            this.editorState.panY = 0;
+        },
+
+        _editorZoomBy(factor, anchorX, anchorY) {
+            const s = this.editorState;
+            const next = Math.max(0.1, Math.min(16, s.zoom * factor));
+            if (Math.abs(next - s.zoom) < 1e-4) return;
+            // Anchor-aware zoom — keep the point under the cursor fixed
+            // in screen space. If no anchor given (button click), zoom
+            // around the centre (anchor offsets default to 0,0).
+            if (anchorX != null && anchorY != null) {
+                const k = next / s.zoom - 1;
+                s.panX -= (anchorX - s.panX) * k / (next / s.zoom);
+                s.panY -= (anchorY - s.panY) * k / (next / s.zoom);
+            }
+            s.zoom = next;
+        },
+
+        editorOnWheel(ev) {
+            // Wheel zooms with the cursor as anchor. We use deltaY sign
+            // (not magnitude — track-pads vary wildly) for predictable
+            // 1.1× steps.
+            const wrap = ev.currentTarget;
+            const rect = wrap.getBoundingClientRect();
+            const cx = ev.clientX - rect.left - rect.width / 2;
+            const cy = ev.clientY - rect.top - rect.height / 2;
+            const factor = ev.deltaY < 0 ? 1.1 : 1 / 1.1;
+            this._editorZoomBy(factor, cx, cy);
+        },
+
+        editorOnPanStart(ev) {
+            if (this.editorState.zoom <= 1) return;
+            this.editorState.panning = true;
+            this.editorState._panStartX = ev.clientX;
+            this.editorState._panStartY = ev.clientY;
+            this.editorState._panOriginX = this.editorState.panX;
+            this.editorState._panOriginY = this.editorState.panY;
+        },
+        editorOnPanMove(ev) {
+            if (!this.editorState.panning) return;
+            this.editorState.panX = this.editorState._panOriginX
+                                    + (ev.clientX - this.editorState._panStartX);
+            this.editorState.panY = this.editorState._panOriginY
+                                    + (ev.clientY - this.editorState._panStartY);
+        },
+        editorOnPanEnd() {
+            this.editorState.panning = false;
+        },
+
+        // Wire Ctrl+Z / Ctrl+Y keyboard shortcuts when the editor tab
+        // is the active surface. Hooked in editorTabOpened.
+        _editorBindKeyHandlers() {
+            if (this._editorKeyHandlerBound) return;
+            this._editorKeyHandlerBound = true;
+            window.addEventListener('keydown', (e) => {
+                if (this.tab !== 'editor' || !this.editorState.session) return;
+                // Skip when user is typing in a real input/textarea.
+                const tag = (e.target?.tagName || '').toLowerCase();
+                if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) {
+                    // Allow Ctrl+Z on sliders — they don't have a useful
+                    // native undo anyway, and the user expects undo to
+                    // walk the edit history regardless of focus.
+                    if (tag === 'input' && e.target?.type !== 'range') return;
+                }
+                if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+                    const k = e.key.toLowerCase();
+                    if (k === 'z' && !e.shiftKey) { e.preventDefault(); this.editorUndo(); }
+                    else if (k === 'z' && e.shiftKey) { e.preventDefault(); this.editorRedo(); }
+                    else if (k === 'y') { e.preventDefault(); this.editorRedo(); }
+                    else if (k === '0') { e.preventDefault(); this.editorZoomReset(); }
+                    else if (k === '=' || k === '+') { e.preventDefault(); this.editorZoomIn(); }
+                    else if (k === '-') { e.preventDefault(); this.editorZoomOut(); }
+                }
+            });
         },
 
         // Debounced render — every input pings, but we coalesce to one

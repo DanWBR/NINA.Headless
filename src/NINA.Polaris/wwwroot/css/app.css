@@ -4439,6 +4439,32 @@ label select.input-sm {
     display: flex;
     align-items: center;
     justify-content: center;
+    /* User-select off so click-drag pan doesn't pick a stray text
+       selection on the surrounding panel. */
+    user-select: none;
+    -webkit-user-select: none;
+}
+/* Inner layer the CSS transform applies to. Sized 100%×100% so the
+   contained <img>/<canvas> fills it at zoom=1; transform-origin centre
+   makes zoom-with-wheel-anchor math straightforward. */
+.editor-preview-stage {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform-origin: center center;
+    will-change: transform;
+    /* Snappy on zoom button clicks without slowing down a wheel drag. */
+    transition: transform 0.12s ease-out;
+}
+/* Killed transition during pan (zoom unchanged, only translate moves) —
+   the .editor-preview-stage's transition above would smear the drag.
+   We toggle by writing inline style from JS during pan; here we just
+   guard against rendering glitches with the default. */
+.editor-preview-stage img,
+.editor-preview-stage canvas {
+    -webkit-user-drag: none;
 }
 .editor-preview-img {
     max-width: 100%;

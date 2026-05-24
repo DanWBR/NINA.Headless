@@ -3176,30 +3176,71 @@
                     <!-- Left rail: preview + histogram -->
                     <div class="editor-preview-col">
                         <div class="editor-preview-toolbar">
-                            <span class="muted" style="flex:1; font-size:11px"
+                            <!-- Undo / redo: walks the history stack of
+                                 edit snapshots maintained by app.js. Each
+                                 idle-stop on a slider drag (500ms after
+                                 last input) pushes one entry, so a
+                                 continuous slider movement is one undoable
+                                 step instead of dozens. -->
+                            <button class="btn btn-sm"
+                                    @click="editorUndo()"
+                                    :disabled="!editorCanUndo()"
+                                    title="Undo (Ctrl+Z)">↶</button>
+                            <button class="btn btn-sm"
+                                    @click="editorRedo()"
+                                    :disabled="!editorCanRedo()"
+                                    title="Redo (Ctrl+Shift+Z / Ctrl+Y)">↷</button>
+                            <span class="muted" style="font-size:10px"
+                                  x-text="editorState.history.index + ' / ' + (editorState.history.stack.length - 1)"
+                                  title="Current history step / total"></span>
+                            <span class="muted" style="flex:1; font-size:11px; text-align:center"
                                   x-text="editorState.sourcePath"></span>
+                            <!-- Zoom controls. Reset = fit-to-window. -->
+                            <button class="btn btn-sm" @click="editorZoomOut()"
+                                    title="Zoom out (or Ctrl + scroll wheel)">−</button>
+                            <button class="btn btn-sm"
+                                    @click="editorZoomReset()"
+                                    :title="'Fit to window (' + Math.round(editorState.zoom * 100) + '% now)'"
+                                    x-text="Math.round(editorState.zoom * 100) + '%'"
+                                    style="min-width:52px"></button>
+                            <button class="btn btn-sm" @click="editorZoomIn()"
+                                    title="Zoom in">+</button>
                             <button class="btn btn-sm"
                                     @mousedown="editorState.showOriginal = true"
                                     @mouseup="editorState.showOriginal = false"
                                     @mouseleave="editorState.showOriginal = false"
-                                    title="Hold to see the original (no edits applied)">👁 Hold to compare</button>
+                                    title="Hold to see the original (no edits applied)">👁 Compare</button>
                             <button class="btn btn-sm" @click="editorClose()"
                                     title="Close editor and free the session">✕ Close</button>
                         </div>
-                        <div class="editor-preview-wrap">
-                            <!-- Server-mode: <img> bound to a JPEG blob URL. -->
-                            <img class="editor-preview-img" :src="editorState.previewUrl"
-                                 x-show="editorState.computeMode !== 'wasm' && editorState.previewUrl && !editorState.showOriginal"
-                                 alt="preview">
-                            <!-- WASM-mode: canvas, raw bytes from
-                                 Interop.EditorApplyEdit drawn via
-                                 putImageData. Avoids a JPEG encode in
-                                 WASM (no Skia there) + skips lossy
-                                 compression. -->
-                            <canvas id="editorWasmCanvas" class="editor-preview-img"
-                                    x-show="editorState.computeMode === 'wasm' && !editorState.showOriginal"></canvas>
-                            <img class="editor-preview-img" :src="editorState.originalUrl"
-                                 x-show="editorState.showOriginal && editorState.originalUrl" alt="original">
+                        <div class="editor-preview-wrap"
+                             @wheel.prevent="editorOnWheel($event)"
+                             @mousedown="editorOnPanStart($event)"
+                             @mousemove="editorOnPanMove($event)"
+                             @mouseup="editorOnPanEnd($event)"
+                             @mouseleave="editorOnPanEnd($event)"
+                             @dblclick="editorZoomReset()"
+                             :style="'cursor:' + (editorState.zoom > 1 ? (editorState.panning ? 'grabbing' : 'grab') : 'default')">
+                            <!-- Inner transform layer. CSS transform avoids
+                                 reflow on every wheel tick and works
+                                 identically for <img> and <canvas>. -->
+                            <div class="editor-preview-stage"
+                                 :style="'transform: translate(' + editorState.panX + 'px,' + editorState.panY + 'px) scale(' + editorState.zoom + ')'">
+                                <!-- Server-mode: <img> bound to a JPEG blob URL. -->
+                                <img class="editor-preview-img" :src="editorState.previewUrl"
+                                     x-show="editorState.computeMode !== 'wasm' && editorState.previewUrl && !editorState.showOriginal"
+                                     alt="preview" draggable="false">
+                                <!-- WASM-mode: canvas, raw bytes from
+                                     Interop.EditorApplyEdit drawn via
+                                     putImageData. Avoids a JPEG encode in
+                                     WASM (no Skia there) + skips lossy
+                                     compression. -->
+                                <canvas id="editorWasmCanvas" class="editor-preview-img"
+                                        x-show="editorState.computeMode === 'wasm' && !editorState.showOriginal"></canvas>
+                                <img class="editor-preview-img" :src="editorState.originalUrl"
+                                     x-show="editorState.showOriginal && editorState.originalUrl"
+                                     alt="original" draggable="false">
+                            </div>
                             <div class="editor-preview-spinner" x-show="editorState.rendering">⌛</div>
                         </div>
                         <canvas id="editorHistogram" class="editor-histogram"

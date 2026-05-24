@@ -2226,36 +2226,30 @@ function ninaApp() {
                         // starts at).
                         this._skyPushObserverAndTime();
                         // SWE-5: ASIAIR-style initial framing. If the
-                        // mount is connected, centre the view on
-                        // mount.ra/dec at FOV=15° so the user lands
-                        // looking at what the scope sees rather than
-                        // some default sky region. The bridge's
-                        // change-hook will then emit a 'center' event
-                        // whose fromCentre handler sets skyTarget =
-                        // current map centre, which keeps the red
-                        // target rectangle glued to whatever the user
-                        // is looking at as they drag.
+                        // mount is connected at ready time, centre the
+                        // view on mount.ra/dec at FOV=15°. Then seed
+                        // skyTarget from the engine's actual current
+                        // centre via _skyGetCenter() — this is robust
+                        // to (a) mount.connected being false at ready
+                        // because the first WS status push hasn't
+                        // landed yet, (b) the change-hook not firing
+                        // before user interaction, (c) stale skyTarget
+                        // values persisted from a previous session.
                         if (this.mount?.connected
                             && Number.isFinite(this.mount.ra)
                             && Number.isFinite(this.mount.dec)) {
                             this._skyLookAt(this.mount.ra, this.mount.dec, 15);
-                            // Pre-seat skyTarget so the very first
-                            // overlay push has a valid centre to draw
-                            // the red target rectangle at — otherwise
-                            // we'd render a stale skyTarget from a
-                            // previous session.
-                            this.skyTarget = {
-                                name: 'Centre',
-                                ra: this.mount.ra,
-                                dec: this.mount.dec
-                            };
-                        } else {
-                            // No mount → clear any stale skyTarget so
-                            // the red rectangle starts at whatever the
-                            // engine's default centre is, then the
-                            // change-hook seeds it.
-                            this.skyTarget = null;
                         }
+                        this._skyGetCenter().then(c => {
+                            if (c && Number.isFinite(c.raDeg) && Number.isFinite(c.decDeg)) {
+                                this.skyTarget = {
+                                    name: 'Centre ' + c.raDeg.toFixed(2) + '°,' + c.decDeg.toFixed(2) + '°',
+                                    ra: c.raDeg / 15,
+                                    dec: c.decDeg
+                                };
+                                this._pushSkyFovOverlays();
+                            }
+                        });
                         this._pushSkyFovOverlays();
                         break;
                     case 'webgl-unavailable':
@@ -4548,6 +4542,23 @@ function ninaApp() {
                     widthDeg: w, heightDeg: h, rotationDeg: rot
                 };
             }
+
+            // Skip when nothing actually changed since last push.
+            // The mount status WS push fires several times per second
+            // when slewing, and re-creating the engine geojson objects
+            // on every tick is wasteful (each call removes + adds
+            // layer geometry) and floods the console. Only re-send
+            // when at least one of mount.{ra,dec} or target.{ra,dec}
+            // moved more than 0.001° (~3 arcsec, well below the
+            // pointing precision the rectangles convey).
+            const key = JSON.stringify({
+                m: mount && { r: mount.raDeg.toFixed(3), d: mount.decDeg.toFixed(3),
+                              w: mount.widthDeg.toFixed(3), rot: (mount.rotationDeg||0).toFixed(2) },
+                t: target && { r: target.raDeg.toFixed(3), d: target.decDeg.toFixed(3),
+                              w: target.widthDeg.toFixed(3), rot: (target.rotationDeg||0).toFixed(2) }
+            });
+            if (key === this._lastFovOverlayKey) return;
+            this._lastFovOverlayKey = key;
 
             // Helpful diagnostic when "where's my FOV rectangle?" comes up:
             // logs whether the parent decided to send a mount/target side
@@ -8079,7 +8090,21 @@ function ninaApp() {
         // Falls back to a picked skyTarget if the map centre can't
         // be read for any reason.
         async slewAndCenter() {
-            const target = this._currentSlewTarget();
+            // SWE-5: prefer the live engine centre (= where the red
+            // target rectangle is right now). The bridge's change-hook
+            // updates skyTarget on every observer.yaw/pitch mutation,
+            // but on the very first call after page load it may not
+            // have fired yet — querying the engine directly closes
+            // that gap and gives an exact "go to what's centred"
+            // semantics regardless of skyTarget freshness.
+            let target = null;
+            try {
+                const c = await this._skyGetCenter();
+                if (c && Number.isFinite(c.raDeg) && Number.isFinite(c.decDeg)) {
+                    target = { ra: c.raDeg / 15, dec: c.decDeg };
+                }
+            } catch { /* fall through to skyTarget */ }
+            if (!target) target = this._currentSlewTarget();
             if (!target) {
                 this.toast('Sky map not ready', 'error');
                 return;
@@ -8101,9 +8126,17 @@ function ninaApp() {
         },
 
         // Slew Only handler — same target source as slewAndCenter
-        // (live map centre) but skips the plate-solve loop.
+        // (live engine centre = where the red rectangle is) but
+        // skips the plate-solve loop.
         async slewToCurrent() {
-            const target = this._currentSlewTarget();
+            let target = null;
+            try {
+                const c = await this._skyGetCenter();
+                if (c && Number.isFinite(c.raDeg) && Number.isFinite(c.decDeg)) {
+                    target = { ra: c.raDeg / 15, dec: c.decDeg };
+                }
+            } catch { /* fall through to skyTarget */ }
+            if (!target) target = this._currentSlewTarget();
             if (!target) { this.toast('Sky map not ready', 'error'); return; }
             return this.slewTo(target.ra, target.dec);
         },

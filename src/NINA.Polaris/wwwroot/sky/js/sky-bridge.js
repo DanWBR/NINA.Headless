@@ -34,7 +34,7 @@
 (function () {
     'use strict';
 
-    var BRIDGE_VERSION = '0.4.0-swe4';
+    var BRIDGE_VERSION = '0.4.1-swe4';
 
     // -----------------------------------------------------------------
     // CRITICAL: stellarium-web-engine's emscripten layer can't resolve
@@ -273,13 +273,13 @@
         var stel = window.__stel;
         switch (msg.type) {
             case 'set-observer':
-                if (typeof msg.lat === 'number') stel.observer.latitude = msg.lat * stel.D2R;
-                if (typeof msg.lng === 'number') stel.observer.longitude = msg.lng * stel.D2R;
-                if (typeof msg.elevation === 'number') stel.observer.elevation = msg.elevation;
+                if (typeof msg.lat === 'number') stel.core.observer.latitude = msg.lat * stel.D2R;
+                if (typeof msg.lng === 'number') stel.core.observer.longitude = msg.lng * stel.D2R;
+                if (typeof msg.elevation === 'number') stel.core.observer.elevation = msg.elevation;
                 break;
             case 'set-time':
                 if (typeof msg.utc === 'number') {
-                    stel.observer.utc = stel.date2MJD(new Date(msg.utc));
+                    stel.core.observer.utc = stel.date2MJD(new Date(msg.utc));
                 }
                 break;
             case 'look-at':

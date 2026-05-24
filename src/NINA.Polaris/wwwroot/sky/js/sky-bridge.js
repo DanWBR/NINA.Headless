@@ -34,7 +34,7 @@
 (function () {
     'use strict';
 
-    var BRIDGE_VERSION = '0.3.6-swe3';
+    var BRIDGE_VERSION = '0.3.7-swe3';
 
     // -----------------------------------------------------------------
     // CRITICAL: stellarium-web-engine's emscripten layer can't resolve
@@ -321,9 +321,46 @@
             // promise carries the real error. Catch it so we see it.
             if (modulePromise && typeof modulePromise.then === 'function') {
                 modulePromise.then(
-                    function (mod) { console.log('[Sky] Module.ready RESOLVED'); },
+                    function (mod) {
+                        console.log('[Sky] Module.ready RESOLVED. Module state:');
+                        console.log('  _core_init:', typeof mod._core_init);
+                        console.log('  GL:', typeof mod.GL,
+                                    'createContext:', typeof (mod.GL && mod.GL.createContext));
+                        console.log('  getModule:', typeof mod.getModule);
+                        console.log('  canvas attached:', !!mod.canvas);
+                        console.log('  Module.core:', typeof mod.core,
+                                    'Module.observer:', typeof mod.observer);
+                        // If onRuntimeInitialized was supposed to set
+                        // .core but didn't, it threw silently. Re-invoke
+                        // it inside a try/catch so we see the error.
+                        if (!mod.core && typeof mod.onRuntimeInitialized === 'function') {
+                            console.log('[Sky] Module.core is undefined — onRuntimeInitialized failed.'
+                                + ' Re-invoking under try/catch to capture the error…');
+                            try {
+                                mod.onRuntimeInitialized();
+                                console.log('[Sky] manual re-invoke returned. Module.core now:',
+                                    typeof mod.core);
+                            } catch (e) {
+                                console.error('[Sky] onRuntimeInitialized THREW:', e,
+                                    '\n  stack:', e && e.stack);
+                            }
+                        }
+                    },
                     function (err) { console.error('[Sky] Module.ready REJECTED:', err); }
                 );
+                // Catch any unhandled rejections from emscripten's
+                // internal promise chain that don't surface through .then
+                window.addEventListener('unhandledrejection', function (ev) {
+                    console.error('[Sky] unhandledrejection:', ev.reason);
+                });
+                // Same for uncaught synchronous errors after the promise
+                // resolved (engine onRuntimeInitialized lives in an async
+                // tick triggered by the asset preload callback).
+                window.addEventListener('error', function (ev) {
+                    console.error('[Sky] window.onerror:', ev.message,
+                        'at', ev.filename + ':' + ev.lineno + ':' + ev.colno,
+                        ev.error && ev.error.stack);
+                });
             }
             // Watchdog: if onReady doesn't fire in 10s, log a hint so
             // we don't sit forever wondering why the sky's blank.

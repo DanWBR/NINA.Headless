@@ -59,19 +59,30 @@ on iPhone) is too tight for the **FP32** Denoise models in their
 default form — the tab dies silently with no error dialog ("crash
 to home screen"). Two extra steps work around this:
 
-### Step 1 — let Polaris force WASM (automatic)
+### Step 1 — let Polaris pick the right backend per-model
 
 iOS Safari's WebGPU EP has aggressive memory accounting — every
 tensor allocated on the GPU counts against the page's budget. BGE
-works (one `session.run()`, tiny GPU churn) but Denoise's hundreds
-of tile calls accumulate small GPU buffers that the runtime can't
-free fast enough between calls. Polaris detects iOS in
-`pickBackends()` and forces the **WASM** backend instead. WASM
-keeps tensors in CPU memory (higher limits, deterministic GC) at
-the cost of ~5-10× slower inference.
+works (one `session.run()`, tiny GPU churn) but the FP32 Denoise
+models tile for hundreds of calls and accumulate enough GPU buffer
+churn to crest iOS Safari's ~1 GB per-tab limit.
 
-No user action required. The console will log
-`[OnnxRegistry] iOS detected — forcing WASM backend`.
+Polaris auto-decides per model based on its on-disk size:
+
+| Model size | iOS backend | Why |
+|---|---|---|
+| ≤ 200 MB | **WebGPU** | Fits comfortably; ~10× faster than CPU |
+| > 200 MB | **WASM** (CPU) | Avoids the OOM cascade |
+
+The Denoise v2 FP16 model is ~142 MB → WebGPU on iPhone. FP32
+v2 (284 MB) and v3 (456 MB) → WASM. The decision is logged on
+each load — DevTools console shows either
+`Using WebGPU adapter: { vendor: 'Apple', ... }` or
+`iOS + large model — forcing WASM (XXX MB > 200 MB iOS WebGPU cap)`.
+
+No user action required. The 200 MB cut-off lives in
+`IOS_WEBGPU_MAX_MODEL_BYTES` in `onnx-pipelines.js` — adjust if a
+future iOS / iPadOS bumps the WebGPU budget.
 
 ### Step 2 — generate FP16 variants of the models
 
@@ -271,7 +282,7 @@ afterwards) + ~50-200 MB per file processed (raw uint16 round-trip).
 | **First save fails with 500** | Source path not writable by the Polaris service account. Check `journalctl -u nina-polaris` (Linux) or the EventLog (Windows). |
 | **iPhone Safari tab dies silently during Denoise ("crash to home screen")** | OOM kill. Generate FP16 model variants — see the *Running on iPhone / iPad* section. `python scripts/quantize_onnx_models.py --only denoise --fp16` then rescan. The modal will auto-select the FP16 variant on iOS. |
 | **"No backend found" / "Failed to load `<model>`" toast** | Most often: you picked the `-int8` model variant. The bundled ORT Web WASM EP doesn't include INT8 ops. Switch the AI model dropdown to `-fp16` or the unsuffixed FP32 variant. |
-| **Inference suspiciously slow on iPhone** | Expected — iOS forces WASM CPU instead of WebGPU to avoid OOM. ~3-15 min for Denoise on a typical master vs ~30-60s on a desktop GPU. Don't switch tabs during the run (iOS suspends JS in background tabs). |
+| **Inference suspiciously slow on iPhone** | If you're on a FP32 model (>200 MB), Polaris forced WASM CPU to avoid OOM — that's ~5-10× slower than WebGPU. Switch to the FP16 variant in the AI model dropdown (or generate one via `quantize_onnx_models.py --fp16` if it doesn't exist) — FP16 fits the WebGPU threshold and gets the GPU speed-up. Don't switch tabs during a long run; iOS suspends JS in background tabs. |
 
 ## Out of scope today
 

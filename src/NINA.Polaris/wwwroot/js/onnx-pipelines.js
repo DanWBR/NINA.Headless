@@ -925,6 +925,24 @@
             const inferenceMs = performance.now() - t0;
 
             // Trim padding + apply strength blend against the original.
+            //
+            // GX-12b: port GraXpert's blend_images mask. The denoise
+            // model is trained ONLY for low-amplitude background noise;
+            // applying it to bright stars + DSO cores blurs them, then
+            // the blend with original at strength<1 just averages-out
+            // the damage. Symptom (user report): "no diff visible at
+            // strength=1.0" — because the model damages stars AND
+            // smooths background, the re-stretched preview looks
+            // almost identical to the original.
+            //
+            // Fix: pixels whose NORMALIZED value > CLIP (the model
+            // threshold, 1.0 for v3 / 10.0 for v2) are restored from
+            // the original. In source-brightness space that maps to
+            // `threshold = CLIP / 0.04 * mad + median`. Stars stay
+            // crisp; background gets the model's denoising; the
+            // strength slider then blends the masked-denoised output
+            // against the original.
+            const thresholdNorm = CLIP / 0.04 * mad + median;
             const offsetX = (padW - width) / 2 | 0;
             const offsetY = (padH - height) / 2 | 0;
             const dst = new Uint16Array(width * height);
@@ -934,7 +952,11 @@
                 for (let x = 0; x < width; x++) {
                     const denoised = out[srcRow + x];        // 0..1
                     const orig = pixels[origRow + x] / 65535;
-                    const blended = denoised * strength + orig * (1 - strength);
+                    // Mask: bright pixels keep the original; only
+                    // sub-threshold background goes through the model.
+                    const masked = orig < thresholdNorm ? denoised : orig;
+                    // Strength still blends masked-denoised vs original.
+                    const blended = masked * strength + orig * (1 - strength);
                     dst[origRow + x] = Math.max(0, Math.min(65535,
                         Math.round(blended * 65535)));
                 }

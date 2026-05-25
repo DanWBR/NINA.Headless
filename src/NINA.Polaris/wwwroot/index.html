@@ -4926,133 +4926,10 @@
                     </div>
                 </div>
 
-                <!-- SIM: built-in equipment simulator. Lets the user
-                     test the whole pipeline without real hardware —
-                     INDI simulator stack on Linux/macOS (renders real
-                     stars from the GSC catalog at the simulated mount
-                     position), Alpaca Omni Simulator on Windows. -->
-                <div class="settings-section">
-                    <h3>Equipment simulator</h3>
-                    <p class="text-muted" style="font-size: 12px; margin-top: -4px;">
-                        Spawn fake cameras + mounts so you can test Polaris without a real rig.
-                        Best for new-installation smoke tests, dev work, or showing the UI to
-                        someone before sunset.
-                    </p>
-
-                    <!-- Backend + install status row. Surfaces what
-                         host OS Polaris picked + whether the binaries
-                         are on disk. -->
-                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                        <span class="text-muted" style="font-size: 11px;">Backend:</span>
-                        <strong x-text="simulator.kind === 'indi' ? 'INDI simulators (Linux/macOS)'
-                                       : simulator.kind === 'ascom' ? 'ASCOM / Alpaca (Windows)'
-                                       : 'None (no backend for this OS)'"></strong>
-
-                        <span x-show="simulator.installed" class="status-indicator ok"
-                              style="font-size: 11px;"
-                              x-text="'✓ Installed' + (simulator.version ? ' v' + simulator.version : '')"></span>
-                        <span x-show="simulator.kind !== 'none' && !simulator.installed"
-                              class="status-indicator warn" style="font-size: 11px;">Not installed</span>
-
-                        <span x-show="simulator.isRunning" class="status-indicator ok"
-                              style="font-size: 11px;">🟢 Running</span>
-                        <span x-show="!simulator.isRunning && simulator.installed"
-                              class="status-indicator" style="font-size: 11px;">Stopped</span>
-
-                        <button class="btn btn-sm" @click="simulatorReDetect()"
-                                style="margin-left: auto;">⟳ Re-detect</button>
-                    </div>
-
-                    <!-- Install instructions banner when the host
-                         doesn't have the binaries yet. -->
-                    <div x-show="simulator.kind !== 'none' && !simulator.installed && simulator.lastError"
-                         style="margin-top: 12px; padding: 10px; background: rgba(245,158,11,0.1); border-left: 3px solid var(--warn); font-size: 12px;">
-                        <div x-text="simulator.lastError"></div>
-                        <a :href="simulator.downloadUrl" target="_blank" style="display: inline-block; margin-top: 6px;">
-                            Open install guide →
-                        </a>
-                    </div>
-
-                    <!-- Device checkbox grid — only the drivers we
-                         actually detected get a checkbox. Saved as
-                         the user toggles. SIM-8: when the stack is
-                         running, each toggle hits the FIFO
-                         immediately (add/remove a driver without
-                         restarting indiserver). When stopped,
-                         changes just update the persisted device
-                         list for the next Launch. -->
-                    <div x-show="simulator.installed" style="margin-top: 12px;">
-                        <div class="text-muted" style="font-size: 11px; margin-bottom: 4px;">
-                            Devices<span x-show="simulator.isRunning && simulator.kind === 'indi'"> (toggle to add/remove live)</span><span x-show="simulator.isRunning && simulator.kind === 'ascom'"> (all served simultaneously)</span>:
-                        </div>
-                        <!-- Windows / Alpaca Omni Sim caveat: the
-                             binary exposes every device type at once
-                             — there's no FIFO equivalent for runtime
-                             add/remove. Toggles only matter as hints
-                             for "which devices to pick in the RIGS
-                             tab"; they don't gate Omni Sim itself.
-                             Render an inline banner so the user
-                             isn't surprised by the no-op behaviour. -->
-                        <div x-show="simulator.kind === 'ascom' && simulator.isRunning"
-                             class="text-muted"
-                             style="font-size: 11px; padding: 6px 8px; background: rgba(96,165,250,0.08); border-left: 3px solid var(--accent); margin-bottom: 6px;">
-                            Alpaca Omni Simulator serves every device simultaneously — pick which to actually
-                            <a href="#" @click.prevent="tab = 'equip'">connect in RIGS</a>.
-                            Stop the simulator to release the port.
-                        </div>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px;">
-                            <template x-for="dev in ['ccd','telescope','focus','wheel','guide','dome','weather']" :key="dev">
-                                <label :title="(simulator.devicesAvailable || []).includes(dev) ? '' : 'Driver not detected on this host'"
-                                       :style="(simulator.devicesAvailable || []).includes(dev) ? '' : 'opacity:0.4; cursor:not-allowed'"
-                                       style="display: flex; align-items: center; gap: 6px; font-size: 12px;">
-                                    <input type="checkbox"
-                                           :value="dev"
-                                           x-model="simulatorSettings.devices"
-                                           @change="simulatorOnDeviceToggle(dev)"
-                                           :disabled="!(simulator.devicesAvailable || []).includes(dev)">
-                                    <span x-text="dev === 'ccd' ? 'Camera (CCD)'
-                                                : dev.charAt(0).toUpperCase() + dev.slice(1)"></span>
-                                    <span x-show="(simulator.runningDevices || []).includes(dev)"
-                                          class="status-indicator ok"
-                                          style="font-size: 9px; padding: 1px 4px;">●</span>
-                                </label>
-                            </template>
-                        </div>
-                    </div>
-
-                    <!-- Port + auto-start + launch buttons -->
-                    <div x-show="simulator.installed" style="margin-top: 12px;">
-                        <div class="control-row actions" style="flex-wrap: wrap; gap: 12px;">
-                            <label style="font-size: 12px;">
-                                Port:
-                                <input type="number" x-model.number="simulatorSettings.port"
-                                       @change="saveSimulatorSettings()"
-                                       class="input-sm" style="width: 80px;" min="1" max="65535">
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 6px; font-size: 12px;">
-                                <input type="checkbox" x-model="simulatorSettings.autoStart"
-                                       @change="saveSimulatorSettings()">
-                                Auto-start when Polaris boots
-                            </label>
-                            <span style="flex:1"></span>
-                            <button class="btn btn-primary" @click="simulatorLaunch()"
-                                    x-show="!simulator.isRunning"
-                                    :disabled="!simulator.installed || (simulatorSettings.devices || []).length === 0">
-                                ▶ Launch simulators
-                            </button>
-                            <button class="btn btn-danger" @click="simulatorShutdown()"
-                                    x-show="simulator.isRunning">
-                                ⏹ Stop
-                            </button>
-                        </div>
-                    </div>
-
-                    <div x-show="simulator.isRunning" class="text-muted"
-                         style="font-size: 11px; margin-top: 8px;">
-                        💡 Now go to <a href="#" @click.prevent="tab = 'equip'">RIGS tab</a> and pick "Simulator..." in each device dropdown.
-                        Running: <span x-text="(simulator.runningDevices || []).join(', ')"></span>
-                    </div>
-                </div>
+                <!-- SIM panel intentionally absent from the Settings UI.
+                     End users do not run the built-in simulator; backend
+                     (/api/simulator/*) stays available for dev curl-driven
+                     usage. Restore the UI from commit 68bd25b if needed. -->
 
                 <div class="settings-section">
                     <h3>Observatory</h3>
@@ -5084,12 +4961,20 @@
                         </div>
                         <div class="obs-location-error" x-show="obsAddressError" x-text="obsAddressError"></div>
                         <div class="obs-location-results" x-show="obsAddressResults.length">
-                            <template x-for="r in obsAddressResults" :key="r.displayName">
+                            <!-- Index-tail key — Nominatim returns multiple hits
+                                 with identical displayName for the same admin
+                                 boundary (e.g. searching "New York" yields the
+                                 city + the state, same displayName). Alpine's
+                                 x-for collapses duplicate :key values, which
+                                 hides every entry after the first. -->
+                            <template x-for="(r, i) in obsAddressResults"
+                                      :key="i + '|' + (r.latitude || 0) + ',' + (r.longitude || 0)">
                                 <button class="obs-location-result"
                                         @click="adoptObservatoryResult(r)">
                                     <strong x-text="r.displayName"></strong>
                                     <span class="muted"
-                                          x-text="r.latitude.toFixed(4) + ', ' + r.longitude.toFixed(4)"></span>
+                                          x-text="(Number(r.latitude) || 0).toFixed(4) + ', '
+                                                + (Number(r.longitude) || 0).toFixed(4)"></span>
                                 </button>
                             </template>
                         </div>
@@ -5681,13 +5566,24 @@
                 </button>
             </form>
             <div class="location-search-results" x-show="locSetup.searchResults.length > 0" x-cloak>
-                <template x-for="r in locSetup.searchResults" :key="r.displayName">
+                <!-- Nominatim happily returns multiple hits with the
+                     same displayName for boundary polygons / admin
+                     levels of the same place (search "Mossoró" → 2
+                     identical-name admin/boundary entries with
+                     different coords). Alpine x-for with a
+                     duplicate :key collapses or skips entries —
+                     symptom was "the result panel opens with nothing
+                     in it". Key on the array index + a numeric tail
+                     so each row is unique. -->
+                <template x-for="(r, i) in locSetup.searchResults"
+                          :key="i + '|' + (r.latitude || 0) + ',' + (r.longitude || 0)">
                     <div class="location-search-result" @click="pickGeocodeResult(r)">
                         <div class="location-search-name" x-text="r.displayName"></div>
                         <div class="text-muted" style="font-size: 10px;">
-                            <span x-text="r.type || r.class"></span>
+                            <span x-text="r.type || r.class || ''"></span>
                             ·
-                            <span x-text="r.latitude.toFixed(4) + '°, ' + r.longitude.toFixed(4) + '°'"></span>
+                            <span x-text="(Number(r.latitude) || 0).toFixed(4) + '°, '
+                                        + (Number(r.longitude) || 0).toFixed(4) + '°'"></span>
                         </div>
                     </div>
                 </template>
@@ -6289,10 +6185,11 @@
          on first call. Loading the registry up-front means the editor
          AI section + FILES tab can call OnnxRegistry.* synchronously
          without awaiting an import. -->
-    <!-- v=GX10a: switched to ort.webgpu.min.js so the WebGPU EP is
-         actually registered with ORT (the WASM-only ort.min.js was
-         silently dropping the requested webgpu provider). -->
-    <script src="/js/onnx-pipelines.js?v=GX10a"></script>
+    <!-- v=GX12: Denoise now applies GraXpert's blend_images mask
+         (bright stars/DSO keep original, only sub-threshold background
+         gets denoised). Previous build damaged stars + made strength=1
+         look identical to original after auto-stretch. -->
+    <script src="/js/onnx-pipelines.js?v=GX12"></script>
     <script src="/js/lib/alpine.min.js" defer></script>
     <script src="/js/app.js"></script>
     <!-- CLST-2: WASM live-stack module bootstrap. The .NET runtime

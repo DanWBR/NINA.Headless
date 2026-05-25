@@ -1,9 +1,20 @@
 namespace NINA.Image.ImageAnalysis;
 
 public static class AutoStretch {
+    // GX-12: defaults aligned with GraXpert's "15% Bg, 3 sigma" preset.
+    // Empirically gives a nicer dark-grey background that doesn't crush
+    // the faint structure of nebulae/galaxies while still presenting
+    // pleasant star contrast. Old PixInsight-ish "0.25 / 2.8" defaults
+    // produced thumbnails that looked muddy on most masters; users had
+    // to manually re-stretch every preview.
+    public const double DefaultTargetBg = 0.15;   // GraXpert: bg
+    public const double DefaultSigma    = 3.0;    // GraXpert: sigma
+
     /// <summary>
-    /// Auto-stretch using median + MAD heuristics (PixInsight-style MTF).
-    /// Black point clipped at median - 2.8·MAD, midtone targeted at 0.25.
+    /// Auto-stretch using GraXpert's "15% Bg, 3 sigma" algorithm —
+    /// sigma-clipped median + MAD on non-saturated samples, MTF mapping
+    /// median to a 15% target background. Drop-in default for the
+    /// FILES / STUDIO previews.
     /// </summary>
     public static byte[] Apply(ushort[] data, int width, int height, int bitDepth = 16) {
         var p = ComputeAutoStretchParams(data, width, height, bitDepth);
@@ -49,17 +60,49 @@ public static class AutoStretch {
     /// Compute the auto-stretch parameters (black/mid/white, all normalised
     /// 0..1) without applying them. Used by the STUDIO viewer to seed
     /// sliders with sensible defaults before the user starts tweaking.
+    ///
+    /// GX-12: ports GraXpert's stretch.py algorithm (see
+    /// <c>graxpert/stretch.py:calculate_mtf_stretch_parameters_for_channel</c>).
+    /// Two material differences vs the prior PixInsight-style heuristic:
+    ///
+    ///   1. Saturated pixels (== 0 and == max) are excluded from the
+    ///      median/MAD sample. Without this, an image with lots of
+    ///      hot pixels or black borders skews the background estimate.
+    ///   2. New defaults: <c>sigma=3</c> (was 2.8) and target
+    ///      background = 15% (was 25%). The lower bg gives a darker,
+    ///      higher-contrast preview that matches what GraXpert ships.
+    ///
+    /// Optional <paramref name="targetBg"/> + <paramref name="sigma"/>
+    /// let callers pick a different preset
+    /// (10% Bg 3σ / 20% Bg 3σ / 30% Bg 2σ are the other GraXpert
+    /// shipped options).
     /// </summary>
-    public static StretchParams ComputeAutoStretchParams(ushort[] data, int width, int height, int bitDepth = 16) {
+    public static StretchParams ComputeAutoStretchParams(
+            ushort[] data, int width, int height, int bitDepth = 16,
+            double? targetBg = null, double? sigma = null) {
         int pixelCount = width * height;
         if (data.Length == 0) return new StretchParams(0, 0.5, 1);
 
-        var histogram = new int[65536];
-        for (int i = 0; i < data.Length && i < pixelCount; i++) {
-            histogram[data[i]]++;
-        }
+        double bgArg    = Math.Clamp(targetBg ?? DefaultTargetBg, 0.01, 0.99);
+        double sigmaArg = Math.Max(0.5, sigma ?? DefaultSigma);
 
-        long half = pixelCount / 2;
+        int maxVal16  = (1 << bitDepth) - 1;
+        ushort topVal = (ushort)Math.Min(maxVal16, 65535);
+
+        // Histogram + median, restricted to NON-saturated samples
+        // (drop 0 and the bit-depth max). Black borders from a
+        // crop / dead pixel rows shouldn't bias the background.
+        var histogram = new int[65536];
+        long sampleCount = 0;
+        for (int i = 0; i < data.Length && i < pixelCount; i++) {
+            ushort v = data[i];
+            if (v == 0 || v >= topVal) continue;
+            histogram[v]++;
+            sampleCount++;
+        }
+        if (sampleCount == 0) return new StretchParams(0, 0.5, 1);
+
+        long half = sampleCount / 2;
         long cumulative = 0;
         double median = 0;
         for (int i = 0; i < histogram.Length; i++) {
@@ -70,12 +113,14 @@ public static class AutoStretch {
             }
         }
 
+        // MAD over the same restricted sample.
         var devHistogram = new int[65536];
         for (int i = 0; i < data.Length && i < pixelCount; i++) {
-            int dev = (int)Math.Abs(data[i] - median);
+            ushort v = data[i];
+            if (v == 0 || v >= topVal) continue;
+            int dev = (int)Math.Abs(v - median);
             if (dev < 65536) devHistogram[dev]++;
         }
-
         cumulative = 0;
         double mad = 0;
         for (int i = 0; i < devHistogram.Length; i++) {
@@ -88,9 +133,13 @@ public static class AutoStretch {
 
         double maxVal = (1 << bitDepth) - 1;
         double normalizedMedian = median / maxVal;
-        double normalizedMAD = mad / maxVal;
-        double shadow = Math.Max(0, normalizedMedian - 2.8 * normalizedMAD);
-        double midtone = MTF(normalizedMedian - shadow, 0.25);
+        double normalizedMAD    = mad / maxVal;
+        // shadow_clipping = clamp(median - sigma * MAD, 0, 1)
+        double shadow = Math.Clamp(
+            normalizedMedian - sigmaArg * normalizedMAD, 0.0, 1.0);
+        // midtone = MTF((median - shadow) / (1 - shadow), bg)
+        double denom = Math.Max(1e-9, 1.0 - shadow);
+        double midtone = MTF((normalizedMedian - shadow) / denom, bgArg);
         return new StretchParams(shadow, midtone, 1.0);
     }
 

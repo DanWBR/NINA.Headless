@@ -3045,7 +3045,11 @@ function ninaApp() {
             this.obsAddressResults = [];
             try {
                 const r = await this.apiGet(`/api/system/geocode?query=${encodeURIComponent(q)}&limit=5`);
-                this.obsAddressResults = Array.isArray(r) ? r : [];
+                // The geocode endpoint returns { query, count, results }, NOT a
+                // raw array — the older Array.isArray(r) check silently
+                // dropped every match. Search "New York" → "No matches"
+                // even though the server returned 5 hits.
+                this.obsAddressResults = Array.isArray(r?.results) ? r.results : [];
                 if (!this.obsAddressResults.length) {
                     this.obsAddressError = 'No matches — try a more specific search (city, state, country).';
                 }
@@ -3057,8 +3061,14 @@ function ninaApp() {
         },
 
         adoptObservatoryResult(r) {
-            this.settings.latitude  = Number(r.latitude.toFixed(4));
-            this.settings.longitude = Number(r.longitude.toFixed(4));
+            // Coerce both fields through Number() before toFixed —
+            // System.Text.Json sometimes serialises doubles as numbers
+            // but custom services have shipped them as strings in the
+            // past, and string.toFixed throws.
+            const lat = Number(r.latitude) || 0;
+            const lon = Number(r.longitude) || 0;
+            this.settings.latitude  = Number(lat.toFixed(4));
+            this.settings.longitude = Number(lon.toFixed(4));
             this.obsAddressResults  = [];
             this.obsAddressQuery    = r.displayName;
             this.saveSettings();

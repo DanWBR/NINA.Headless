@@ -3238,6 +3238,29 @@ label select.input-sm {
 .https-info-collapsed[open] {
     background: rgba(34, 197, 94, 0.04);
 }
+/* SIM-9: same compact details treatment as .https-info-collapsed
+   but in neutral muted instead of green (this isn't a "good news"
+   thing — it's an opt-in feature whose absence is the default). */
+.sim-collapsed.settings-section {
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--border, #2a3142);
+    border-radius: 6px;
+    box-shadow: none;
+}
+.sim-collapsed summary {
+    cursor: pointer;
+    font-size: 13px;
+    list-style: none;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.sim-collapsed summary::-webkit-details-marker { display: none; }
+.sim-collapsed[open] {
+    background: rgba(255, 255, 255, 0.04);
+}
 
 /* Connection lost banner */
 .connection-banner {
@@ -4648,18 +4671,25 @@ label select.input-sm {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    /* GX-11b: match the .image-viewer-modal sizing (12 px outer
+       padding, 96vw × 92vh shell) so before/after takes the same
+       real estate as the regular OpenSeadragon FITS viewer.
+       Previously the wider 24 px padding + un-stretched height
+       left the image clamped to its natural aspect ratio in the
+       middle of the screen, which made it look tiny on a 4k display
+       when the source FITS was square. */
+    padding: 12px;
 }
 .graxpert-compare-shell {
     display: flex;
     flex-direction: column;
     background: var(--bg-secondary, #0f1422);
     border: 1px solid var(--border, #2a3142);
-    border-radius: 10px;
+    border-radius: var(--radius, 10px);
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+    width: 96vw;
+    height: 92vh;
     max-width: 1600px;
-    max-height: 92vh;
-    width: 100%;
     overflow: hidden;
 }
 .graxpert-compare-header {
@@ -4715,20 +4745,34 @@ label select.input-sm {
     clip-path: inset(0 calc(100% - var(--split)) 0 0);
 }
 .graxpert-compare-handle {
+    /* GX-11c: the handle is a 40-px-wide invisible HIT TARGET
+       centred on the split column. The visible 2-px bar + the
+       36-px circular grip live inside it but are pointer-events:
+       none so the whole 40-px column reliably receives mousedown.
+       Previously the handle was only the 2-px bar, which meant
+       clicking the obvious-looking grip missed by ~17 px and
+       fell through to the wrap (which had no listener) — drag
+       was effectively broken on every screen. */
     position: absolute;
     top: 0;
     bottom: 0;
     left: var(--split);
-    width: 2px;
-    background: rgba(255, 255, 255, 0.85);
-    transform: translateX(-1px);
+    width: 40px;
+    transform: translateX(-20px);
     cursor: ew-resize;
     z-index: 2;
+    background: transparent;
 }
 .graxpert-compare-handle-bar {
     position: absolute;
-    inset: 0;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-1px);
+    background: rgba(255, 255, 255, 0.85);
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
 }
 .graxpert-compare-handle-grip {
     position: absolute;

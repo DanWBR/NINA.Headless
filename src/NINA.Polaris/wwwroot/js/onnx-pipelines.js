@@ -996,8 +996,28 @@
                 opts.psfPixels != null ? opts.psfPixels : 4.0));
             const strength = Math.max(0, Math.min(1,
                 opts.strength != null ? opts.strength : 0.5));
-            const sigmaNormalized = Math.max(0.05, Math.min(0.95,
-                psfPixels / 15));
+            // GX-12d: GraXpert maps PSF (FWHM in pixels) → normalized sigma
+            // with a MODEL-SPECIFIC non-linear formula. The previous
+            // psf/15 linear mapping fed the model wildly wrong sigmas,
+            // and the symptom users see is tile-shaped seams in the
+            // output (each tile's residual is wrong by a different
+            // amount). Exact formulas lifted from
+            // GraXpert/graxpert/deconvolution.py.
+            const sigmaNormalized = (() => {
+                const sigma = psfPixels / 2.355;   // FWHM → gaussian σ
+                let v;
+                if (target === 'objects') {
+                    // v1.0.1 is the current default; v1.0.0 uses a
+                    // different mapping. Pick by version string.
+                    v = version === '1.0.0'
+                        ? (sigma - 1.0) / 5.0
+                        : (sigma - 0.5) / 5.5;
+                } else {
+                    // Stellar (v1.0.0)
+                    v = (sigma - 1.5) / 3.0;
+                }
+                return Math.max(0.05, Math.min(0.95, v));
+            })();
             const TILE = 512;
             const STRIDE = 448;
             const MARGIN = (TILE - STRIDE) / 2;   // 32
@@ -1025,15 +1045,34 @@
             const ort = await loadOrtWeb();
             const inputNames = session.inputNames;
             const outputName = session.outputNames[0];
-            // Two inputs: image NCHW + params [B,2]. Param order is
-            // [sigma, strength × 0.95] — matches GraXpert's effective
-            // ceiling of 0.95.
-            const paramsData = new Float32Array(
-                [sigmaNormalized, strength * 0.95]);
-            const paramsTensor = new ort.Tensor('float32',
-                paramsData, [1, 2]);
+            // Strength gets the 0.95 cap GraXpert applies (TODO note in
+            // GraXpert source: strength=1.0 produces no result).
+            const effStrength = strength * 0.95;
+            // Input layout depends on the model:
+            //   • Stars v1.0.0 + Objects v1.0.1: image + "params" [B,2]
+            //   • Objects v1.0.0: image + "sigma" + "strenght" (sic) [B,1] each
+            // Detect by the input-name set rather than versions strings
+            // so future model versions can pick whichever convention.
             const inputImageName = inputNames.find(n => n.includes('image')) || inputNames[0];
-            const inputParamsName = inputNames.find(n => n !== inputImageName) || inputNames[1];
+            const hasSigma = inputNames.includes('sigma');
+            const hasStrenght = inputNames.includes('strenght');
+            const useThreeInputs = hasSigma && hasStrenght;
+            let extraInputs;
+            if (useThreeInputs) {
+                extraInputs = {
+                    sigma: new ort.Tensor('float32',
+                        new Float32Array([sigmaNormalized]), [1, 1]),
+                    strenght: new ort.Tensor('float32',
+                        new Float32Array([effStrength]), [1, 1]),
+                };
+            } else {
+                const inputParamsName = inputNames.find(n => n !== inputImageName) || inputNames[1];
+                extraInputs = {
+                    [inputParamsName]: new ort.Tensor('float32',
+                        new Float32Array([sigmaNormalized, effStrength]),
+                        [1, 2]),
+                };
+            }
             const totalTiles = itw * ith;
             let processed = 0;
             const t0 = performance.now();
@@ -1070,17 +1109,22 @@
                     }
                     const std = Math.max(1e-6, Math.sqrt(varSum / tile.length));
 
-                    // Normalize for the model: (v - mean) / (std * 0.1)
+                    // GX-12d: Normalize per GraXpert convention:
+                    // (v - mean) / std * 0.1   (NOT  / (std * 0.1)).
+                    // The previous off-by-100 fed the model out-of-
+                    // distribution inputs → garbage residuals → tile
+                    // seams in the output.
                     const tensorData = new Float32Array(TILE * TILE);
+                    const invStd10 = 0.1 / std;
                     for (let i = 0; i < tile.length; i++) {
-                        tensorData[i] = (tile[i] - mean) / (std * 0.1);
+                        tensorData[i] = (tile[i] - mean) * invStd10;
                     }
 
                     const inputTensor = new ort.Tensor('float32',
                         tensorData, [1, 1, TILE, TILE]);
                     const result = await session.run({
                         [inputImageName]: inputTensor,
-                        [inputParamsName]: paramsTensor,
+                        ...extraInputs,
                     });
                     const residual = result[outputName].data;
 
@@ -1093,9 +1137,9 @@
                             const normIn  = tensorData[tileRow + x];
                             const normRes = residual[tileRow + x];
                             const normOut = normIn - normRes;
-                            // De-normalize: undo the (mean, std, min)
-                            // captured for this tile.
-                            const logVal = normOut * (std * 0.1) + mean;
+                            // GX-12d: De-normalize per GraXpert convention:
+                            // out * std / 0.1 + mean   (was * std * 0.1).
+                            const logVal = normOut * std / 0.1 + mean;
                             const v = Math.exp(logVal) + minV - eps;
                             out[outRow + x] = v;
                         }

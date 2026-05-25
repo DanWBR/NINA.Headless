@@ -5844,14 +5844,25 @@
                 </label>
             </div>
 
-            <!-- Decon controls -->
+            <!-- Decon controls — labels + range match GraXpert's UI
+                 (Method + Deconvolution Strength + Image FWHM in
+                 pixels) so a user switching back and forth between
+                 the two tools gets the same numbers in the same
+                 places. -->
             <div class="siril-modal-row" x-show="graxpert.modalOp === 'deconvolution'">
-                <label>Strength
+                <label>Method
+                    <select class="input-sm"
+                            x-model="graxpert.modalDeconTarget">
+                        <option value="stars">Stars-only</option>
+                        <option value="objects">Object-only</option>
+                    </select>
+                </label>
+                <label>Deconvolution Strength
                     <input type="number" class="input-sm" step="0.05" min="0" max="1"
                            x-model.number="graxpert.modalDeconStrength">
                 </label>
-                <label>PSF size (px)
-                    <input type="number" class="input-sm" step="0.5" min="0.5" max="20"
+                <label>Image FWHM (in pixels)
+                    <input type="number" class="input-sm" step="0.1" min="0.5" max="20"
                            x-model.number="graxpert.modalDeconPsfSize">
                 </label>
             </div>
@@ -5947,8 +5958,17 @@
          @touchend.window="graxpertCompareMouseUp()">
         <div class="graxpert-compare-shell">
             <div class="graxpert-compare-header">
-                <strong>Before vs After</strong>
+                <!-- GX-12g: title switches with mode. The GraXpert-op
+                     auto-open shows "Before vs After" + the source
+                     filename; the FILES "↔ Compare" pick shows just
+                     "Compare" since the per-side corner tags already
+                     surface both filenames (showing them in the
+                     header too is redundant + clips at narrow
+                     viewport widths). -->
+                <strong x-text="graxpertCompare.mode === 'compare'
+                                ? 'Compare' : 'Before vs After'"></strong>
                 <span class="graxpert-compare-label"
+                      x-show="graxpertCompare.mode !== 'compare'"
                       x-text="graxpertCompare.pairs[graxpertCompare.index]?.label
                               || ''"></span>
                 <span class="graxpert-compare-spacer" style="flex:1"></span>
@@ -5983,8 +6003,10 @@
                     <div class="graxpert-compare-handle-bar"></div>
                     <div class="graxpert-compare-handle-grip">↔</div>
                 </div>
-                <span class="graxpert-compare-tag graxpert-compare-tag-src">BEFORE</span>
-                <span class="graxpert-compare-tag graxpert-compare-tag-out">AFTER</span>
+                <span class="graxpert-compare-tag graxpert-compare-tag-src"
+                      x-text="graxpertCompareTag('src')"></span>
+                <span class="graxpert-compare-tag graxpert-compare-tag-out"
+                      x-text="graxpertCompareTag('out')"></span>
             </div>
         </div>
     </div>
@@ -6196,11 +6218,13 @@
          on first call. Loading the registry up-front means the editor
          AI section + FILES tab can call OnnxRegistry.* synchronously
          without awaiting an import. -->
-    <!-- v=GX12: Denoise now applies GraXpert's blend_images mask
-         (bright stars/DSO keep original, only sub-threshold background
-         gets denoised). Previous build damaged stars + made strength=1
-         look identical to original after auto-stretch. -->
-    <script src="/js/onnx-pipelines.js?v=GX12"></script>
+    <!-- v=GX12d: Decon now uses GraXpert's PSF→sigma mapping (model-
+         specific, non-linear with FWHM/2.355) and the correct
+         per-tile normalize (× 0.1 / std, not / (std × 0.1)). Previous
+         build fed the model 100× off inputs → garbage residuals →
+         visible tile seams in the output. Also handles object v1.0.0's
+         3-input signature (sigma + strenght separate). -->
+    <script src="/js/onnx-pipelines.js?v=GX12d"></script>
     <script src="/js/lib/alpine.min.js" defer></script>
     <script src="/js/app.js"></script>
     <!-- CLST-2: WASM live-stack module bootstrap. The .NET runtime

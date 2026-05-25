@@ -793,6 +793,11 @@ function ninaApp() {
             modalSaveBackground: false,
             modalDeconStrength: 0.5,
             modalDeconPsfSize: 4.0,
+            // GX-12h: parity with GraXpert UI — pick the dedicated
+            // decon-stars or decon-objects ONNX model. Browser path
+            // forwards as opts.target; CLI path tags the family in
+            // the API request.
+            modalDeconTarget: 'stars',
             modalDenoiseStrength: 0.5,
             currentJobId: null,
             currentJob: null,
@@ -848,12 +853,20 @@ function ninaApp() {
         // pairs is [{ src, out, label }, ...]; we render only pairs[0]
         // today, but the array shape leaves room for a future
         // "step through multiple files" arrow control.
+        //
+        // GX-12g: `mode` distinguishes the GraXpert-op auto-open
+        // (`'gx'`, default — shows generic BEFORE / AFTER tags since
+        // the user just performed a known transformation) from the
+        // arbitrary FILES "↔ Compare" button (`'compare'` — shows
+        // the actual filenames in the corner tags so the user can
+        // tell two unrelated files apart).
         graxpertCompare: {
             open: false,
             pairs: [],
             index: 0,
             split: 0.5,
             dragging: false,
+            mode: 'gx',
         },
 
         // d3-celestial Sky Viewer (offline, BSD-3-Clause).
@@ -4100,7 +4113,9 @@ function ninaApp() {
                         runOpts = {
                             strength: this.settings.graxpertDeconStrength,
                             psfPixels: this.settings.graxpertDeconPsfSize,
-                            target: 'stars',  // GX-5 v1; UI radio in follow-up
+                            // GX-12h: parity with GraXpert UI — let the
+                            // user pick Stars-only vs Object-only here too.
+                            target: this.graxpert?.modalDeconTarget || 'stars',
                         };
                         suffix = '_decon';
                         break;
@@ -4844,7 +4859,11 @@ function ninaApp() {
                 out: ordered[1],
                 label: labelFor(ordered[0]) + '  ↔  ' + labelFor(ordered[1]),
             };
-            this.graxpertOpenCompare([pair], 0);
+            // mode='compare' switches the corner tags from
+            // BEFORE/AFTER (the GraXpert-op semantic) to the actual
+            // filenames — the user is comparing two arbitrary files,
+            // not a known before/after pair.
+            this.graxpertOpenCompare([pair], 0, 'compare');
         },
 
         // --- Clipboard + mutations ------------------------------------
@@ -8611,14 +8630,13 @@ function ninaApp() {
                         break;
                     case 'deconvolution':
                         pipeline = new OnnxRegistry.DeconPipeline();
-                        // GraXpert CLI doesn't expose Stars-vs-Objects in
-                        // its single flag set; default to Stars (more
-                        // useful for typical DSO masters). Editor will
-                        // expose a radio in GX-5.
+                        // GX-12h: target now comes from the modal
+                        // dropdown — Stars-only picks decon-stars,
+                        // Object-only picks decon-objects ONNX models.
                         runOpts = {
                             strength: this.graxpert.modalDeconStrength,
                             psfPixels: this.graxpert.modalDeconPsfSize,
-                            target: 'stars',
+                            target: this.graxpert.modalDeconTarget || 'stars',
                         };
                         break;
                     default:
@@ -8825,12 +8843,30 @@ function ninaApp() {
         // moving the handle left reveals the source underneath.
         // pairs: [{ src, out, label }]; index picks which pair to show.
 
-        graxpertOpenCompare(pairs, index) {
+        graxpertOpenCompare(pairs, index, mode) {
             this.graxpertCompare.pairs = pairs;
             this.graxpertCompare.index = index || 0;
             this.graxpertCompare.split = 0.5;
             this.graxpertCompare.dragging = false;
+            // GX-12g: 'gx' = GraXpert auto-open (BEFORE/AFTER tags);
+            // 'compare' = arbitrary two-file pick from FILES (show
+            // the actual filenames on each side).
+            this.graxpertCompare.mode = mode || 'gx';
             this.graxpertCompare.open = true;
+        },
+
+        // GX-12g: label resolver for the corner tags. Returns the
+        // generic BEFORE/AFTER words for a GraXpert op (the user
+        // just produced the AFTER file, they don't need its name
+        // surfaced redundantly) and the actual filename for an
+        // arbitrary Compare invocation.
+        graxpertCompareTag(side /* 'src' | 'out' */) {
+            const pair = this.graxpertCompare.pairs[this.graxpertCompare.index];
+            if (this.graxpertCompare.mode === 'compare' && pair) {
+                const p = pair[side];
+                if (p) return p.split(/[\\/]+/).pop();
+            }
+            return side === 'src' ? 'BEFORE' : 'AFTER';
         },
 
         graxpertCloseCompare() {

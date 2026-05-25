@@ -207,6 +207,27 @@
      *  user without re-probing.
      */
     let _pickedBackends = null;
+
+    // GX-12m4: iOS Safari Denoise OOM root cause is WebGPU memory
+    // pressure. BGE works (single 256×256 pass, ~few MB of GPU
+    // intermediates) but Denoise tiles for ~5-10 minutes hitting
+    // session.run() hundreds of times — each call leaks small GPU
+    // buffers that iOS Safari counts against the page's memory
+    // budget. iPhone Safari kills the tab when this crests ~1 GB.
+    // WASM stays in CPU memory which has higher limits and is more
+    // forgiving (incremental allocation, deterministic GC).
+    // Force WASM on iOS to trade speed (CPU is 5-10× slower than
+    // GPU here) for tab survival.
+    function _isIOSForOnnx() {
+        if (typeof navigator === 'undefined') return false;
+        const ua = navigator.userAgent || '';
+        if (/iPhone|iPad|iPod/i.test(ua)) return true;
+        // iPadOS 13+ desktop-class Safari reports MacIntel + touch.
+        if (navigator.platform === 'MacIntel'
+            && navigator.maxTouchPoints > 1) return true;
+        return false;
+    }
+
     async function pickBackends() {
         if (_pickedBackends) return _pickedBackends;
         // navigator.gpu just means the API exists — Edge / Chrome
@@ -218,6 +239,18 @@
         let chosen;
         let adapterInfo = null;
         let probeNotes = [];
+        // GX-12m4: skip WebGPU on iOS to avoid OOM kills (see comment
+        // on _isIOSForOnnx). Lands here BEFORE the requestAdapter
+        // attempt so we don't even allocate a GPU adapter handle.
+        if (_isIOSForOnnx()) {
+            _pickedBackends = ['wasm'];
+            const ortReg = (window.OnnxRegistry || {});
+            ortReg.__lastBackend = 'wasm';
+            ortReg.__adapterInfo = { skippedReason: 'iOS WebGPU avoided to prevent OOM kill' };
+            console.log('[OnnxRegistry] iOS detected — forcing WASM backend '
+                + '(WebGPU would crash the tab during Denoise tile loop).');
+            return _pickedBackends;
+        }
         const hasNavGpu = typeof navigator !== 'undefined' && navigator.gpu
                           && typeof navigator.gpu.requestAdapter === 'function';
         if (!hasNavGpu) {

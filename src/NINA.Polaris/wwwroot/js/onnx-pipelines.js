@@ -193,6 +193,26 @@
         return _manifestPromise;
     }
 
+    // GX-12o: pick the "best" version for a family on the current
+    // platform. On iOS, prefer a -fp16 sibling of the requested
+    // version if the manifest has it — half the weights → fits the
+    // iOS WebGPU cap → ~10× faster than WASM. Falls back to the
+    // requested version on desktop OR when the FP16 sibling isn't
+    // registered. Pure preference layer; the requested version is
+    // ALWAYS valid when a manifest entry exists for it.
+    async function preferQuantizedOnIOS(family, requestedVersion) {
+        if (typeof _isIOSForOnnx !== 'function' || !_isIOSForOnnx()) {
+            return requestedVersion;
+        }
+        // Already quantized? Don't double-suffix.
+        if (/-fp16$|-int8$/.test(requestedVersion)) return requestedVersion;
+        const m = await fetchManifest();
+        const wanted = `${requestedVersion}-fp16`;
+        const hit = (m.models || []).find(
+            x => x.family === family && x.version === wanted);
+        return hit ? wanted : requestedVersion;
+    }
+
     /** Find the manifest entry for a given (family, version), or null. */
     async function lookupModel(family, version) {
         const m = await fetchManifest();
@@ -641,7 +661,11 @@
         async run(pixels, width, height, opts = {}) {
             const correction = opts.correction || 'Subtraction';
             const family = 'bge';
-            const version = '1.0.1';
+            // GX-12o: BGE FP32 is ~208 MB which just exceeds the iOS
+            // WebGPU cap (200 MB), so it lands on WASM today. If a
+            // -fp16 sibling exists (~104 MB), prefer it on iOS to get
+            // the WebGPU GPU path.
+            const version = await preferQuantizedOnIOS('bge', '1.0.1');
             const TILE = 256;
             // GX-9: derive the channel count. Old callers omit
             // opts.channels and pass a Uint16Array length == w*h —
@@ -1122,8 +1146,15 @@
         async _runMono(pixels, width, height, opts = {}) {
             const target = opts.target || 'stars';   // 'stars' | 'objects'
             const family = target === 'objects' ? 'decon-objects' : 'decon-stars';
-            const version = opts.version
+            const requestedVersion = opts.version
                 || (target === 'objects' ? '1.0.1' : '1.0.0');
+            // GX-12o: on iOS, auto-prefer the -fp16 sibling if the
+            // user (or operator) generated one — Decon FP32 is ~267 MB
+            // which lands on WASM (slow), FP16 is ~133 MB and stays
+            // on WebGPU (fast). Decon has no per-run version dropdown
+            // in the UI today, so this auto-bump is how iOS gets the
+            // GPU path without code-or-UI work from the user.
+            const version = await preferQuantizedOnIOS(family, requestedVersion);
             const psfPixels = Math.max(0.05, Math.min(15,
                 opts.psfPixels != null ? opts.psfPixels : 4.0));
             const strength = Math.max(0, Math.min(1,

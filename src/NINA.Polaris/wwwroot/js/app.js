@@ -822,6 +822,11 @@ function ninaApp() {
             licenseAcknowledged: false,
             backends: null,        // ['webgpu', 'wasm'] after first probe
         },
+        // GX-6: consent modal state. _onnxLicenseResolver is the Promise
+        // resolver awaited by `_ensureOnnxLicenseAccepted`; the
+        // I-agree / cancel buttons resolve true/false to it.
+        onnxLicenseModalOpen: false,
+        _onnxLicenseResolver: null,
 
         // d3-celestial Sky Viewer (offline, BSD-3-Clause).
         // Always renders the live sky from the observer's location at the
@@ -8592,6 +8597,46 @@ function ninaApp() {
             }
         },
 
+        // ─── GX-6: license consent ──────────────────────────────────────
+        // Awaited promise that resolves true when the user has
+        // acknowledged CC BY-NC-SA 4.0, false when they cancel. Cached
+        // in localStorage (early-out without bothering the user) and
+        // persisted to the server profile via saveSettingsToServer so
+        // the consent survives across browsers / clean installs of the
+        // page bundle.
+        _ensureOnnxLicenseAccepted() {
+            try {
+                if (localStorage.getItem('nina-onnx-license-accepted') === '1') return true;
+            } catch { /* private mode */ }
+            if (this.settings.onnxLicenseAcknowledged) return true;
+            return new Promise(resolve => {
+                this._onnxLicenseResolver = resolve;
+                this.onnxLicenseModalOpen = true;
+            });
+        },
+
+        async onnxLicenseAccept() {
+            this.onnxLicenseModalOpen = false;
+            this.settings.onnxLicenseAcknowledged = true;
+            try { localStorage.setItem('nina-onnx-license-accepted', '1'); }
+            catch { /* private mode */ }
+            // Best-effort flush to the server so other browsers /
+            // devices inherit the consent without re-prompting.
+            try { await this.saveSettingsToServer(); } catch { }
+            if (this._onnxLicenseResolver) {
+                this._onnxLicenseResolver(true);
+                this._onnxLicenseResolver = null;
+            }
+        },
+
+        onnxLicenseDecline() {
+            this.onnxLicenseModalOpen = false;
+            if (this._onnxLicenseResolver) {
+                this._onnxLicenseResolver(false);
+                this._onnxLicenseResolver = null;
+            }
+        },
+
         // Reused helper for displaying bytes in the AI panel + per-model
         // size column. Mirrors the auto-scale rules formatBytesPerSec
         // uses for the network indicator but for static quantities (no
@@ -8608,8 +8653,14 @@ function ninaApp() {
         // (BGE / Decon / Denoise). Defaults pulled from the profile
         // so the modal already has sensible values per op.
         graxpertOpenModal(operation) {
-            if (!this.graxpert.status?.available) {
-                this.toast('GraXpert is not installed on this host', 'warn');
+            // GX-7: open the modal if either path is viable — CLI
+            // installed OR the matching ONNX model is in the registry.
+            // Block only when both are unavailable.
+            const cliOk     = !!this.graxpert.status?.available;
+            const browserOk = this.onnxAvailableForOp(operation);
+            if (!cliOk && !browserOk) {
+                this.toast('GraXpert unavailable: install the CLI or '
+                         + 'configure Onnx:ModelsPath in Settings', 'warn');
                 return;
             }
             // Source paths come from FILES selection (when called from
@@ -8623,8 +8674,13 @@ function ninaApp() {
             this.graxpert.modalDeconStrength = this.settings.graxpertDeconStrength;
             this.graxpert.modalDeconPsfSize = this.settings.graxpertDeconPsfSize;
             this.graxpert.modalDenoiseStrength = this.settings.graxpertDenoiseStrength;
+            // GX-7: default depends on the user's preference + per-op
+            // availability. Force browser-off when there's no model
+            // even if the user prefers browser (CLI is the only path).
+            this.graxpert.modalRunInBrowser = browserOk && !this.settings.onnxPreferCli;
             this.graxpert.currentJobId = null;
             this.graxpert.currentJob = null;
+            this.graxpert.browserActive = false;
             this.graxpert.modalOpen = true;
         },
 
@@ -8723,6 +8779,16 @@ function ninaApp() {
         // shared.
 
         async _graxpertRunInBrowser() {
+            // GX-6: gate on CC BY-NC-SA 4.0 consent. Resolves
+            // immediately when the flag is already set (localStorage
+            // OR server-side onnxLicenseAcknowledged); otherwise the
+            // promise pauses here until the user clicks I-agree /
+            // cancel in the modal.
+            const ok = await this._ensureOnnxLicenseAccepted();
+            if (!ok) {
+                this.toast('AI inference cancelled (licence not accepted)', 'warn');
+                return;
+            }
             const paths = [...this.graxpert.modalPaths];
             this.graxpert.browserActive = true;
             this.graxpert.browserDone = 0;

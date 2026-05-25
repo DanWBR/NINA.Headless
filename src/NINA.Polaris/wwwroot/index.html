@@ -4642,21 +4642,31 @@
                             title="Open this file in the Lightroom-style editor">
                         🎨 Edit
                     </button>
-                    <!-- GraXpert dropdown: only when binary detected.
-                         BGE is always offered; decon/denoise are gated
-                         on the v3.0+ flag from /api/graxpert/status. -->
-                    <span x-show="graxpert.status?.available" style="display:inline-flex;gap:4px">
+                    <!-- GraXpert dropdown — visible when EITHER the CLI
+                         is installed on the host OR the matching ONNX
+                         model is detected by the server. The modal's
+                         Run-in-browser toggle picks the path; GX-7 lets
+                         the user override the default in Settings. -->
+                    <span x-show="graxpert.status?.available
+                                  || onnxAvailableForOp('background-extraction')
+                                  || onnxAvailableForOp('denoising')
+                                  || onnxAvailableForOp('deconvolution')"
+                          style="display:inline-flex;gap:4px">
                         <button class="btn btn-sm"
+                                x-show="graxpert.status?.available
+                                       || onnxAvailableForOp('background-extraction')"
                                 :disabled="files.selectedPaths.length === 0"
                                 @click="graxpertOpenModal('background-extraction')"
-                                title="Remove gradient with GraXpert">🌅 BGE</button>
+                                title="Remove gradient with GraXpert (browser ONNX or CLI)">🌅 BGE</button>
                         <button class="btn btn-sm"
-                                x-show="graxpert.status?.supportsDeconvolution"
+                                x-show="graxpert.status?.supportsDeconvolution
+                                       || onnxAvailableForOp('deconvolution')"
                                 :disabled="files.selectedPaths.length === 0"
                                 @click="graxpertOpenModal('deconvolution')"
                                 title="Sharpen with GraXpert deconvolution">✨ Decon</button>
                         <button class="btn btn-sm"
-                                x-show="graxpert.status?.supportsDenoising"
+                                x-show="graxpert.status?.supportsDenoising
+                                       || onnxAvailableForOp('denoising')"
                                 :disabled="files.selectedPaths.length === 0"
                                 @click="graxpertOpenModal('denoising')"
                                 title="Reduce noise with GraXpert">🔇 Denoise</button>
@@ -5337,6 +5347,28 @@
                         prompt you to acknowledge the licence. Polaris itself
                         is MPL 2.0 and does not redistribute the model files.
                     </p>
+                    <!-- GX-7: opt-in to the legacy CLI subprocess path. -->
+                    <details style="margin-top:12px">
+                        <summary style="cursor:pointer; font-size:11px;
+                                       color:var(--text-muted)">
+                            Advanced — use GraXpert CLI subprocess instead
+                        </summary>
+                        <label class="checkbox-label" style="margin-top:8px">
+                            <input type="checkbox"
+                                   x-model="settings.onnxPreferCli"
+                                   @change="saveSettingsToServer()">
+                            Prefer CLI subprocess by default
+                        </label>
+                        <p class="hint" style="margin-top:4px">
+                            When enabled, the FILES-tab GraXpert modal opens
+                            with <em>Run in browser</em> unchecked. Useful
+                            if your browser can't load the models (very old
+                            device, no WebGPU or WASM SIMD) and you want
+                            the host's <code>graxpert</code> binary to do
+                            the work instead. The in-browser toggle is still
+                            available per-run — this is just the default.
+                        </p>
+                    </details>
                 </div>
 
             </div>
@@ -5808,6 +5840,41 @@
                 <button class="btn btn-primary"
                         x-show="!graxpert.currentJob"
                         @click="graxpertStartRun()">Start</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GX-6: ONNX model licence consent. Modal shows on the first
+         BGE / Denoise / Decon invocation; user must acknowledge that
+         the GraXpert AI weights are CC BY-NC-SA 4.0 (non-commercial)
+         before inference runs. The flag is persisted to localStorage
+         immediately and saved to the user profile on the next settings
+         flush, so subsequent sessions don't re-prompt. -->
+    <div class="editor-export-backdrop" x-show="onnxLicenseModalOpen" x-cloak
+         @click.self="onnxLicenseDecline()">
+        <div class="editor-export-modal" style="max-width:560px">
+            <h3>AI model licence — CC BY-NC-SA 4.0</h3>
+            <p style="font-size:13px; line-height:1.55">
+                The GraXpert AI models (Background Extraction, Denoising,
+                Deconvolution) are © GraXpert Development Team and licensed
+                under
+                <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/"
+                   target="_blank" rel="noopener">CC BY-NC-SA 4.0</a> —
+                <strong>non-commercial use only</strong>, with attribution
+                and share-alike on derivative works.
+            </p>
+            <p style="font-size:13px; line-height:1.55">
+                Polaris itself is MPL 2.0 and does not redistribute the
+                model files; they live on your server's disk via
+                <code>Onnx:ModelsPath</code> and stream to your browser
+                under the model authors' licence. By continuing you confirm
+                your use of the models complies with the terms above.
+            </p>
+            <div class="editor-export-actions">
+                <button class="btn" @click="onnxLicenseDecline()">Cancel</button>
+                <button class="btn btn-primary" @click="onnxLicenseAccept()">
+                    I agree — continue
+                </button>
             </div>
         </div>
     </div>

@@ -5291,15 +5291,6 @@
                 <span class="activity-host-icon" x-text="hostDeviceIcon()"></span>
                 <span class="activity-host-value" x-text="hostDeviceLabel()"></span>
             </span>
-            <!-- CPU brand + frequency. Separate chip from CPU% load
-                 so the static identity (model + clock) is visually
-                 grouped with the device label rather than the live
-                 metric. -->
-            <span class="activity-host-stat activity-host-cpu-info" x-show="host.device && host.device.cpuLabel"
-                  :title="host.device && host.device.cpuLabel">
-                <span class="activity-host-icon">⚙</span>
-                <span class="activity-host-value" x-text="hostCpuLabel()"></span>
-            </span>
             <span class="activity-host-stat" title="System CPU usage">
                 <span class="activity-host-label">CPU</span>
                 <span class="activity-host-value" :class="hostCpuClass()"

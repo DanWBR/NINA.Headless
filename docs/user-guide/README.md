@@ -17,6 +17,11 @@ This guide is split into **flows** (do this to accomplish X) and
    your first sequence. ~30 minutes. Walks through INDI/Alpaca,
    creating a rig, hooking PHD2, slew-and-center, and triggering a
    ten-frame test sequence on Vega or similar bright reference target.
+3. **[End-to-end workflow](end-to-end-workflow.md)**, the full path
+   from "scope on the tripod" to "JPEG exported": setup, acquire,
+   calibrate, integrate, GraXpert AI cleanup (BGE / Denoise / Decon),
+   editor pass, export. Stitches every Polaris feature into one
+   continuous night with a worked-example time budget.
 
 ## By feature
 

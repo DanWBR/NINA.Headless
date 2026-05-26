@@ -9050,6 +9050,25 @@ function ninaApp() {
             }
         },
 
+        // GX-12r2: file-pair label shown next to the title in the
+        // header. Shows BOTH basenames separated by an arrow so the
+        // user sees what came in and what went out (e.g.
+        // "M81_master.fits → M81_master_denoise.fits"). Falls back
+        // gracefully when src/out are missing or identical.
+        graxpertComparePairLabel() {
+            const pair = this.graxpertCompare.pairs[this.graxpertCompare.index];
+            if (!pair) return '';
+            const base = (p) => (p || '').split(/[\\/]+/).pop();
+            const srcName = base(pair.src);
+            const outName = base(pair.out);
+            if (srcName && outName && srcName !== outName) {
+                return srcName + ' → ' + outName;
+            }
+            // Fallback to whichever side has a name (or the pair's
+            // own .label that callers may have set explicitly).
+            return outName || srcName || pair.label || '';
+        },
+
         // GX-12g: label resolver for the corner tags. Returns the
         // generic BEFORE/AFTER words for a GraXpert op (the user
         // just produced the AFTER file, they don't need its name

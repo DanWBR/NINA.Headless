@@ -6246,10 +6246,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                      generic "Before vs After" / "Compare" via the
                      helper for older flows. -->
                 <strong x-text="graxpertCompareTitle()"></strong>
+                <!-- GX-12r2: show BOTH filenames after the title
+                     so the user sees source → output at a glance.
+                     Hidden in compare-mode because the per-side
+                     corner tags already carry the filenames there. -->
                 <span class="graxpert-compare-label"
                       x-show="graxpertCompare.mode !== 'compare'"
-                      x-text="graxpertCompare.pairs[graxpertCompare.index]?.label
-                              || ''"></span>
+                      x-text="graxpertComparePairLabel()"></span>
                 <span class="graxpert-compare-spacer" style="flex:1"></span>
                 <template x-if="graxpertCompare.pairs.length > 1">
                     <span class="graxpert-compare-nav">

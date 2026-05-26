@@ -161,6 +161,42 @@ public static class StudioEndpoints {
             return p == null ? Results.NotFound() : Results.Ok(p);
         });
 
+        // --- CC-1: channel combine (RGB / LRGB / PixelMath) -----------
+        // Combine N per-filter mono masters into one RGB or LRGB FITS.
+        // The mono workflow's last missing step before AI cleanup and
+        // editor; replaces a PixInsight round-trip for ChannelCombination
+        // + LRGBCombination + PixelMath. See
+        // docs/user-guide/lrgb-mono-workflow.md for the user-facing flow.
+        //
+        // Body:
+        //   { mode: "rgb"|"lrgb"|"pixelmath",
+        //     channelMap: [{ variable: "R", frameId: 42 }, ...],
+        //     register: true,    (cross-channel star alignment, default ON)
+        //     normalize: true,   (per-channel scale to common median)
+        //     lrgbAlgo: "lab"|"ratio",   (LRGB only)
+        //     expressions: ["..."],      (PixelMath only)
+        //     monoOutput: false,         (PixelMath only)
+        //     targetName: "..." }        (optional, defaults to first input's target)
+        g.MapPost("/combine", (ChannelCombineService svc,
+                               ChannelCombineService.ChannelCombineRequest req) => {
+            if (req?.ChannelMap == null || req.ChannelMap.Count < 2) {
+                return Results.BadRequest(new {
+                    error = "channelMap must contain at least 2 entries."
+                });
+            }
+            try {
+                var jobId = svc.StartJob(req);
+                return Results.Accepted(value: new { jobId });
+            } catch (ArgumentException ex) {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        });
+
+        g.MapGet("/combine/{jobId}", (ChannelCombineService svc, string jobId) => {
+            var p = svc.GetStatus(jobId);
+            return p == null ? Results.NotFound() : Results.Ok(p);
+        });
+
         // --- ST-6: debayer + background extraction -------------------
 
         // Debayer an OSC frame to a single-channel luminance plane.

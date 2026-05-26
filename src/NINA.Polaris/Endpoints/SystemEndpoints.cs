@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using NINA.Polaris.Services;
 
@@ -33,8 +34,18 @@ public static class SystemEndpoints {
 
         group.MapGet("/status", (EquipmentManager equip) => {
             var process = Process.GetCurrentProcess();
+            // PA-7: surface the auto-incrementing 0.1.{days}.{seconds/2}
+            // version that NINA.Polaris.csproj computes at build time.
+            // GetExecutingAssembly() returns this DLL — the AssemblyVersion
+            // and InformationalVersion attributes are both set to the
+            // same VersionPrefix in csproj. UI banner reads `version`.
+            var asm = Assembly.GetExecutingAssembly();
+            var asmVer = asm.GetName().Version?.ToString() ?? "0.0.0.0";
+            var infoVer = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion ?? asmVer;
             return Results.Ok(new {
-                version = "0.1.0-alpha",
+                version = infoVer,
+                versionParts = asmVer,
                 platform = RuntimeInformation.OSDescription,
                 architecture = RuntimeInformation.ProcessArchitecture.ToString(),
                 memoryMb = process.WorkingSet64 / (1024 * 1024),

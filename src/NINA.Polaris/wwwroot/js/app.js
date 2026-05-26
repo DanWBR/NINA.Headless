@@ -1084,10 +1084,24 @@ function ninaApp() {
         _previewFetching: false,
         _imageClientId: null,
 
+        // PA-7: build-time auto-incrementing version surfaced by
+        // /api/system/status. Fetched once on init + displayed by the
+        // brand badge in the status bar.
+        appVersion: '',
+
         init() {
             this.updateClock();
             setInterval(() => this.updateClock(), 1000);
             this.updateFov();
+
+            // PA-7: pull the running version once. Cheap, fire-and-forget.
+            // 'cache: no-store' so a long-lived browser tab against an
+            // updated server picks up the new version after a Polaris
+            // restart without forcing the user to ctrl+F5.
+            fetch('/api/system/status', { cache: 'no-store' })
+                .then(r => r.ok ? r.json() : null)
+                .then(s => { if (s && s.version) this.appVersion = s.version; })
+                .catch(() => { /* badge stays as '…' — non-fatal */ });
 
             // NET-1: kick the throughput meter immediately. WS opens
             // moments later — by the time the first frames flow the

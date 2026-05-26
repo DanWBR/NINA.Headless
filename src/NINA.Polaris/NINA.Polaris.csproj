@@ -10,6 +10,36 @@
          FrameLibraryService / FrameProcessingService — same pattern as
          NINA.Image.Portable.ImageAnalysis.JpegHelper. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Auto-incrementing version: 0.1.{days-since-2026}.{seconds-since-midnight/2}
+         Same shape as the classic .NET Framework 0.1.* wildcard but
+         computed via MSBuild date math so it works with SDK-style
+         projects + stays deterministic per-build (every build of the
+         day gets a unique revision stamp). Example output:
+           0.1.145.32421    → day 145 of 2026 (May 25), build at ~09:00
+           0.1.145.43102    → same day, build at ~11:58
+           0.1.146.0        → next-day midnight build
+         Build / Revision tokens are <65535 so X.509 cert tooling and
+         MSI version requirements stay happy.
+
+         Why a base date instead of just "now": days-since-2000 would
+         overflow ushort (65535) eventually + makes the numbers
+         needlessly large. Anchoring at 2026-01-01 keeps the build
+         field readable for the foreseeable future. Bump _VersionBaseDate
+         only if the build number ever crests ~60000 (~165 years). -->
+    <_VersionBaseDate>2026-01-01</_VersionBaseDate>
+    <_VersionDays>$([System.DateTime]::UtcNow.Subtract($([System.DateTime]::Parse('$(_VersionBaseDate)'))).TotalDays.ToString('F0'))</_VersionDays>
+    <_VersionSeconds>$([MSBuild]::Divide($([System.DateTime]::UtcNow.TimeOfDay.TotalSeconds), 2).ToString('F0'))</_VersionSeconds>
+    <VersionPrefix>0.1.$(_VersionDays).$(_VersionSeconds)</VersionPrefix>
+    <!-- AssemblyVersion is what reflection (Assembly.GetName().Version)
+         surfaces — this is what the /api/system/status endpoint reads
+         and the UI banner displays. FileVersion is the same so Windows
+         "right-click → Properties" shows matching numbers. -->
+    <AssemblyVersion>$(VersionPrefix)</AssemblyVersion>
+    <FileVersion>$(VersionPrefix)</FileVersion>
+    <!-- InformationalVersion is the human-readable string; can carry
+         pre-release suffixes if we want them. Keep equal for now. -->
+    <InformationalVersion>$(VersionPrefix)</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

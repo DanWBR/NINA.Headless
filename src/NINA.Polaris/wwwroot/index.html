@@ -213,7 +213,11 @@
                 </svg>
                 <span class="brand-name">N.I.N.A.</span>
                 <span class="brand-tag">POLARIS</span>
-                <span class="brand-version">v0.0.1</span>
+                <!-- PA-7: version comes from /api/system/status, which
+                     reads it from the assembly. Auto-incrementing
+                     0.1.{days-since-2026}.{seconds-since-midnight/2}
+                     stamp set by NINA.Polaris.csproj at build time. -->
+                <span class="brand-version" x-text="'v' + (appVersion || '…')"></span>
             </a>
         </div>
         <div class="status-bar-right">
@@ -364,7 +368,11 @@
                         <div class="home-eyebrow">
                             <span class="brand-name">N.I.N.A.</span>
                             <span class="brand-tag">POLARIS</span>
-                            <span class="brand-version">v0.0.1</span>
+                            <!-- PA-7: version comes from /api/system/status, which
+                     reads it from the assembly. Auto-incrementing
+                     0.1.{days-since-2026}.{seconds-since-midnight/2}
+                     stamp set by NINA.Polaris.csproj at build time. -->
+                <span class="brand-version" x-text="'v' + (appVersion || '…')"></span>
                         </div>
                         <h1 class="home-title">Ready when you are.</h1>
                         <p class="home-lede" x-show="!indiConnected">

@@ -4749,6 +4749,33 @@ label select.input-sm {
        is AFTER; at split=100% the whole image is BEFORE. */
     clip-path: inset(0 0 0 var(--split));
 }
+/* GX-12q: Typography normalisation for the cert-install modal.
+   Without these the global h3 / p / li / code styles render much
+   larger than the rest of the app (h3 ≈ 22-28px, body ≈ 16px+),
+   which made the modal feel like a different product. Scoped to
+   .cert-modal-frame so it doesn't bleed into siril / other
+   .siril-modal-frame instances that share the base class. */
+.cert-modal-frame,
+.cert-modal-frame p,
+.cert-modal-frame li {
+    font-size: 13px;
+    line-height: 1.55;
+}
+.cert-modal-frame h2 { font-size: 16px; margin: 0 0 10px; }
+.cert-modal-frame h3 { font-size: 13px; font-weight: 600;
+    margin: 16px 0 6px; color: var(--text-primary); }
+.cert-modal-frame p { margin: 6px 0; }
+.cert-modal-frame ol,
+.cert-modal-frame ul { margin: 6px 0; padding-left: 22px; }
+.cert-modal-frame li { margin: 4px 0; }
+.cert-modal-frame code {
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+.cert-modal-frame .hint { font-size: 12px; }
+
 /* GX-12q: per-OS tab bar inside the certificate-install modal.
    Five small pills the user toggles between Windows / macOS /
    iOS / Android / Linux. Active tab gets the accent fill so
@@ -4781,25 +4808,17 @@ label select.input-sm {
     border-color: var(--accent, #5b8def);
     color: white;
 }
-.cert-modal-content {
-    font-size: 13px;
-    line-height: 1.55;
-}
-.cert-modal-content ol,
-.cert-modal-content ul {
-    padding-left: 22px;
-    margin: 8px 0;
-}
-.cert-modal-content li { margin: 6px 0; }
+/* .cert-modal-content holds the per-OS tab body. Typography rules
+   come from .cert-modal-frame above — only the pre block needs
+   its own dark-background treatment for the Linux certutil snippet. */
 .cert-modal-content pre {
-    background: rgba(0,0,0,0.35);
+    background: rgba(0, 0, 0, 0.35);
     padding: 10px;
     border-radius: 4px;
     overflow-x: auto;
     font-size: 11.5px;
     line-height: 1.4;
 }
-.cert-modal-content code { font-size: 11.5px; }
 
 /* GX-12p: Strength sliders in the Denoise / Decon modals.
    Replaces the type=number stepper that was too small to hit

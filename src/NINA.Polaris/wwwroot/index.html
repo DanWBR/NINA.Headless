@@ -5698,10 +5698,10 @@
          install flow that matches docs/user-guide/https-setup.md, but
          in-app so the user doesn't have to chase a 404'd link to a
          raw .md file the server doesn't serve. -->
-    <div class="siril-modal" x-show="certModal.open" x-cloak
+    <div class="siril-modal cert-modal" x-show="certModal.open" x-cloak
          @click.self="certModal.open = false"
          @keydown.escape.window="certModal.open = false">
-        <div class="siril-modal-frame" style="max-width:720px; max-height:88vh; overflow:auto">
+        <div class="siril-modal-frame cert-modal-frame" style="max-width:720px; max-height:88vh; overflow:auto">
             <h2>🔒 Install Polaris certificate as trusted</h2>
             <p class="hint" style="margin-top:0">
                 One-time per device. After install, the browser shows

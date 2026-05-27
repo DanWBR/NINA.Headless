@@ -1,4 +1,4 @@
-# Mono LRGB workflow
+# Mono workflow (RGB / LRGB / narrowband)
 
 The end-to-end flow for the **mono camera + filter wheel** branch of the
 Polaris workflow. If you shoot OSC (one-shot color), the
@@ -7,31 +7,51 @@ already. This page is the missing piece for mono shooters: how to take
 the per-filter masters that come out of STUDIO and combine them into a
 single colour image, all without leaving Polaris.
 
+> **L is optional.** Plenty of mono workflows are pure RGB (no
+> separate luminance), and narrowband-only shooters skip RGB
+> entirely. Use the **RGB** tab when you only have R/G/B masters;
+> the **LRGB** tab when you also captured a luminance master and
+> want its SNR to drive the lightness channel; the **PixelMath**
+> tab for narrowband palettes or anything custom.
+
 ## What you need before starting
 
-- A mono camera + filter wheel (LRGB filters minimum; Ha/OIII/SII
-  optional for narrowband).
-- Per-filter masters already produced by **STUDIO -> Integrate**: one
-  master_*.fits per filter, all landing under
-  `{rig}/integrated/{target}/{filter}/`. If you have not done that
-  yet, follow the [end-to-end guide](end-to-end-workflow.md) up to
-  step 4 first.
-- The masters should be stretched to comparable brightness ranges. In
-  practice that means: either run them all linear (raw stack output),
-  or pre-stretch each one in STUDIO with the same parameters. Polaris
-  trusts both planes are comparable; if L is wildly brighter than RGB
-  you get a wildly brighter output.
+- A mono camera + filter wheel.
+- At least 2 per-filter masters already produced by
+  **STUDIO -> Integrate**, one `master_*.fits` per filter, all
+  landing under `{rig}/integrated/{target}/{filter}/`. RGB sets need
+  3 masters; LRGB needs 4; PixelMath needs as many as your
+  expression references (minimum 2). If you have not done the
+  per-filter integration yet, follow the
+  [end-to-end guide](end-to-end-workflow.md) up to step 4 first.
+- The masters should be stretched to comparable brightness ranges.
+  In practice that means: either run them all linear (raw stack
+  output), or pre-stretch each one in STUDIO with the same
+  parameters. Polaris trusts the planes are comparable; if one is
+  wildly brighter than the others you get a brightness-shifted
+  output.
 
-A typical mono session lands these on disk:
+A typical mono session can land any of these layouts on disk:
 
 ```
+# Plain RGB (no luminance), common for fast or short sessions
 {rig}/integrated/M81/
-  L/master_L_30x180s.fits
+  R/master_R_30x180s.fits
+  G/master_G_30x180s.fits
+  B/master_B_30x180s.fits
+
+# Classic LRGB (luminance master adds SNR)
+{rig}/integrated/M81/
+  L/master_L_30x180s.fits          (extra L pass for noise control)
   R/master_R_15x180s.fits
   G/master_G_15x180s.fits
   B/master_B_15x180s.fits
-  Ha/master_Ha_20x300s.fits         (optional, narrowband boost)
+
+# Narrowband only (no RGB at all)
+{rig}/integrated/NGC7000/
+  Ha/master_Ha_20x300s.fits
   OIII/master_OIII_15x300s.fits
+  SII/master_SII_10x300s.fits      (optional, for SHO palette)
 ```
 
 ## Step 1: Open the Combine dialog
@@ -49,9 +69,10 @@ Three tabs, three modes:
 
 ### RGB
 
-The simplest case: three mono masters (R/G/B), one RGB output. Use
-this when you only have RGB filters or when you want to skip the
-luminance step.
+The default and the one most mono shooters use. Three mono masters
+(R/G/B), one RGB output. No luminance master required, this is the
+right tab when you only captured RGB filters or when you don't want
+to spend extra session time on a separate L pass.
 
 Polaris auto-fills the R/G/B slots from each frame's `FILTER`
 header. If your filter names don't match (e.g. you set
@@ -62,10 +83,14 @@ Output:
 
 ### LRGB
 
-The classic mono workflow. Four masters (R/G/B/L), one RGB output
-that takes its lightness from L. **L is where the SNR lives** because
-it is captured through the broadest filter, so this is what makes
-LRGB look better than plain RGB.
+For shooters who **also** captured a luminance master. Four masters
+(R/G/B/L), one RGB output that takes its lightness from L. **L is
+where the SNR lives** because it is captured through the broadest
+filter, so this is what makes LRGB look better than plain RGB,
+when you have it.
+
+If you don't have an L master, use the **RGB** tab instead, that
+gives you the same R/G/B compose without forcing an L slot.
 
 Pick an algorithm:
 
@@ -193,10 +218,28 @@ The rest of the workflow is identical to the OSC path in the
 [end-to-end workflow guide](end-to-end-workflow.md) from step 6
 onward.
 
+## Worked example: M81 pure RGB
+
+The simpler path, what most backyard mono shooters do. Pi 5 host,
+ZWO ASI2600MM Pro, EQ6-R Pro, ASKAR FRA600, RGB filter set, no
+luminance pass.
+
+| Step | Time | Output |
+|---|---|---|
+| Capture: 20R + 20G + 20B at 180s each (3 hours unattended) | 3 h | 60 raw lights |
+| STUDIO: calibrate + integrate per filter | 8 min | 3 per-filter masters |
+| Combine: RGB tab, Register on, Normalize on | 15 s | `rgb_M81_*.fits` |
+| FILES -> GraXpert BGE | 30 s | `_bge.fits` |
+| FILES -> GraXpert Denoise (v2 FP32) | 90 s | `_denoise.fits` |
+| Editor tone work | 8 min | sidecar saved |
+| Export JPG quality 92 | 3 s | final image |
+
+Active human work: ~20 minutes. The rest is camera + Polaris time.
+
 ## Worked example: M81 LRGB + Ha boost
 
-Pi 5 host, ZWO ASI2600MM Pro, EQ6-R Pro, ASKAR FRA600, LRGB +
-Ha filter set.
+For shooters who add a separate luminance pass + narrowband boost.
+Same hardware as above, plus an L filter and Ha narrowband.
 
 | Step | Time | Output |
 |---|---|---|

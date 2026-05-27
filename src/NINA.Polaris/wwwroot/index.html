@@ -4587,8 +4587,10 @@
                             <!-- RGB tab: 3 channel slots auto-filled from filter. -->
                             <div x-show="studio.combine.activeTab === 'rgb'" class="combine-tab-body">
                                 <div class="muted" style="font-size:12px;margin-bottom:8px">
-                                    Pack 3 mono per-filter masters into one RGB FITS. The
-                                    file lands in <code>{rig}/integrated/{target}/composed/rgb_*.fits</code>.
+                                    Default for most mono shooters. Pack 3 mono per-filter
+                                    masters (R/G/B) into one RGB FITS. No luminance master
+                                    needed. Output:
+                                    <code>{rig}/integrated/{target}/composed/rgb_*.fits</code>.
                                 </div>
                                 <template x-for="slot in ['R','G','B']" :key="'rgb-'+slot">
                                     <label class="control-row">
@@ -4608,11 +4610,14 @@
                             <!-- LRGB tab: RGB + L + algorithm radio. -->
                             <div x-show="studio.combine.activeTab === 'lrgb'" class="combine-tab-body">
                                 <div class="muted" style="font-size:12px;margin-bottom:8px">
-                                    Combine R, G, B with a luminance L master. Output:
+                                    Use this tab when you captured a separate luminance
+                                    master in addition to R/G/B. If you only have R/G/B,
+                                    switch to the <strong>RGB</strong> tab, no L slot to
+                                    fill there. Output:
                                     <code>{rig}/integrated/{target}/composed/lrgb_*.fits</code>.
-                                    Both algorithms trust that L and RGB were stretched
-                                    together upstream (re-stretch in STUDIO if the
-                                    brightness gap is large).
+                                    Both algorithms trust L and RGB were stretched together
+                                    upstream (re-stretch in STUDIO if the brightness gap is
+                                    large).
                                 </div>
                                 <template x-for="slot in ['R','G','B','L']" :key="'lrgb-'+slot">
                                     <label class="control-row">

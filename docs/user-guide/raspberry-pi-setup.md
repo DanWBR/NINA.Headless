@@ -149,18 +149,39 @@ sudo chown polaris:polaris /mnt/astro
 Now `/mnt/astro` is your image library root. You will point Polaris at
 this folder in the FILES tab after first run.
 
-## 4. Install all dependencies in one go
+## 4. Install all dependencies
 
-Single big apt block. Copy and paste, walk away for 10 minutes.
+Apt covers most. Two callouts:
+
+- **INDI, PHD2, xpra**: the apt versions on Bookworm lag upstream by
+  6 to 18 months. If you want bleeding edge (new camera drivers,
+  PHD2 fixes, xpra protocol updates), compile from source. See
+  [section 4.2](#42-optional-compile-indi-phd2-xpra-from-source).
+- **GraXpert**: no apt package. Download from
+  [graxpert.com](https://www.graxpert.com/), extract into a folder
+  (the convention used here is `~/graxpert`), point Polaris at it via
+  Settings (UI does the wiring, no JSON editing).
+
+### 4.1. Apt block (copy-paste, walk away ~10 min)
 
 ```bash
-# .NET 10 ASP.NET Core runtime
+# .NET 10 ASP.NET Core runtime (installed under the polaris user, not
+# system-wide; keeps apt away from /usr and makes upgrades a single
+# re-run of the install script)
 sudo apt install -y libicu-dev libssl-dev curl libfontconfig1
 curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin \
-  --channel 10.0 --runtime aspnetcore --install-dir /usr/share/dotnet
-sudo ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet
+  --channel 10.0 --runtime aspnetcore --install-dir $HOME/.dotnet
 
-# INDI core + all bundled drivers
+# Make `dotnet` available in interactive shells and to systemd later
+cat >> ~/.bashrc <<'BASHRC'
+
+# .NET 10 (user install)
+export DOTNET_ROOT=$HOME/.dotnet
+export PATH=$DOTNET_ROOT:$PATH
+BASHRC
+source ~/.bashrc
+
+# INDI core + all bundled drivers (apt version)
 sudo apt install -y indi-bin indi-full
 
 # Plate solver
@@ -169,14 +190,16 @@ sudo apt install -y astap
 # pipenv for installing indi-web in a managed venv
 sudo apt install -y pipenv
 
-# Optional: PHD2 (autoguiding)
+# PHD2 autoguider (apt version)
 sudo apt install -y phd2
 
-# Optional: Siril and GraXpert (post-processing, Polaris invokes their CLIs)
+# Siril (post-processing, Polaris invokes its CLI)
 sudo apt install -y siril
-# GraXpert is a manual install, see https://www.graxpert.com/
 
-# Optional: lsof and journalctl helpers
+# xpra for the embedded PHD2 GUI (apt version)
+sudo apt install -y xpra xserver-xorg-video-dummy
+
+# Diagnostics helpers
 sudo apt install -y lsof
 ```
 
@@ -189,21 +212,65 @@ dotnet --info
 Should show `Microsoft.AspNetCore.App 10.x.x`. If not, the install
 script silently fell back; re-run it.
 
-Verify INDI:
+### 4.2. (Optional) compile INDI, PHD2, xpra from source
+
+Skip this section unless you have a specific reason. Apt versions work
+for most setups. Reasons to compile:
+
+- New camera was released after the apt INDI version froze
+  (e.g. ZWO ASI2600MM Pro support).
+- PHD2 has a fix you need that has not made it to Debian yet.
+- xpra HTML5 client needs a newer protocol than apt ships for the
+  embedded PHD2 GUI in modern browsers.
+
+Build dependencies:
 
 ```bash
-indiserver --help
+sudo apt install -y build-essential cmake git pkg-config \
+  libnova-dev libcfitsio-dev libusb-1.0-0-dev zlib1g-dev libgsl-dev \
+  libjpeg-dev libcurl4-gnutls-dev libtheora-dev libfftw3-dev \
+  libftdi1-dev libgps-dev libraw-dev libdc1394-dev libgphoto2-dev \
+  libboost-dev libboost-regex-dev libindi-dev libnova-dev libwxgtk3.2-dev
 ```
 
-Should print usage. ASTAP:
+**INDI** (clone, build, install):
 
 ```bash
-which astap
+git clone --depth 1 https://github.com/indilib/indi.git ~/src/indi
+mkdir -p ~/src/indi/build && cd ~/src/indi/build
+cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release ..
+make -j$(nproc)
+sudo make install
 ```
 
-Should print `/usr/bin/astap`.
+For 3rd-party drivers (ZWO, QHY, Pegasus, etc):
 
-### 4.1. ASTAP star database (one-time, 290 MB)
+```bash
+git clone --depth 1 https://github.com/indilib/indi-3rdparty.git ~/src/indi-3rdparty
+# follow per-driver build instructions in the README
+```
+
+**PHD2**:
+
+```bash
+git clone --recursive --depth 1 https://github.com/OpenPHDGuiding/phd2.git ~/src/phd2
+mkdir -p ~/src/phd2/build && cd ~/src/phd2/build
+cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DCMAKE_BUILD_TYPE=Release ..
+make -j$(nproc)
+sudo make install
+```
+
+**xpra**: source builds are involved (lots of optional codecs). The
+project's [Pi setup notes](https://github.com/Xpra-org/xpra/wiki/Raspberry-Pi-Build)
+are the canonical reference. Most users will be fine with the apt
+version, the embedded PHD2 GUI works either way.
+
+After source installs, `which indiserver`, `which phd2`, `which xpra`
+should resolve to `/usr/local/bin/`. The apt versions in `/usr/bin/`
+get shadowed by the PATH order; uninstall them if you want to be
+certain (`sudo apt remove indi-bin phd2 xpra`).
+
+### 4.3. ASTAP star database (one-time, 290 MB)
 
 ASTAP alone cannot solve, it needs a star catalog. Install the H17
 database (good for focal lengths from 50 mm to 2000 mm):
@@ -218,6 +285,45 @@ sudo unzip h17_star_database_mag17_colour.zip -d /opt/astap/
 
 ASTAP looks in `/opt/astap`, `~/.local/share/astap`, or alongside its
 binary. The `/opt/astap` path is read-anyone, works for all users.
+
+### 4.4. GraXpert (manual install)
+
+GraXpert ships as a self-contained AppImage or tarball. Drop it into
+the polaris user's home so the systemd-run Polaris process can find it:
+
+```bash
+mkdir -p ~/graxpert && cd ~/graxpert
+# Grab the latest Linux build from https://www.graxpert.com/
+# Example (replace VERSION with current):
+wget https://github.com/Steffenhir/GraXpert/releases/download/VERSION/GraXpert-linux-VERSION
+chmod +x GraXpert-linux-VERSION
+ln -sf GraXpert-linux-VERSION graxpert    # stable name Polaris can find
+```
+
+You should end up with an executable at `~/graxpert/graxpert`. After
+Polaris is running, go to **Settings, External Tools, GraXpert path**
+and paste `/home/polaris/graxpert/graxpert`. Hit Re-detect. The status
+flips to green with the detected version + supported operations (BGE
+on 2.x, BGE + Deconvolution + Denoising on 3.x).
+
+You can also drop the binary at `/usr/local/bin/graxpert` instead, in
+which case Polaris auto-detects it without the manual path config.
+The `~/graxpert` location is cleaner if you want to keep multiple
+versions side by side.
+
+The GraXpert AI models are downloaded on first run; first invocation
+of each operation will hang for a few minutes while pulling weights
+from GitHub.
+
+### 4.5. Verify external binaries
+
+```bash
+dotnet --info       # Microsoft.AspNetCore.App 10.x.x
+indiserver --help   # should print usage
+which astap         # /usr/bin/astap (or /usr/local/bin/astap if from source)
+which siril         # /usr/bin/siril
+~/graxpert/graxpert --version    # prints GraXpert version
+```
 
 ## 5. Install Polaris
 
@@ -309,6 +415,8 @@ WorkingDirectory=/home/polaris/polaris
 ExecStart=/home/polaris/polaris/NINA.Polaris
 Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
 Environment=HOME=/home/polaris
+Environment=DOTNET_ROOT=/home/polaris/.dotnet
+Environment=PATH=/home/polaris/.dotnet:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Restart=on-failure
 RestartSec=5
 
@@ -465,6 +573,12 @@ VLANs or guest networks. Fall back to IP: find it with
 `appsettings.json` (validate JSON syntax), missing
 `libfontconfig1` (SkiaSharp needs it for image encoding), wrong
 permissions on the image output folder.
+
+**systemd says `dotnet: command not found` or `framework not found`.**
+The .NET install lives under `/home/polaris/.dotnet/`, which is not on
+the system PATH. The systemd unit in section 7 includes
+`Environment=DOTNET_ROOT=...` and `Environment=PATH=...` to fix that.
+If you wrote your own unit, copy those two lines in.
 
 **INDI driver shows in indi-web but Polaris RIGS dropdown is empty.**
 Polaris connects to `127.0.0.1:7624` by default. If you changed the

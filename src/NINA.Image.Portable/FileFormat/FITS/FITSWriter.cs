@@ -157,8 +157,18 @@ public static class FITSWriter {
         }
 
         // ---- Filter wheel ----
+        // FilterWheel.Filter is the live-capture path's authoritative
+        // source; Exposure.Filter is what FITSReader populates from
+        // the FILTER header on disk. Pipeline-internal writes
+        // (CalibrationService, BatchStackingService, etc.) set
+        // Exposure.Filter only, so fall back to that when the FW
+        // bucket is empty, otherwise the calibrated / integrated
+        // FITS silently lose their filter tag.
         AddStr(cards, "FWHEEL", meta.FilterWheel.Name);
-        AddStr(cards, "FILTER", meta.FilterWheel.Filter);
+        var filterTag = !string.IsNullOrEmpty(meta.FilterWheel.Filter)
+            ? meta.FilterWheel.Filter
+            : (meta.Exposure.Filter ?? "");
+        AddStr(cards, "FILTER", filterTag);
 
         // ---- Focuser ----
         AddStr(cards, "FOCNAME", meta.Focuser.Name);

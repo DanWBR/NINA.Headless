@@ -237,6 +237,15 @@ public static class FITSReader {
         meta.Exposure.Filter = GetStringHeader(headers, "FILTER", "");
         meta.Exposure.ImageType = GetStringHeader(headers, "IMAGETYP", "LIGHT");
 
+        // FITSWriter reads FILTER from meta.FilterWheel.Filter (live
+        // capture path populates that field), so mirror the FILTER
+        // header into both buckets here. Without this the read/write
+        // roundtrip used by CalibrationService / MasterFrameService /
+        // BatchStackingService silently drops the filter tag.
+        meta.FilterWheel.Filter = meta.Exposure.Filter;
+        meta.FilterWheel.Name = GetStringHeader(headers, "FWHEEL",
+            meta.FilterWheel.Name);
+
         return meta;
     }
 

@@ -414,4 +414,13 @@ nanobanana-output/
 # its own attribution requirement (CC-BY). Polaris's publish output
 # picks it up via the default wwwroot/** rule.
 src/NINA.Polaris/wwwroot/catalogs/apass/*.db
+
+# Real-capture fixture used by the E2E pipeline test
+# (tests/NINA.Polaris.Test/E2E/RealDataPipelineTests.cs). ~19 GB
+# of mono SHO + OSC sessions captured locally; not redistributed
+# in the repo. Drop your own NINA-format captures here (any
+# subfolder layout works, the rescan walks recursively and reads
+# IMAGETYP / FILTER / OBJECT from FITS headers) to run the
+# fixture via `dotnet test --filter "Category=E2E"`.
+test_data/
 scripts/.apass-cache/

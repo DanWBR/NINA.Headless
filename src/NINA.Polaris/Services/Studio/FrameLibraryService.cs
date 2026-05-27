@@ -99,7 +99,13 @@ public class FrameLibraryService {
                 return;
             }
 
-            var files = Directory.EnumerateFiles(root, "*.fits", SearchOption.AllDirectories).ToList();
+            // Pick up both .fits and .fit (the latter is what the NINA
+            // desktop app + Siril output by default; many cameras /
+            // scripts also use it). FITSReader does not care about the
+            // extension, the format is identified from the header.
+            var files = Directory.EnumerateFiles(root, "*.fits", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(root, "*.fit", SearchOption.AllDirectories))
+                .ToList();
             Rescan = new RescanProgress(true, 0, files.Count, null);
 
             using var c = new SqliteConnection(ConnString);

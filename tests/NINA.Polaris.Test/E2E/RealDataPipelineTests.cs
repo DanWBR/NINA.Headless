@@ -135,9 +135,24 @@ public class RealDataPipelineTests {
     [OneTimeTearDown]
     public void GlobalTeardown() {
         try { _editor?.Dispose(); } catch { }
+        // Opt-in to preserve outputs for visual inspection. Set
+        // POLARIS_E2E_KEEP_OUTPUT=1 in the environment and the rig
+        // dir under test_data/ survives the run, including masters,
+        // calibrated lights, integrated MASTERLIGHTs, SHO composed
+        // RGB, BG-neutralised RGB, PCC output, and the synthetic
+        // pcc-synthetic-rgb-*.fits / *_pcc.fits Step 09 generates.
+        // Default: clean up so a re-run starts fresh.
+        var keep = Environment.GetEnvironmentVariable("POLARIS_E2E_KEEP_OUTPUT");
+        var rigDir = Path.Combine(_testDataRoot, E2eRigName);
+        if (!string.IsNullOrEmpty(keep) && keep != "0") {
+            Log($"POLARIS_E2E_KEEP_OUTPUT set, preserving outputs at: {rigDir}");
+            if (Directory.Exists(_tempStudio)) {
+                try { Directory.Delete(_tempStudio, recursive: true); } catch { }
+            }
+            return;
+        }
         // Sweep the rig output dir created under test_data so a re-run
         // starts clean. Leave the source captures intact.
-        var rigDir = Path.Combine(_testDataRoot, E2eRigName);
         if (Directory.Exists(rigDir)) {
             try { Directory.Delete(rigDir, recursive: true); }
             catch (Exception ex) {

@@ -84,7 +84,11 @@ WLAN country. `Finish`.
 
 ### 2.4. Bump swap to 2 GB (helps editor, ONNX, batch stacking)
 
+Recent Raspberry Pi OS Lite images no longer ship `dphys-swapfile`
+pre-installed, so install it first:
+
 ```bash
+sudo apt install -y dphys-swapfile
 sudo dphys-swapfile swapoff
 sudo sed -i 's/CONF_SWAPSIZE=.*/CONF_SWAPSIZE=2048/' /etc/dphys-swapfile
 sudo dphys-swapfile setup

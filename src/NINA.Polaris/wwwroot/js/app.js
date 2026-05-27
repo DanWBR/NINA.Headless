@@ -755,6 +755,19 @@ function ninaApp() {
         },
         _editorPreviewTimer: null,
         _editorPendingPreview: false,
+        // Slider drag-aware throttling. The WASM EditorApplyEdit call
+        // is synchronous on the main thread; on a 20MP master a single
+        // render costs 100-300ms which makes a continuous slider drag
+        // feel stuck. While the user is actively dragging we (a) drop
+        // the preview maxDim to a smaller value (4x fewer pixels =
+        // ~4x faster), (b) skip the histogram render entirely, (c)
+        // yield to requestAnimationFrame before each WASM call so the
+        // browser paints the slider position before the heavy work
+        // starts, (d) bump the debounce slightly. On pointerup we
+        // re-fire one full-quality render + histogram.
+        _editorDragging: false,
+        _editorDragSettleTimer: null,
+        _editorHistTimer: null,
         editorLightSliders: [
             { key: 'exposure',   label: 'Exposure',   min: -5,   max: 5,   step: 0.05, dp: 2 },
             { key: 'contrast',   label: 'Contrast',   min: -1,   max: 1,   step: 0.01, dp: 2 },
@@ -4325,6 +4338,7 @@ function ninaApp() {
                 }
             } catch { /* private mode */ }
             this._editorBindKeyHandlers();
+            this._editorBindDragHandlers();
         },
 
         // Flip between server-mode and WASM-mode. When entering WASM
@@ -4811,6 +4825,49 @@ function ninaApp() {
             this.editorState.panning = false;
         },
 
+        // Slider drag detection. While a range input has the
+        // pointer captured (pointerdown..pointerup), flag the editor
+        // as "dragging" so _editorRunPreview can downscale the
+        // preview + skip the histogram render. On pointerup we wait
+        // a short settle window then re-fire one full-quality render
+        // + histogram. Document-level capture so we still see the
+        // pointerup if the user releases outside the slider track.
+        _editorBindDragHandlers() {
+            if (this._editorDragHandlerBound) return;
+            this._editorDragHandlerBound = true;
+            const onDown = (e) => {
+                if (this.tab !== 'editor') return;
+                const el = e.target;
+                if (!(el instanceof HTMLInputElement) || el.type !== 'range') return;
+                // Only treat the slider as "dragging" while inside
+                // the editor panel; the simulator + other tabs have
+                // their own ranges and we don't want to throttle
+                // their renders.
+                if (!el.closest('.editor-panel')) return;
+                this._editorDragging = true;
+                clearTimeout(this._editorDragSettleTimer);
+            };
+            const onUp = () => {
+                if (!this._editorDragging) return;
+                // Short settle window — covers the case where the
+                // user releases briefly then re-grabs the same
+                // slider (mouse wheel, keyboard arrows on a focused
+                // range emit input events between pointerup +
+                // pointerdown).
+                clearTimeout(this._editorDragSettleTimer);
+                this._editorDragSettleTimer = setTimeout(() => {
+                    this._editorDragging = false;
+                    // Re-fire one full-quality render so the user
+                    // ends up looking at the high-res preview after
+                    // settle, plus the histogram that was skipped.
+                    this._editorSchedulePreview();
+                }, 120);
+            };
+            document.addEventListener('pointerdown', onDown, true);
+            document.addEventListener('pointerup', onUp, true);
+            document.addEventListener('pointercancel', onUp, true);
+        },
+
         // Wire Ctrl+Z / Ctrl+Y keyboard shortcuts when the editor tab
         // is the active surface. Hooked in editorTabOpened.
         _editorBindKeyHandlers() {
@@ -4841,9 +4898,17 @@ function ninaApp() {
         // Debounced render, every input pings, but we coalesce to one
         // request in flight + one queued. Prevents the server from
         // queueing 100 stale requests while the user is mid-drag.
+        //
+        // Two debounce profiles:
+        //   - dragging (pointer held down on a slider): 120 ms so
+        //     a fast back-and-forth doesn't spam the WASM heap
+        //   - idle / single click: 60 ms so a one-shot edit feels
+        //     near-instant
         _editorSchedulePreview() {
             if (this._editorPreviewTimer) clearTimeout(this._editorPreviewTimer);
-            this._editorPreviewTimer = setTimeout(() => this._editorRunPreview(), 80);
+            const delay = this._editorDragging ? 120 : 60;
+            this._editorPreviewTimer = setTimeout(
+                () => this._editorRunPreview(), delay);
         },
 
         async _editorRunPreview() {
@@ -4856,12 +4921,41 @@ function ninaApp() {
             this.editorState.rendering = true;
             try {
                 if (this.editorState.computeMode === 'wasm' && this.editorState.wasmLoaded) {
-                    this._editorRunPreviewWasm();
+                    // Drag-aware downscale: while the user is
+                    // sweeping a slider we render a smaller preview
+                    // so the per-frame cost stays under one rAF
+                    // tick. The settle handler re-fires at full
+                    // 1600 px once the pointer goes up.
+                    const dragging = this._editorDragging;
+                    const maxDim = dragging ? 700 : 1600;
+                    // Yield to the next animation frame BEFORE the
+                    // synchronous WASM call so the browser gets to
+                    // paint the slider thumb at its new position
+                    // before the main thread sticks for a few
+                    // hundred ms.
+                    await new Promise(r => requestAnimationFrame(() => r()));
+                    this._editorRunPreviewWasm(maxDim);
                 } else {
-                    await this._editorRunPreviewServer();
+                    // Server path's fetch is already async; the only
+                    // main-thread cost is the JPEG decode at blob
+                    // unwrap time. Still respect the drag-aware
+                    // downscale to keep the network roundtrip + decode
+                    // snappy during a drag.
+                    const dragging = this._editorDragging;
+                    const maxDim = dragging ? 900 : 1600;
+                    await this._editorRunPreviewServer(maxDim);
                 }
-                clearTimeout(this._editorHistTimer);
-                this._editorHistTimer = setTimeout(() => this._editorRenderHistogram(), 250);
+                // Histogram is purely informational; skip it during
+                // active drag (re-fired by the drag-settle handler)
+                // and defer to requestIdleCallback so it never
+                // competes with the preview render for main-thread
+                // time.
+                if (!this._editorDragging) {
+                    clearTimeout(this._editorHistTimer);
+                    this._editorHistTimer = setTimeout(() => {
+                        this._idleRun(() => this._editorRenderHistogram());
+                    }, 200);
+                }
             } catch (e) {
                 console.warn('[Editor] preview failed', e);
             } finally {
@@ -4873,14 +4967,26 @@ function ninaApp() {
             }
         },
 
-        async _editorRunPreviewServer() {
+        // Tiny requestIdleCallback shim — Safari doesn't ship rIC
+        // even today, so fall back to a short setTimeout. The
+        // histogram update is non-critical so a 100 ms delay is
+        // fine when rIC isn't available.
+        _idleRun(fn) {
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(fn, { timeout: 500 });
+            } else {
+                setTimeout(fn, 100);
+            }
+        },
+
+        async _editorRunPreviewServer(maxDim = 1600) {
             const r = await fetch('/api/editor/preview', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     sessionId: this.editorState.session,
                     edits: this.editorState.edits,
-                    maxDim: 1600,
+                    maxDim: maxDim,
                     quality: 85
                 })
             });
@@ -4891,7 +4997,7 @@ function ninaApp() {
             this.editorState.previewUrl = url;
         },
 
-        _editorRunPreviewWasm() {
+        _editorRunPreviewWasm(maxDim = 1600) {
             // Synchronous JSExport call, pixels come back as a Uint8Array
             // we render to the editor canvas via ImageData. No JPEG encode,
             // no network roundtrip; latency is just the pipeline + canvas
@@ -4903,7 +5009,7 @@ function ninaApp() {
                 return this._editorRunPreviewServer();
             }
             const editsJson = JSON.stringify(this.editorState.edits || {});
-            const pixels = interop.EditorApplyEdit(editsJson, 1600);
+            const pixels = interop.EditorApplyEdit(editsJson, maxDim);
             const dims = interop.EditorGetOutputDims();
             const w = dims[0], h = dims[1], ch = dims[2];
             if (!w || !h) return;

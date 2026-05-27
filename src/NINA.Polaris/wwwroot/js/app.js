@@ -465,6 +465,14 @@ function ninaApp() {
         },
         _simulatorSettingsLoaded: false,
 
+        // INDI-WEB-3: indi-web (indiwebmanager) iframe-based driver
+        // management UI lives inside the RIGS panel. `indiWeb.status`
+        // mirrors GET /api/indi/web/status (refreshed on RIGS open +
+        // after each lifecycle button click). `autoStart` is a UI-
+        // local mirror of the IndiWeb:AutoStart config flag persisted
+        // via /api/system/settings (same plumbing as PHD2 auto-start).
+        indiWeb: { status: null, autoStart: false, busy: false },
+
         // Rotator
         rotator: { connected: false, name: '', position: null, moving: false, reversed: false },
 
@@ -11183,6 +11191,82 @@ function ninaApp() {
             } catch (e) {
                 this.toast('Shutdown failed: ' + (e.message || e), 'error');
             }
+        },
+
+        // ── INDI-WEB-3: indi-web (indiwebmanager) lifecycle ─────
+        // Fetches /api/indi/web/status, fires lifecycle commands,
+        // surfaces install hint + iframe URL. Called by the RIGS
+        // panel's <details> @toggle and the inline buttons.
+
+        async indiWebStatusRefresh() {
+            try {
+                this.indiWeb.status = await this.apiGet('/api/indi/web/status');
+            } catch (e) {
+                this.indiWeb.status = {
+                    supportedOs: false, installed: false, running: false,
+                    unsupportedReason: 'Status endpoint unreachable',
+                };
+            }
+        },
+
+        async indiWebStart() {
+            if (this.indiWeb.busy) return;
+            this.indiWeb.busy = true;
+            try {
+                const r = await this.apiPost('/api/indi/web/start');
+                if (r?.running) {
+                    this.toast('indi-web started', 'ok');
+                } else {
+                    this.toast('Start failed: ' + (r?.error || 'unknown'), 'error');
+                }
+            } catch (e) {
+                this.toast('Start failed: ' + (e.message || e), 'error');
+            } finally {
+                this.indiWeb.busy = false;
+                await this.indiWebStatusRefresh();
+            }
+        },
+
+        async indiWebStop() {
+            if (this.indiWeb.busy) return;
+            this.indiWeb.busy = true;
+            try {
+                await this.apiPost('/api/indi/web/stop');
+                this.toast('indi-web stopped', 'ok');
+            } catch (e) {
+                this.toast('Stop failed: ' + (e.message || e), 'error');
+            } finally {
+                this.indiWeb.busy = false;
+                await this.indiWebStatusRefresh();
+            }
+        },
+
+        // Status pill: maps the status snapshot to a green / amber /
+        // red label so the <details> summary surfaces the state
+        // without having to open it.
+        indiWebStatusClass() {
+            const s = this.indiWeb.status;
+            if (!s) return 'status-muted';
+            if (!s.supportedOs) return 'status-muted';
+            if (!s.installed) return 'status-warn';
+            if (s.running) return 'status-ok';
+            return 'status-muted';
+        },
+        indiWebStatusLabel() {
+            const s = this.indiWeb.status;
+            if (!s) return 'Status: …';
+            if (!s.supportedOs) return 'OS not supported';
+            if (!s.installed) return 'Not installed';
+            if (s.running) return '● Running';
+            return 'Stopped';
+        },
+        indiWebSummaryLabel() {
+            const s = this.indiWeb.status;
+            if (!s) return '(click to load)';
+            if (!s.supportedOs) return '(unavailable on this OS)';
+            if (!s.installed) return '(install with pip)';
+            if (s.running) return '✓ running · ' + (s.version || 'v?');
+            return 'stopped';
         },
 
         // SIM-8: device checkbox toggle handler. Two cases:

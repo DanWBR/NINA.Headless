@@ -104,6 +104,12 @@ Each tab in the sidebar has its own page. Read the ones you need:
   pipeline without real hardware. Renders real stars at the simulated
   mount position so plate solve, auto-focus, and live stacking all
   actually work.
+- **[INDI Drivers manager (embedded indi-web)](indi-web.md)**,
+  embed the indi-web (indiwebmanager) UI inside the RIGS tab via
+  iframe so you can add / remove INDI drivers and start / stop
+  the indiserver from the Polaris browser instead of ssh'ing into
+  the host. Lighter than the PHD2 xpra integration (no display
+  server, just HTTP).
 
 ## A note on screenshots
 

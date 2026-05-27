@@ -127,9 +127,16 @@ builder.Services.AddSingleton<PHD2CalibrationOrchestrator>();
 // in DI for endpoint handlers + runs its background loop.
 builder.Services.AddSingleton<Phd2GuiSessionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Phd2GuiSessionService>());
-// YARP direct forwarder, used by the /phd2-gui/* reverse-proxy below
-// to bridge browser ↔ xpra HTML5 client. Includes WebSocket upgrade
-// support, which is what xpra-html5 needs for the pixel stream.
+// INDI-WEB-1: indi-web (indiwebmanager) lifecycle manager. Same
+// dual-registration shape as Phd2GuiSession so endpoint handlers
+// resolve the singleton AND the background loop (auto-start +
+// health probe) runs.
+builder.Services.AddSingleton<IndiWebManagerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<IndiWebManagerService>());
+// YARP direct forwarder, used by the /phd2-gui/* AND /indi-web/*
+// reverse-proxies below to bridge browser ↔ embedded webapp.
+// Includes WebSocket upgrade support, which xpra-html5 needs for
+// the pixel stream and indi-web can use for live driver state.
 builder.Services.AddHttpForwarder();
 builder.Services.AddSingleton<AutoFocusService>();
 builder.Services.AddSingleton<MeridianFlipService>();
@@ -354,6 +361,70 @@ app.Map("/phd2-gui/{**rest}", async (HttpContext ctx, Phd2GuiSessionService gui)
     }
 });
 
+// ----- INDI-WEB-2: /indi-web/* reverse-proxy → indi-web (Bottle webapp) -----
+// Same shape as /phd2-gui/* above: same-origin proxy so the iframe
+// gets indi-web's HTML / JS / XHR / WebSocket without CORS dance,
+// and Polaris's outer auth layer (Relay tokens / LAN-only) covers
+// driver management. indi-web binds to 127.0.0.1 only — never
+// directly exposed to the network even when Polaris listens on
+// 0.0.0.0.
+var indiWebForwarder = app.Services.GetRequiredService<IHttpForwarder>();
+var indiWebHttpClient = new HttpMessageInvoker(new SocketsHttpHandler {
+    UseProxy = false,
+    AllowAutoRedirect = false,
+    AutomaticDecompression = System.Net.DecompressionMethods.None,
+    UseCookies = false,
+    EnableMultipleHttp2Connections = true,
+    ActivityHeadersPropagator = new Yarp.ReverseProxy.Forwarder.ReverseProxyPropagator(
+        System.Diagnostics.DistributedContextPropagator.Current),
+    ConnectTimeout = TimeSpan.FromSeconds(5),
+});
+// Default transformer leaves headers / body untouched. We strip
+// the /indi-web prefix from the request path manually below
+// (HttpContext.Request.Path) before calling SendAsync — indi-web
+// returns asset URLs like /static/app.css that need to resolve
+// to the upstream root, not /indi-web/static/app.css.
+var indiWebTransform = HttpTransformer.Default;
+app.Map("/indi-web/{**rest}", async (HttpContext ctx, IndiWebManagerService svc) => {
+    if (!svc.IsSupportedOs) {
+        ctx.Response.StatusCode = 501;
+        await ctx.Response.WriteAsJsonAsync(new {
+            error = svc.UnsupportedReason ?? "Not supported on this OS",
+        });
+        return;
+    }
+    if (!svc.Installed) {
+        ctx.Response.StatusCode = 501;
+        await ctx.Response.WriteAsJsonAsync(new {
+            error = "indi-web not installed. Run: pip install indiwebmanager",
+        });
+        return;
+    }
+    if (!svc.Running) {
+        ctx.Response.StatusCode = 503;
+        await ctx.Response.WriteAsJsonAsync(new {
+            error = "indi-web not running. POST /api/indi/web/start to launch it.",
+        });
+        return;
+    }
+    // Strip the /indi-web prefix in-place so indi-web sees its
+    // own root paths. PathBase grows / Path shrinks; the forwarder
+    // uses Path verbatim for the upstream request.
+    var rest = ctx.Request.Path.Value ?? "/";
+    if (rest.StartsWith("/indi-web", StringComparison.OrdinalIgnoreCase)) {
+        rest = rest["/indi-web".Length..];
+        if (string.IsNullOrEmpty(rest)) rest = "/";
+    }
+    ctx.Request.Path = rest;
+    var target = $"http://{svc.BindAddress}:{svc.BindPort}";
+    var err = await indiWebForwarder.SendAsync(ctx, target, indiWebHttpClient,
+        ForwarderRequestConfig.Empty, indiWebTransform);
+    if (err != ForwarderError.None) {
+        ctx.Response.StatusCode = 502;
+        await ctx.Response.WriteAsync($"indi-web proxy error: {err}");
+    }
+});
+
 // Equipment endpoints
 app.MapEquipmentEndpoints();
 app.MapCameraEndpoints();
@@ -367,6 +438,7 @@ app.MapDomeEndpoints();
 app.MapWeatherEndpoints();
 app.MapGuiderEndpoints();
 app.MapSimulatorEndpoints();
+app.MapIndiWebEndpoints();
 app.MapAutoFocusEndpoints();
 app.MapMeridianFlipEndpoints();
 app.MapPolarAlignmentEndpoints();

@@ -2746,6 +2746,107 @@
                     </div>
                 </details>
 
+                <!-- INDI-WEB-3: INDI Drivers Manager. Embeds the
+                     indi-web (indiwebmanager) webapp in an iframe so
+                     the user can start / stop INDI drivers from the
+                     Polaris UI itself without ssh'ing into the host.
+                     Hidden when the OS doesn't support it (Windows),
+                     with install hint when the indi-web pip package
+                     isn't on PATH. -->
+                <details class="equip-accessories"
+                         x-data="{ open: false }"
+                         :open="open"
+                         @toggle="open = $event.target.open;
+                                  if (open) indiWebStatusRefresh()">
+                    <summary class="equip-accessories-summary">
+                        <span class="equip-accessories-caret">▸</span>
+                        <strong>INDI Drivers</strong>
+                        <span class="text-muted"
+                              x-text="indiWebSummaryLabel()"></span>
+                    </summary>
+
+                    <!-- Body, three states: unsupported OS, not
+                         installed, ready (running or stopped). -->
+                    <div class="indi-web-wrap" style="padding:10px 0;">
+
+                        <!-- Status strip + lifecycle buttons -->
+                        <div class="control-row" style="margin-bottom:8px;align-items:center;gap:10px;">
+                            <span class="status-pill"
+                                  :class="indiWebStatusClass()"
+                                  x-text="indiWebStatusLabel()"></span>
+                            <span class="text-muted" style="font-size:11px;"
+                                  x-show="indiWeb.status?.version"
+                                  x-text="'v' + indiWeb.status.version"></span>
+                            <span style="flex:1;"></span>
+                            <!-- Auto-start toggle is server-side
+                                 only (IndiWeb:AutoStart in appsettings)
+                                 for now; live PUT is a follow-up. -->
+                            <span class="text-muted" style="font-size:11px;"
+                                  x-show="indiWeb.status?.installed &amp;&amp; !indiWeb.status?.running">
+                                Click Start to launch indi-web
+                            </span>
+                            <button class="btn btn-sm" @click="indiWebStart()"
+                                    :disabled="indiWeb.busy || !indiWeb.status?.installed || indiWeb.status?.running"
+                                    x-show="indiWeb.status?.supportedOs">
+                                ▶ Start
+                            </button>
+                            <button class="btn btn-sm btn-danger" @click="indiWebStop()"
+                                    :disabled="indiWeb.busy || !indiWeb.status?.running">
+                                ■ Stop
+                            </button>
+                            <button class="btn btn-sm" @click="indiWebStatusRefresh()"
+                                    :disabled="indiWeb.busy">
+                                ⟳
+                            </button>
+                        </div>
+
+                        <!-- Unsupported OS banner (Windows) -->
+                        <div class="text-warn"
+                             style="padding:12px;background:rgba(245,158,11,0.08);
+                                    border:1px solid rgba(245,158,11,0.3);
+                                    border-radius:6px;font-size:13px;"
+                             x-show="indiWeb.status &amp;&amp; !indiWeb.status.supportedOs">
+                            <strong>Not available on this OS.</strong>
+                            <div style="margin-top:4px;color:var(--text-muted);"
+                                 x-text="indiWeb.status?.unsupportedReason"></div>
+                        </div>
+
+                        <!-- Install hint (Linux/macOS but binary missing) -->
+                        <div style="padding:12px;background:rgba(91,141,255,0.08);
+                                    border:1px solid rgba(91,141,255,0.3);
+                                    border-radius:6px;font-size:13px;"
+                             x-show="indiWeb.status?.supportedOs &amp;&amp; !indiWeb.status?.installed">
+                            <strong>indi-web not detected.</strong>
+                            <div style="margin-top:6px;color:var(--text-muted);">
+                                Install with pip on the Polaris host:
+                            </div>
+                            <pre style="background:rgba(0,0,0,0.4);padding:8px;border-radius:4px;
+                                        margin-top:6px;font-size:12px;overflow-x:auto;"
+>pip install indiwebmanager</pre>
+                            <div style="color:var(--text-muted);">
+                                Click ⟳ to re-check after install. More info:
+                                <a href="https://github.com/knro/indiwebmanager"
+                                   target="_blank" rel="noopener">github.com/knro/indiwebmanager</a>
+                            </div>
+                        </div>
+
+                        <!-- Iframe (only mounted when running so we
+                             don't fire a doomed request on an empty
+                             upstream) -->
+                        <iframe x-show="indiWeb.status?.running"
+                                src="/indi-web/"
+                                style="width:100%;height:600px;border:1px solid var(--border);
+                                       border-radius:6px;background:#0a0e16;"
+                                sandbox="allow-scripts allow-same-origin allow-forms"
+                                title="INDI Web Manager"></iframe>
+
+                        <!-- Error surface for the LAST start/stop op -->
+                        <div class="text-error" style="font-size:12px;margin-top:6px;"
+                             x-show="indiWeb.status?.lastError"
+                             x-text="'⚠ ' + indiWeb.status?.lastError"></div>
+                    </div>
+                </details>
+
                 <!-- Refresh/Disconnect moved to the compact connection
                      strip at the top of the panel, no separate footer
                      needed anymore. -->

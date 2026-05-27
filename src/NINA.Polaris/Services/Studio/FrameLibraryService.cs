@@ -30,7 +30,21 @@ public class FrameLibraryService {
     private readonly string _studioDir;
     private readonly string _dbPath;
     private readonly string _thumbDir;
-    private readonly SemaphoreSlim _rescanLock = new(1, 1);
+
+    // Rescan coalescing state. The previous implementation used a
+    // SemaphoreSlim with non-blocking acquire which silently no-op'd
+    // overlapping callers — fine for fire-and-forget kickers but
+    // wrong for an explicit `await RescanAsync()` that expected the
+    // index to reflect disk state on return. New semantics:
+    //   - Idle: start a fresh rescan, return its Task.
+    //   - One running: queue a follow-up that begins AFTER the
+    //     current one (so the caller sees state that includes any
+    //     files written after the in-flight rescan started).
+    //   - Already queued: piggyback on the queued follow-up so
+    //     concurrent callers share a single coalesced re-run.
+    private readonly object _scanGate = new();
+    private Task _runningRescan = Task.CompletedTask;
+    private Task? _queuedRescan;
 
     // Background rescan progress (single one at a time).
     public RescanProgress Rescan { get; private set; } = new(false, 0, 0, null);
@@ -86,12 +100,47 @@ public class FrameLibraryService {
     /// Walk the active profile's image output dir for .fits files,
     /// decode headers only, upsert into the SQLite cache. Files that
     /// have disappeared from disk are removed.
+    ///
+    /// Coalescing semantics (see <see cref="_scanGate"/>): callers
+    /// that <c>await</c> this method always see an index that reflects
+    /// disk state at or after their call time. Multiple concurrent
+    /// callers share a single follow-up rescan so the file walk is
+    /// not amplified by the caller count.
     /// </summary>
-    public async Task RescanAsync(CancellationToken ct = default) {
-        if (!await _rescanLock.WaitAsync(0, ct)) {
-            _logger.LogWarning("Rescan already in progress, skipping");
-            return;
+    public Task RescanAsync(CancellationToken ct = default) {
+        lock (_scanGate) {
+            if (_runningRescan.IsCompleted) {
+                // Nothing running, start fresh. Subsequent overlapping
+                // callers will queue a follow-up via the else branch.
+                _runningRescan = RescanCoreAsync(ct);
+                _queuedRescan = null;
+                return _runningRescan;
+            }
+            // A rescan is running. We need a pass that BEGINS after
+            // the current one ends so disk state at this call time
+            // is fully covered. If a follow-up is already queued,
+            // every newcomer piggybacks on the same Task.
+            return _queuedRescan ??= ScheduleFollowUpAsync(_runningRescan, ct);
         }
+    }
+
+    private async Task ScheduleFollowUpAsync(Task waitFor, CancellationToken ct) {
+        try { await waitFor.ConfigureAwait(false); }
+        catch { /* swallow upstream errors; we run our own pass anyway */ }
+        Task self;
+        lock (_scanGate) {
+            // Promote ourselves to running. Clear the queued slot so
+            // the NEXT caller to arrive while we're running can queue
+            // their own follow-up against us, recursively maintaining
+            // the at-most-one-pending invariant.
+            self = RescanCoreAsync(ct);
+            _runningRescan = self;
+            _queuedRescan = null;
+        }
+        await self.ConfigureAwait(false);
+    }
+
+    private async Task RescanCoreAsync(CancellationToken ct) {
         try {
             var root = _profile.Active.ImageOutputDir;
             if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) {
@@ -144,8 +193,6 @@ public class FrameLibraryService {
         } catch (Exception ex) {
             _logger.LogError(ex, "Rescan failed");
             Rescan = new RescanProgress(false, Rescan.Done, Rescan.Total, ex.Message);
-        } finally {
-            _rescanLock.Release();
         }
     }
 

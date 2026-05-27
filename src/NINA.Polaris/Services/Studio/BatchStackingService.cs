@@ -59,6 +59,12 @@ public class BatchStackingService {
         _jobs[jobId] = new IntegrationProgress {
             JobId = jobId,
             InProgress = true,
+            // Total stays at the input frame count for the whole job
+            // so the UI's "done / total" reads consistently across
+            // loading + aligning + integrating + writing. Per-phase
+            // sub-progress (e.g. row counter during integration)
+            // lives on Stage / IntegrationPercent so the headline
+            // "frames done" stays accurate.
             Total = req.FrameIds.Count,
             Stage = "queued"
         };
@@ -109,7 +115,10 @@ public class BatchStackingService {
             // Reference = frame with the most detected stars. That
             // gives StarMatcher the largest catalogue to match against
             // and produces the most robust transforms.
-            _jobs[jobId] = _jobs[jobId] with { Stage = "aligning", Done = 0, Total = loaded.Count };
+            // Reset Done for the next phase but leave Total untouched
+            // so the overall job's "done / total" headline stays
+            // anchored on the input frame count for the whole run.
+            _jobs[jobId] = _jobs[jobId] with { Stage = "aligning", Done = 0 };
             var refIdx = 0;
             for (int i = 1; i < loaded.Count; i++) {
                 if (loaded[i].Stars.Count > loaded[refIdx].Stars.Count) refIdx = i;
@@ -162,12 +171,26 @@ public class BatchStackingService {
             loaded.Clear();
 
             // ---- Phase 3: per-pixel integration --------------------
-            _jobs[jobId] = _jobs[jobId] with { Stage = "integrating", Done = 0, Total = H };
+            // Don't fold this phase's row counter into Done / Total —
+            // the previous implementation set Total = H (image
+            // height) here, which made "done / total" briefly read as
+            // "row 2841 of 3672 image rows" while the headline number
+            // really wants to stay "X of N frames". Track row
+            // progress on IntegrationPercent instead so the UI can
+            // surface it as a sub-bar without overwriting the frame
+            // counters. Done bumps to aligned.Count up front so the
+            // headline reads "N frames" through this phase.
+            _jobs[jobId] = _jobs[jobId] with {
+                Stage = "integrating",
+                Done = aligned.Count,
+                IntegrationPercent = 0,
+            };
             int N = aligned.Count;
             var output = new ushort[W * H];
             var stacks = aligned.ToArray();
 
             int rowsDone = 0;
+            int lastReportedPct = 0;
             Parallel.For(0, H, () => new ushort[N], (y, _, scratch) => {
                 int rowOff = y * W;
                 for (int x = 0; x < W; x++) {
@@ -195,9 +218,18 @@ public class BatchStackingService {
                     }
                 }
                 var done = System.Threading.Interlocked.Increment(ref rowsDone);
-                _jobs[jobId] = _jobs[jobId] with { Done = done };
+                // Throttle the status writeback to whole percent
+                // ticks, the inner loop fires once per row (thousands
+                // of times per master) and the record-with churn
+                // dominates the work on small images otherwise.
+                int pct = (int)(done * 100L / H);
+                if (pct != lastReportedPct) {
+                    lastReportedPct = pct;
+                    _jobs[jobId] = _jobs[jobId] with { IntegrationPercent = pct };
+                }
                 return scratch;
             }, _ => { });
+            _jobs[jobId] = _jobs[jobId] with { IntegrationPercent = 100 };
 
             // ---- Phase 4: write integrated master FITS -------------
             _jobs[jobId] = _jobs[jobId] with { Stage = "writing" };
@@ -289,8 +321,22 @@ public class BatchStackingService {
 public record IntegrationProgress {
     public string JobId { get; init; } = "";
     public bool InProgress { get; init; }
+
+    // Frame-count progress. Done counts inputs the current phase has
+    // touched; Total is pinned to the input frame count for the
+    // entire job so the UI's "done / total" reads sensibly all the
+    // way through (loading 5/20, aligning 14/20, integrating 20/20,
+    // done 20/20). Don't shove image-height or any other denominator
+    // into Total — fold sub-phase progress into IntegrationPercent
+    // instead.
     public int Done { get; init; }
     public int Total { get; init; }
+
+    // 0..100 progress through the integration phase's per-row sweep.
+    // Reads 0 outside the integrating stage, climbs to 100 at the
+    // start of the writing stage, stays at 100 thereafter.
+    public int IntegrationPercent { get; init; }
+
     public int Combined { get; init; }
     public int Dropped { get; init; }
     public double TotalExposureSec { get; init; }

@@ -94,7 +94,17 @@ public class MasterFrameService {
             }
 
             // ---- Phase 2: integrate per-pixel -----------------------
-            _jobs[jobId] = _jobs[jobId] with { Stage = "integrating", Done = 0, Total = height!.Value };
+            // Done stays at the input frame count; folding the row
+            // counter into Done/Total used to make "done / total"
+            // read as "row 1842 / 3672" mid-integration, hiding the
+            // actual frame count. Row-level progress moves to
+            // IntegrationPercent so the UI can render it as a
+            // dedicated sub-bar.
+            _jobs[jobId] = _jobs[jobId] with {
+                Stage = "integrating",
+                Done = loaded.Count,
+                IntegrationPercent = 0,
+            };
             int W = width!.Value;
             int H = height!.Value;
             int N = loaded.Count;
@@ -110,6 +120,7 @@ public class MasterFrameService {
             // local that gets reused across iterations of the same
             // worker, avoiding per-row allocation.
             int rowsDone = 0;
+            int lastReportedPct = 0;
             Parallel.For(0, H, () => new ushort[N], (y, _, scratch) => {
                 int rowOff = y * W;
                 for (int x = 0; x < W; x++) {
@@ -123,14 +134,19 @@ public class MasterFrameService {
                         _                        => IntegrationMath.Mean(scratch)
                     };
                 }
-                // Atomic progress bump, the UI polls at ~1 Hz so we
-                // don't need to throttle here; the contention cost on a
-                // 32-MP image is negligible compared to the per-pixel
-                // integration work.
+                // Throttle the status writeback to whole percent
+                // ticks; the inner loop fires once per row (thousands
+                // of times per master) and the record-with churn is
+                // surprisingly expensive at that frequency.
                 var done = System.Threading.Interlocked.Increment(ref rowsDone);
-                _jobs[jobId] = _jobs[jobId] with { Done = done };
+                int pct = (int)(done * 100L / H);
+                if (pct != lastReportedPct) {
+                    lastReportedPct = pct;
+                    _jobs[jobId] = _jobs[jobId] with { IntegrationPercent = pct };
+                }
                 return scratch;
             }, _ => { });
+            _jobs[jobId] = _jobs[jobId] with { IntegrationPercent = 100 };
 
             // ---- Phase 3: write master FITS -------------------------
             _jobs[jobId] = _jobs[jobId] with { Stage = "writing" };
@@ -228,8 +244,22 @@ public enum IntegrationMethod { Mean, Median, SigmaClippedMean }
 public record MasterProgress {
     public string JobId { get; init; } = "";
     public bool InProgress { get; init; }
+
+    // Done / Total count inputs the job is processing; Total is
+    // pinned to the input frame count for the whole job so the UI's
+    // "done / total" stays meaningful across loading + integrating
+    // + writing. Sub-phase progress goes on IntegrationPercent
+    // instead of clobbering Total with image-height (the previous
+    // implementation did this and "done / total" briefly read as
+    // "row 1842 / 3672").
     public int Done { get; init; }
     public int Total { get; init; }
+
+    // 0..100 progress through the integration phase's per-row sweep.
+    // Reads 0 outside the integrating stage, 100 once the rows are
+    // exhausted (and stays there through writing/done).
+    public int IntegrationPercent { get; init; }
+
     public string Stage { get; init; } = "";          // queued | loading | integrating | writing | done | error
     public string? Error { get; init; }
     public string? OutputPath { get; init; }

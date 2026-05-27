@@ -4371,12 +4371,26 @@
                                 <div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em">
                                     Status: <span x-text="studio.master.lastJob?.stage || 'idle'"></span>
                                 </div>
+                                <!-- Frame-count progress bar, stable across phases -->
                                 <div class="studio-master-bar" x-show="studio.master.lastJob?.total > 0">
                                     <div class="studio-master-bar-fill"
                                          :style="'width:' + Math.round(100 * (studio.master.lastJob?.done || 0) / (studio.master.lastJob?.total || 1)) + '%'"></div>
                                 </div>
+                                <!-- Per-row sub-bar, only visible while integrating -->
+                                <div class="studio-master-bar"
+                                     x-show="studio.master.lastJob?.stage === 'integrating'
+                                             &amp;&amp; studio.master.lastJob?.integrationPercent > 0"
+                                     style="margin-top:4px">
+                                    <div class="studio-master-bar-fill"
+                                         style="background:rgba(136,224,136,0.6)"
+                                         :style="'width:' + (studio.master.lastJob?.integrationPercent || 0) + '%'"></div>
+                                </div>
                                 <div style="font-size:11px;color:var(--text-muted)" x-show="studio.master.lastJob">
-                                    <span x-text="(studio.master.lastJob?.done || 0) + ' / ' + (studio.master.lastJob?.total || 0)"></span>
+                                    <span x-text="(studio.master.lastJob?.done || 0) + ' / ' + (studio.master.lastJob?.total || 0) + ' frames'"></span>
+                                    <span x-show="studio.master.lastJob?.stage === 'integrating'
+                                                  &amp;&amp; studio.master.lastJob?.integrationPercent > 0">
+                                        · <span x-text="'integrating ' + (studio.master.lastJob?.integrationPercent || 0) + '%'"></span>
+                                    </span>
                                 </div>
                                 <div style="color:#ff9c66;font-size:12px" x-show="studio.master.lastJob?.error"
                                      x-text="studio.master.lastJob?.error"></div>
@@ -4527,12 +4541,26 @@
                                 <div class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:0.05em">
                                     Status: <span x-text="studio.integrate.lastJob?.stage || 'idle'"></span>
                                 </div>
+                                <!-- Frame-count progress: stable across all phases -->
                                 <div class="studio-master-bar" x-show="studio.integrate.lastJob?.total > 0">
                                     <div class="studio-master-bar-fill"
                                          :style="'width:' + Math.round(100 * (studio.integrate.lastJob?.done || 0) / (studio.integrate.lastJob?.total || 1)) + '%'"></div>
                                 </div>
+                                <!-- Integration sub-progress: only visible during the row sweep -->
+                                <div class="studio-master-bar"
+                                     x-show="studio.integrate.lastJob?.stage === 'integrating'
+                                             &amp;&amp; studio.integrate.lastJob?.integrationPercent > 0"
+                                     style="margin-top:4px">
+                                    <div class="studio-master-bar-fill"
+                                         style="background:rgba(136,224,136,0.6)"
+                                         :style="'width:' + (studio.integrate.lastJob?.integrationPercent || 0) + '%'"></div>
+                                </div>
                                 <div style="font-size:11px;color:var(--text-muted)" x-show="studio.integrate.lastJob">
-                                    <span x-text="(studio.integrate.lastJob?.done || 0) + ' / ' + (studio.integrate.lastJob?.total || 0)"></span>
+                                    <span x-text="(studio.integrate.lastJob?.done || 0) + ' / ' + (studio.integrate.lastJob?.total || 0) + ' frames'"></span>
+                                    <span x-show="studio.integrate.lastJob?.stage === 'integrating'
+                                                  &amp;&amp; studio.integrate.lastJob?.integrationPercent > 0">
+                                        · <span x-text="'integrating ' + (studio.integrate.lastJob?.integrationPercent || 0) + '%'"></span>
+                                    </span>
                                     <span x-show="studio.integrate.lastJob?.combined > 0">
                                         · <span style="color:#88e088"
                                                 x-text="(studio.integrate.lastJob?.combined || 0) + ' combined'"></span>

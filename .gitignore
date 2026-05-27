@@ -425,3 +425,4 @@ src/NINA.Polaris/wwwroot/catalogs/apass/*.db
 # fixture via `dotnet test --filter "Category=E2E"`.
 test_data/
 scripts/.apass-cache/
+/external_tools

@@ -521,7 +521,7 @@ public class RealDataPipelineTests {
         Assert.That(File.Exists(status.OutputPath!), Is.True);
         var sizeMb = new FileInfo(status.OutputPath!).Length / 1024 / 1024;
         Log($"  -> {status.OutputPath} ({sizeMb} MB) " +
-            $"combined={status.Combined}/{status.Total} " +
+            $"combined={status.Combined}/{calibratedIds.Count} frames " +
             $"dropped={status.Dropped} " +
             $"in {sw.Elapsed.TotalSeconds:0.0}s");
         // Same race as masters, see CreateMaster, retry until the

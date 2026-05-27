@@ -99,15 +99,30 @@ public class HostMetricsService : BackgroundService {
                                        int coreCount) {
         var util = _monitor.GetUtilization(SampleInterval);
 
-        // GC info gives us the OS-allocated memory ceiling, close
-        // enough to "system total" for the UI's purposes, and the
-        // only cheap cross-platform path that doesn't require a
-        // platform-specific /proc or WMI call.
-        var gcInfo = GC.GetGCMemoryInfo();
-        var totalBytes = gcInfo.TotalAvailableMemoryBytes;
+        long totalBytes;
+        long usedBytes;
+        double usedPercent;
 
-        // ResourceMonitor returns MemoryUsedPercentage as 0..100.
-        var memUsedBytes = (long)(totalBytes * util.MemoryUsedPercentage / 100.0);
+        // Prefer /proc/meminfo on Linux. The default IResourceMonitor
+        // path counts buff/cache as used memory, which makes a healthy
+        // Pi with lots of file cache show 100% RAM and look alarming.
+        // /proc/meminfo's MemAvailable subtracts reclaimable pages,
+        // matching what `free -h` reports under "available" and what
+        // actually matters for memory pressure.
+        if (OperatingSystem.IsLinux() && TryReadProcMeminfo(out var procTotal, out var procAvailable)) {
+            totalBytes = procTotal;
+            usedBytes = Math.Max(0, procTotal - procAvailable);
+            usedPercent = procTotal > 0
+                ? Math.Min(100.0, 100.0 * usedBytes / procTotal)
+                : 0;
+        } else {
+            // Fallback (Windows, edge cases): GC info gives the OS
+            // memory ceiling, IResourceMonitor gives the percentage.
+            var gcInfo = GC.GetGCMemoryInfo();
+            totalBytes = gcInfo.TotalAvailableMemoryBytes;
+            usedBytes = (long)(totalBytes * util.MemoryUsedPercentage / 100.0);
+            usedPercent = util.MemoryUsedPercentage;
+        }
 
         var now = DateTime.UtcNow;
         var elapsedMs = (now - lastSampleTime).TotalMilliseconds * coreCount;
@@ -124,13 +139,45 @@ public class HostMetricsService : BackgroundService {
 
         return new HostMetricsSnapshot {
             CpuPercent = Math.Round(util.CpuUsedPercentage, 1),
-            MemoryPercent = Math.Round(util.MemoryUsedPercentage, 1),
-            MemoryUsedMB = memUsedBytes / (1024 * 1024),
+            MemoryPercent = Math.Round(usedPercent, 1),
+            MemoryUsedMB = usedBytes / (1024 * 1024),
             MemoryTotalMB = totalBytes / (1024 * 1024),
             ProcessCpuPercent = Math.Round(processCpu, 1),
             ProcessMemoryMB = process.WorkingSet64 / (1024 * 1024),
             SampledAt = now
         };
+    }
+
+    /// <summary>
+    /// Parse the two lines we care about out of /proc/meminfo. Returns
+    /// false on any IO error or unparseable line so the caller can fall
+    /// back to the cross-platform path.
+    /// </summary>
+    internal static bool TryReadProcMeminfo(out long totalBytes, out long availableBytes) {
+        totalBytes = 0;
+        availableBytes = 0;
+        try {
+            foreach (var line in File.ReadLines("/proc/meminfo")) {
+                if (totalBytes == 0 && line.StartsWith("MemTotal:", StringComparison.Ordinal)) {
+                    totalBytes = ParseKibLine(line);
+                } else if (availableBytes == 0 && line.StartsWith("MemAvailable:", StringComparison.Ordinal)) {
+                    availableBytes = ParseKibLine(line);
+                }
+                if (totalBytes > 0 && availableBytes > 0) break;
+            }
+        } catch {
+            return false;
+        }
+        return totalBytes > 0 && availableBytes > 0;
+    }
+
+    private static long ParseKibLine(string line) {
+        // Format: "MemTotal:        4015896 kB"
+        var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2 && long.TryParse(parts[1], out var kb)) {
+            return kb * 1024L;
+        }
+        return 0;
     }
 }
 

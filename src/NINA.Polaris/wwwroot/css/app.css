@@ -6023,12 +6023,16 @@ label select.input-sm {
 
 .phd2-algo-advanced summary::marker { color: var(--text-muted); }
 
-/* PHD2 GUI tab, iframe wrapper + the 4 conditional states. */
+/* PHD2 GUI tab, iframe wrapper + the 4 conditional states.
+   flex: 1 + min-height: 0 lets the iframe inside grow to fill the
+   remaining viewport height below the page header + guide tabstrip,
+   instead of getting clamped to a fixed 600px box. */
 .phd2-gui-tab {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    min-height: 400px;
+    flex: 1;
+    min-height: 0;
 }
 .phd2-gui-banner {
     padding: 14px 18px;
@@ -6058,7 +6062,7 @@ label select.input-sm {
     display: flex;
     flex-direction: column;
     flex: 1;
-    min-height: 600px;
+    min-height: 0;
 }
 .phd2-gui-toolbar {
     display: flex;
@@ -6074,7 +6078,11 @@ label select.input-sm {
 .phd2-gui-iframe {
     flex: 1;
     width: 100%;
-    min-height: 600px;
+    /* min-height 0 + flex:1 + the chain above lets the iframe grow
+       to fill the remaining tab area instead of being clamped to a
+       fixed minimum that wastes space on tall viewports. The 400px
+       floor is just a safety against ultra-short windows. */
+    min-height: 400px;
     border: 1px solid var(--border);
     border-top: none;
     border-radius: 0 0 var(--radius) var(--radius);

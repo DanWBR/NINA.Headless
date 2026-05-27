@@ -290,21 +290,34 @@ should resolve to `/usr/local/bin/`. The apt versions in `/usr/bin/`
 get shadowed by the PATH order; uninstall them if you want to be
 certain (`sudo apt remove indi-bin phd2 xpra`).
 
-### 4.3. ASTAP star database (one-time, 290 MB)
+### 4.3. ASTAP star database (one-time, ~290 MB)
 
-ASTAP alone cannot solve, it needs a star catalog. Install the H17
-database (good for focal lengths from 50 mm to 2000 mm):
+ASTAP alone cannot solve, it needs a star catalog. The modern V50
+database (Gaia-based, replaces the older H17 Hipparcos catalog) covers
+focal lengths from 50 mm to 2000 mm and ships as a `.deb` that
+installs to the right location automatically:
 
 ```bash
 cd /tmp
-wget https://sourceforge.net/projects/astap-program/files/star_databases/h17_star_database_mag17_colour.zip
-sudo apt install -y unzip
-sudo mkdir -p /opt/astap
-sudo unzip h17_star_database_mag17_colour.zip -d /opt/astap/
+wget -O v50_star_database.deb \
+  "https://downloads.sourceforge.net/project/astap-program/star_databases/v50_star_database.deb"
+sudo dpkg -i v50_star_database.deb
 ```
 
-ASTAP looks in `/opt/astap`, `~/.local/share/astap`, or alongside its
-binary. The `/opt/astap` path is read-anyone, works for all users.
+The postinst lands the chunks in `/opt/astap/` where the ASTAP binary
+looks for them by default. No further configuration needed.
+
+Verify:
+
+```bash
+ls /opt/astap/ | head     # should show *.001 / *.290 / etc chunks
+astap_cli -h 2>&1 | head  # confirms ASTAP itself runs
+```
+
+For ultra-narrow fields (Hyperstar f/2 + huge sensor, mosaic tiles
+under 30 arcmin) the deeper V17 database is available on the same
+SourceForge page; for the typical 400-1500 mm imaging setup V50 is
+the right pick.
 
 ### 4.4. GraXpert (manual install)
 

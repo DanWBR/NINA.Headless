@@ -131,6 +131,18 @@ function ninaApp() {
             booting: true        // hides app shell until /status responds
         },
 
+        // HELP-1: in-app tutorial state. tutorial null = landing
+        // (4-card picker); otherwise one of 'firstNight', 'capture',
+        // 'workflowsPicker', 'lrgb', 'planetary', 'pcc', 'troubleshoot'.
+        // step is a 0-based index into the chosen tutorial's array.
+        // Persisted to localStorage so refreshing or jumping into
+        // another tab and coming back lands you on the same step.
+        help: {
+            tutorial: null,
+            step: 0,
+            landingHintDismissed: false
+        },
+
         // Focus
         focusPosition: 0,
         focusStep: 50,
@@ -1847,6 +1859,137 @@ function ninaApp() {
                 this.auth.needLogin = true;
                 this.auth.needSetup = false;
             }
+        },
+
+        // ---- HELP-1: tutorial stepper + landing helpers ----------------
+
+        // Restore last position on tab entry. Skips the restore when
+        // the user is already mid-tutorial (e.g. clicked Help from
+        // the sidebar while inside the stepper, that's a no-op).
+        helpOnTabEnter() {
+            if (this.help.tutorial) return;
+            try {
+                const raw = localStorage.getItem('polaris-help-pos');
+                if (!raw) return;
+                const pos = JSON.parse(raw);
+                if (pos && pos.tutorial && this._helpTutorials()[pos.tutorial]) {
+                    this.help.tutorial = pos.tutorial;
+                    this.help.step = Math.min(
+                        Math.max(0, pos.step | 0),
+                        this._helpTutorials()[pos.tutorial].length - 1);
+                }
+            } catch { /* no-op */ }
+        },
+
+        helpStart(tutorialKey) {
+            this.help.tutorial = tutorialKey;
+            this.help.step = 0;
+            this._helpPersist();
+        },
+
+        helpExit() {
+            this.help.tutorial = null;
+            this.help.step = 0;
+            try { localStorage.removeItem('polaris-help-pos'); } catch {}
+        },
+
+        helpNext() {
+            const max = this._helpSteps().length - 1;
+            if (this.help.step < max) {
+                this.help.step++;
+                this._helpPersist();
+            }
+        },
+
+        helpPrev() {
+            if (this.help.step > 0) {
+                this.help.step--;
+                this._helpPersist();
+            }
+        },
+
+        helpJumpTo(idx) {
+            const steps = this._helpSteps();
+            this.help.step = Math.min(Math.max(0, idx | 0), steps.length - 1);
+            this._helpPersist();
+        },
+
+        // Switches the app to the named tab but PRESERVES the help
+        // position so coming back via the sidebar lands the user
+        // exactly where they left off.
+        helpOpenTab(tabId) {
+            this._helpPersist();
+            this.tab = tabId;
+        },
+
+        _helpPersist() {
+            if (!this.help.tutorial) return;
+            try {
+                localStorage.setItem('polaris-help-pos',
+                    JSON.stringify({
+                        tutorial: this.help.tutorial,
+                        step: this.help.step
+                    }));
+            } catch {}
+        },
+
+        // Convenience wrappers for the template.
+        _helpSteps() {
+            const t = this._helpTutorials()[this.help.tutorial];
+            return Array.isArray(t) ? t : [];
+        },
+
+        helpCurrentStep() {
+            const steps = this._helpSteps();
+            if (!steps.length) return { title: '', body: [] };
+            return steps[Math.min(this.help.step, steps.length - 1)];
+        },
+
+        _helpTutorialMeta(key) {
+            return ({
+                firstNight:   { title: 'First night' },
+                capture:      { title: 'Capture to export' },
+                lrgb:         { title: 'LRGB / mono pipeline' },
+                planetary:    { title: 'Planetary / lucky imaging' },
+                pcc:          { title: 'Photometric color calibration' },
+                troubleshoot: { title: 'Troubleshooting & FAQ' }
+            })[key] || { title: '' };
+        },
+
+        // ---- HELP catalogue --------------------------------------------
+        // One method returning the full set keeps everything in one
+        // place; the steppers and the landing card counts both pull
+        // from here. Each tutorial is an array of step objects with:
+        //   title       string, required
+        //   body        string[] of paragraphs, required
+        //   screenshot  string, optional; resolves to /screenshots/<path>
+        //   tab         string, optional; tab id to jump to
+        //   tabLabel    string, optional; display label for the button
+        //   docLink     string, optional; filename under docs/user-guide/
+        //   tip         string, optional; renders a 💡 callout
+        //   warn        string, optional; renders a ⚠ callout
+        // HELP-2..5 fill these arrays with real content.
+        _helpTutorials() {
+            return {
+                firstNight: [
+                    { title: 'TODO HELP-3', body: ['First-night content lands in HELP-3.'] }
+                ],
+                capture: [
+                    { title: 'TODO HELP-2', body: ['Capture-to-export content lands in HELP-2.'] }
+                ],
+                lrgb: [
+                    { title: 'TODO HELP-4', body: ['LRGB content lands in HELP-4.'] }
+                ],
+                planetary: [
+                    { title: 'TODO HELP-4', body: ['Planetary content lands in HELP-4.'] }
+                ],
+                pcc: [
+                    { title: 'TODO HELP-4', body: ['PCC content lands in HELP-4.'] }
+                ],
+                troubleshoot: [
+                    { title: 'TODO HELP-5', body: ['Troubleshooting content lands in HELP-5.'] }
+                ]
+            };
         },
 
         // ---- Exposure preset dropdown source --------------------------

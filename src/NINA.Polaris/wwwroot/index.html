@@ -456,6 +456,19 @@
                 <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v3m0 16v3m-9-11h3m16 0h3m-3.3-7.7l-2.1 2.1M6.4 17.6l-2.1 2.1m0-15.4l2.1 2.1m11.2 11.2l2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                 <span class="nav-label">Settings</span>
             </button>
+            <!-- HELP-1: in-app tutorials (capture-to-export stepper +
+                 first-night checklist + workflow paths + troubleshoot
+                 FAQ). Last in the nav so it doesn't compete with the
+                 daily-use tabs but stays discoverable. -->
+            <button class="nav-btn" :class="{ active: tab === 'help' }"
+                    @click="tab = 'help'; helpOnTabEnter()" title="Help">
+                <svg viewBox="0 0 24 24" width="22" height="22">
+                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M9.1 9.5c.3-1.3 1.5-2.2 2.9-2.2 1.7 0 3 1.2 3 2.7 0 1.4-1 2-2 2.6-.6.4-1 .8-1 1.7v.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="12" cy="17.2" r="1" fill="currentColor"/>
+                </svg>
+                <span class="nav-label">Help</span>
+            </button>
         </nav>
 
         <!-- Main content area -->
@@ -6848,6 +6861,265 @@
                 </div>
 
                 </div><!-- /.settings-grid -->
+            </div>
+
+            <!-- =================================================
+                 HELP-1: in-app tutorials. Two view states:
+                   1. Landing: 4 cards picking a tutorial path
+                   2. Stepper: one step per card with Prev/Next.
+                      Same shape across "Capture", "First night",
+                      "Workflows" (sub-picker first). Troubleshoot
+                      renders as an accordion instead of a stepper.
+                 Step data lives in app.js _helpTutorials(); the
+                 template binds against helpCurrentStep(). The
+                 screenshot path pattern is wwwroot/screenshots/
+                 {topic}/{NN}-{slug}.png; the @error handler on
+                 <img> reveals the placeholder when the file isn't
+                 there yet, so the structure ships before the
+                 screenshots are filled in. ================== -->
+            <div x-show="tab === 'help'" class="tab-panel help-panel">
+
+                <!-- ---- LANDING (tutorial picker) ------------- -->
+                <template x-if="!help.tutorial">
+                    <div>
+                        <div class="panel-header">Help</div>
+                        <p class="help-intro">
+                            Polaris has many tabs and pieces. These
+                            tutorials walk you through the most common
+                            workflows step by step, with screenshots and
+                            direct links into the relevant tabs. Pick
+                            up where you left off, your position is
+                            saved in this browser.
+                        </p>
+                        <div class="help-landing-grid">
+                            <button class="help-tutorial-card"
+                                    @click="helpStart('firstNight')">
+                                <span class="help-card-icon">🚀</span>
+                                <h3>First night</h3>
+                                <p>Just installed Polaris. Get the
+                                browser, password, location, WiFi
+                                and first device set up.</p>
+                                <span class="help-card-meta"
+                                      x-text="_helpTutorials().firstNight.length + ' steps'"></span>
+                            </button>
+                            <button class="help-tutorial-card"
+                                    @click="helpStart('capture')">
+                                <span class="help-card-icon">📷</span>
+                                <h3>Capture to export</h3>
+                                <p>From connecting equipment to
+                                exporting the final processed image.
+                                The main end-to-end workflow.</p>
+                                <span class="help-card-meta"
+                                      x-text="_helpTutorials().capture.length + ' steps'"></span>
+                            </button>
+                            <button class="help-tutorial-card"
+                                    @click="help.tutorial = 'workflowsPicker'; help.step = 0">
+                                <span class="help-card-icon">🌈</span>
+                                <h3>Specific workflows</h3>
+                                <p>LRGB mono, planetary lucky imaging,
+                                photometric color calibration.
+                                Variants of the main pipeline.</p>
+                                <span class="help-card-meta">3 paths</span>
+                            </button>
+                            <button class="help-tutorial-card"
+                                    @click="helpStart('troubleshoot')">
+                                <span class="help-card-icon">🔧</span>
+                                <h3>Troubleshooting &amp; FAQ</h3>
+                                <p>Common problems with diagnosis and
+                                fix, pointing into the deeper docs.</p>
+                                <span class="help-card-meta">collapsible list</span>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- ---- WORKFLOWS SUB-PICKER ------------------ -->
+                <template x-if="help.tutorial === 'workflowsPicker'">
+                    <div>
+                        <div class="help-stepper-header">
+                            <button class="help-back-btn" @click="helpExit()">
+                                ← Help
+                            </button>
+                            <span class="help-stepper-title">
+                                Specific workflows
+                            </span>
+                        </div>
+                        <div class="help-landing-grid">
+                            <button class="help-tutorial-card"
+                                    @click="helpStart('lrgb')">
+                                <span class="help-card-icon">🎨</span>
+                                <h3>LRGB / mono pipeline</h3>
+                                <p>Per-filter captures + channel
+                                combine into a finished color image.</p>
+                                <span class="help-card-meta"
+                                      x-text="_helpTutorials().lrgb.length + ' steps'"></span>
+                            </button>
+                            <button class="help-tutorial-card"
+                                    @click="helpStart('planetary')">
+                                <span class="help-card-icon">🪐</span>
+                                <h3>Planetary / lucky imaging</h3>
+                                <p>Video capture + rank + stack of
+                                the best frames for planet detail.</p>
+                                <span class="help-card-meta"
+                                      x-text="_helpTutorials().planetary.length + ' steps'"></span>
+                            </button>
+                            <button class="help-tutorial-card"
+                                    @click="helpStart('pcc')">
+                                <span class="help-card-icon">⭐</span>
+                                <h3>Photometric color calibration</h3>
+                                <p>Plate-solve + APASS catalog match
+                                for scientifically calibrated colors.</p>
+                                <span class="help-card-meta"
+                                      x-text="_helpTutorials().pcc.length + ' steps'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- ---- STEPPER (most tutorials) -------------- -->
+                <template x-if="help.tutorial && help.tutorial !== 'workflowsPicker' && help.tutorial !== 'troubleshoot'">
+                    <div>
+                        <div class="help-stepper-header">
+                            <button class="help-back-btn" @click="helpExit()">
+                                ← Help
+                            </button>
+                            <span class="help-stepper-title"
+                                  x-text="_helpTutorialMeta(help.tutorial).title"></span>
+                            <button class="help-close-btn"
+                                    @click="helpExit()"
+                                    title="Close tutorial">×</button>
+                        </div>
+                        <div class="help-progress-dots">
+                            <template x-for="(_, i) in _helpSteps()"
+                                      :key="i">
+                                <span class="help-progress-dot"
+                                      :class="{ active: i === help.step,
+                                                done: i < help.step }"
+                                      @click="helpJumpTo(i)"></span>
+                            </template>
+                            <span class="help-progress-label"
+                                  x-text="'Step ' + (help.step + 1) + ' of ' + _helpSteps().length"></span>
+                        </div>
+
+                        <article class="help-step-card"
+                                 x-data="{ step: helpCurrentStep() }"
+                                 x-effect="step = helpCurrentStep()">
+                            <h2 x-text="step.title"></h2>
+
+                            <!-- Screenshot slot. <img> tries to load
+                                 the file; @error swaps in the
+                                 placeholder so missing screenshots
+                                 don't break the layout. -->
+                            <div class="help-screenshot"
+                                 x-show="step.screenshot">
+                                <img :src="'/screenshots/' + step.screenshot"
+                                     :alt="step.title"
+                                     @error="$el.style.display='none'; $el.nextElementSibling.style.display='flex'">
+                                <div class="help-screenshot-placeholder"
+                                     style="display:none">
+                                    <span class="help-placeholder-icon">📸</span>
+                                    <div>
+                                        <strong>Screenshot pending</strong>
+                                        <p>Drop a PNG at
+                                        <code x-text="'wwwroot/screenshots/' + step.screenshot"></code>
+                                        and refresh.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="help-step-body">
+                                <template x-for="(para, i) in step.body"
+                                          :key="i">
+                                    <p x-text="para"></p>
+                                </template>
+                            </div>
+
+                            <div class="help-tip"
+                                 x-show="step.tip">
+                                <span class="help-tip-icon">💡</span>
+                                <span x-text="step.tip"></span>
+                            </div>
+                            <div class="help-warn"
+                                 x-show="step.warn">
+                                <span class="help-warn-icon">⚠</span>
+                                <span x-text="step.warn"></span>
+                            </div>
+
+                            <div class="help-step-actions"
+                                 x-show="step.tab || step.docLink">
+                                <a class="btn btn-sm"
+                                   x-show="step.docLink"
+                                   :href="'https://github.com/DanWBR/NINA.Polaris/blob/master/docs/user-guide/' + step.docLink"
+                                   target="_blank" rel="noopener">
+                                    📖 Read more
+                                </a>
+                                <button class="btn btn-sm btn-primary"
+                                        x-show="step.tab"
+                                        @click="helpOpenTab(step.tab)"
+                                        x-text="'→ Open ' + (step.tabLabel || step.tab.toUpperCase()) + ' tab'"></button>
+                            </div>
+
+                            <div class="help-step-nav">
+                                <button class="btn"
+                                        @click="helpPrev()"
+                                        :disabled="help.step === 0">
+                                    ← Previous
+                                </button>
+                                <button class="btn btn-primary"
+                                        @click="helpNext()"
+                                        :disabled="help.step >= _helpSteps().length - 1">
+                                    Next →
+                                </button>
+                            </div>
+                        </article>
+                    </div>
+                </template>
+
+                <!-- ---- TROUBLESHOOT ACCORDION ---------------- -->
+                <template x-if="help.tutorial === 'troubleshoot'">
+                    <div>
+                        <div class="help-stepper-header">
+                            <button class="help-back-btn" @click="helpExit()">
+                                ← Help
+                            </button>
+                            <span class="help-stepper-title">
+                                Troubleshooting &amp; FAQ
+                            </span>
+                        </div>
+                        <p class="help-intro">
+                            Common problems and their fixes. Click any
+                            item to expand. For deeper coverage follow
+                            the doc links inside.
+                        </p>
+                        <div class="help-faq-list">
+                            <template x-for="(item, i) in _helpTutorials().troubleshoot"
+                                      :key="i">
+                                <details class="help-faq">
+                                    <summary x-text="item.title"></summary>
+                                    <div class="help-faq-body">
+                                        <template x-for="(para, j) in item.body"
+                                                  :key="j">
+                                            <p x-text="para"></p>
+                                        </template>
+                                        <p x-show="item.docLink">
+                                            <a :href="'https://github.com/DanWBR/NINA.Polaris/blob/master/docs/user-guide/' + item.docLink"
+                                               target="_blank" rel="noopener">
+                                                📖 Read more in <span x-text="item.docLink"></span>
+                                            </a>
+                                        </p>
+                                    </div>
+                                </details>
+                            </template>
+                        </div>
+                        <p class="help-intro" style="margin-top:24px">
+                            Didn't find what you need? The
+                            <a href="https://github.com/DanWBR/NINA.Polaris/blob/master/docs/user-guide/README.md"
+                               target="_blank" rel="noopener">full
+                            user guide on GitHub</a> covers every
+                            tab in depth.
+                        </p>
+                    </div>
+                </template>
             </div>
 
         </main>

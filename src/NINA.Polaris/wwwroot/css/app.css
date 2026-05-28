@@ -6952,3 +6952,279 @@ label select.input-sm {
     padding: 10px;
     font-size: 14px;
 }
+
+/* ---- HELP-1: tutorial stepper + landing layout -----------------
+   .help-panel hosts both the landing 4-card picker and the stepper
+   view; the template (index.html) decides which subtree renders
+   based on help.tutorial. Card grid mirrors the .settings-grid /
+   .tonight visual rhythm so the page feels consistent. */
+.help-panel {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.help-intro {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 0 0 18px;
+    max-width: 720px;
+}
+.help-landing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-top: 8px;
+}
+.help-tutorial-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 18px 18px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    text-align: left;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s, background 0.15s;
+}
+.help-tutorial-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    background: rgba(56, 132, 255, 0.06);
+}
+.help-card-icon {
+    font-size: 28px;
+    line-height: 1;
+}
+.help-tutorial-card h3 {
+    margin: 0;
+    font-size: 15px;
+}
+.help-tutorial-card p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+.help-card-meta {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+/* Stepper view */
+.help-stepper-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.help-back-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.help-back-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+.help-stepper-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1;
+}
+.help-close-btn {
+    background: transparent;
+    border: 0;
+    color: var(--text-muted);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+.help-close-btn:hover { color: var(--text-primary); }
+
+.help-progress-dots {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+.help-progress-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    cursor: pointer;
+    transition: background 0.15s, transform 0.15s;
+}
+.help-progress-dot:hover { transform: scale(1.2); }
+.help-progress-dot.done { background: var(--accent); }
+.help-progress-dot.active {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(56, 132, 255, 0.25);
+    transform: scale(1.2);
+}
+.help-progress-label {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.help-step-card {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 24px 28px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.help-step-card h2 {
+    margin: 0 0 16px;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.help-screenshot {
+    position: relative;
+    margin: 0 0 18px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+}
+.help-screenshot img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+.help-screenshot-placeholder {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 28px 24px;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+.help-placeholder-icon {
+    font-size: 32px;
+    line-height: 1;
+}
+.help-screenshot-placeholder strong {
+    display: block;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    font-size: 13px;
+}
+.help-screenshot-placeholder p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+}
+.help-screenshot-placeholder code {
+    color: var(--accent);
+    background: rgba(56, 132, 255, 0.08);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+.help-step-body p {
+    margin: 0 0 12px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.6;
+}
+.help-step-body p:last-child { margin-bottom: 0; }
+
+.help-tip, .help-warn {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin: 16px 0 0;
+    padding: 12px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.help-tip {
+    background: rgba(56, 132, 255, 0.08);
+    border: 1px solid rgba(56, 132, 255, 0.30);
+    color: var(--text-secondary);
+}
+.help-warn {
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.40);
+    color: var(--text-secondary);
+}
+.help-tip-icon, .help-warn-icon {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.help-step-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+}
+.help-step-nav {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+/* Troubleshoot accordion list */
+.help-faq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 920px;
+}
+.help-faq {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.help-faq summary {
+    padding: 12px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    user-select: none;
+}
+.help-faq summary:hover { background: rgba(255, 255, 255, 0.03); }
+.help-faq[open] summary {
+    border-bottom: 1px solid var(--border);
+}
+.help-faq-body {
+    padding: 12px 16px 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+}
+.help-faq-body p { margin: 0 0 10px; }
+.help-faq-body p:last-child { margin-bottom: 0; }
+.help-faq-body a { color: var(--accent); }
+
+@media (max-width: 720px) {
+    .help-step-card { padding: 18px 16px; }
+    .help-stepper-title { font-size: 14px; }
+    .help-screenshot-placeholder { flex-direction: column; align-items: flex-start; }
+}

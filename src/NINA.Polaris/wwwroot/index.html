@@ -1973,6 +1973,23 @@
                           x-text="indiConnected ? 'INDI (' + devices.length + ' devices)' : 'INDI Off'"></span>
                 </div>
 
+                <!-- RIGS sub-tabstrip. 'Equipment' (default) holds the
+                     rig selector + role-cards grid; 'INDI Drivers' hosts
+                     the embedded indi-web iframe so the driver picker
+                     has its own scrollable surface instead of competing
+                     for space at the bottom of the long equipment grid.
+                     Same pattern as the GUIDE tab's Control / PHD2 GUI
+                     tabstrip. -->
+                <div class="video-tabstrip">
+                    <button class="video-tab" :class="{ active: equipTab === 'equipment' }"
+                            @click="equipTab = 'equipment'">Equipment</button>
+                    <button class="video-tab" :class="{ active: equipTab === 'indi-web' }"
+                            @click="equipTab = 'indi-web'; indiWebStatusRefresh()">INDI Drivers</button>
+                </div>
+
+                <!-- ===== Equipment subtab ===== -->
+                <div x-show="equipTab === 'equipment'">
+
                 <!-- Rig (equipment profile) selector -->
                 <div class="rig-bar">
                     <span class="rig-bar-label">Rig:</span>
@@ -2922,27 +2939,21 @@
                     </div>
                 </details>
 
+                </div><!-- /.equipment subtab -->
+
+                <!-- ===== INDI Drivers subtab ===== -->
                 <!-- INDI-WEB-3: INDI Drivers Manager. Embeds the
                      indi-web (indiwebmanager) webapp in an iframe so
                      the user can start / stop INDI drivers from the
                      Polaris UI itself without ssh'ing into the host.
                      Hidden when the OS doesn't support it (Windows),
                      with install hint when the indi-web pip package
-                     isn't on PATH. -->
-                <details class="equip-accessories"
-                         x-data="{ open: false }"
-                         :open="open"
-                         @toggle="open = $event.target.open;
-                                  if (open) indiWebStatusRefresh()">
-                    <summary class="equip-accessories-summary">
-                        <span class="equip-accessories-caret">▸</span>
-                        <strong>INDI Drivers</strong>
-                        <span class="text-muted"
-                              x-text="indiWebSummaryLabel()"></span>
-                    </summary>
-
-                    <!-- Body, three states: unsupported OS, not
-                         installed, ready (running or stopped). -->
+                     isn't on PATH. Was a <details> at the bottom of
+                     the Equipment grid; promoted to its own subtab
+                     so the iframe gets the full panel height to work
+                     with instead of being cramped under the role
+                     cards. -->
+                <div x-show="equipTab === 'indi-web'" class="indi-web-subtab">
                     <div class="indi-web-wrap" style="padding:10px 0;">
 
                         <!-- Status strip + lifecycle buttons -->
@@ -3008,10 +3019,13 @@
 
                         <!-- Iframe (only mounted when running so we
                              don't fire a doomed request on an empty
-                             upstream) -->
+                             upstream). Tall (75vh) since the subtab
+                             gives us the whole panel to fill instead
+                             of being cramped under the equipment grid. -->
                         <iframe x-show="indiWeb.status?.running"
                                 src="/indi-web/"
-                                style="width:100%;height:600px;border:1px solid var(--border);
+                                style="width:100%;height:75vh;min-height:500px;
+                                       border:1px solid var(--border);
                                        border-radius:6px;background:#0a0e16;"
                                 sandbox="allow-scripts allow-same-origin allow-forms"
                                 title="INDI Web Manager"></iframe>
@@ -3021,7 +3035,7 @@
                              x-show="indiWeb.status?.lastError"
                              x-text="'⚠ ' + indiWeb.status?.lastError"></div>
                     </div>
-                </details>
+                </div><!-- /.indi-web subtab -->
 
                 <!-- Refresh/Disconnect moved to the compact connection
                      strip at the top of the panel, no separate footer

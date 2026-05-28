@@ -380,6 +380,7 @@ function ninaApp() {
         // Driven by VideoRecordingService + PlanetaryStackerService on the
         // server; the WS status feed populates videoRecording / videoStack.
         videoTab: 'capture',       // 'capture' | 'process'
+        equipTab: 'equipment',     // 'equipment' | 'indi-web' (RIGS sub-tabstrip)
         video: {
             exposure: 0.05,
             gain: 200,

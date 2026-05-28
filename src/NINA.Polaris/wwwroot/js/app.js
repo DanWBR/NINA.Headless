@@ -1183,6 +1183,25 @@ function ninaApp() {
             // tick loop is running and the rolling window absorbs them.
             this._netStartMeter();
 
+            // Touch-friendly range slider augmentation: walks the DOM
+            // looking for <input type="range"> and wraps each one in
+            // a [-] slider [+] control row. Idempotent; safe to run
+            // many times. A MutationObserver also re-runs the pass
+            // when Alpine mounts modals / panels late, so editor
+            // sliders, GraXpert dialogs, etc. all get the treatment.
+            this._augmentRangeInputs();
+            const rangeObs = new MutationObserver(() => {
+                // Microtask debounce so Alpine's burst-rendering does
+                // not trigger one pass per inserted node.
+                if (this._rangeObsPending) return;
+                this._rangeObsPending = true;
+                queueMicrotask(() => {
+                    this._rangeObsPending = false;
+                    this._augmentRangeInputs();
+                });
+            });
+            rangeObs.observe(document.body, { childList: true, subtree: true });
+
             // SWE-1: stand up the postMessage bridge to the Sky
             // sub-application iframe (/sky/index.html). The iframe
             // posts back { type: "ready" } once it's loaded; until
@@ -11658,6 +11677,88 @@ function ninaApp() {
         _netStartMeter() {
             if (this._netMeterTimer) return;
             this._netMeterTimer = setInterval(() => this._netMeterTick(), 250);
+        },
+
+        /**
+         * Wrap every native <input type="range"> in a touch-friendly
+         * [-] slider [+] control row. Buttons step by the slider's
+         * own `step` attribute (default 1) and dispatch synthetic
+         * `input` + `change` events so Alpine x-model + plain
+         * @input handlers see the new value the same way they do
+         * when the user drags.
+         *
+         * Idempotent: a sentinel data-flag on the input skips already
+         * wrapped sliders. Inline `style="flex:1"` (used by sliders
+         * inside flex labels for the Appearance card etc.) is moved
+         * onto the wrapper instead so the row, not just the track,
+         * stretches.
+         */
+        _augmentRangeInputs() {
+            const sliders = document.querySelectorAll(
+                'input[type="range"]:not([data-range-augmented])');
+            for (const input of sliders) {
+                // Mark first so a re-entrant MutationObserver firing
+                // from the DOM moves below does not loop.
+                input.dataset.rangeAugmented = '1';
+
+                const wrap = document.createElement('span');
+                wrap.className = 'range-with-controls';
+                // Hand any inline flex sizing the slider had down to
+                // the wrapper. Otherwise the slider's flex:1 stops
+                // applying once the wrapper sits between it and the
+                // surrounding flex container.
+                if (input.style.flex) {
+                    wrap.style.flex = input.style.flex;
+                    input.style.flex = '';
+                }
+                if (input.style.width) {
+                    wrap.style.width = input.style.width;
+                    input.style.width = '';
+                }
+
+                const mkBtn = (label, dir) => {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'range-step-btn';
+                    b.textContent = label;
+                    b.setAttribute('aria-label',
+                        dir < 0 ? 'Decrease' : 'Increase');
+                    b.tabIndex = -1;
+                    // pointerdown so it works for both mouse + touch
+                    // without firing twice on touch devices that also
+                    // emit synthetic click events.
+                    b.addEventListener('pointerdown', (ev) => {
+                        ev.preventDefault();
+                        if (input.disabled) return;
+                        const step = parseFloat(input.step) || 1;
+                        const min = input.min !== '' ? parseFloat(input.min) : -Infinity;
+                        const max = input.max !== '' ? parseFloat(input.max) : Infinity;
+                        let cur = parseFloat(input.value);
+                        if (!Number.isFinite(cur)) cur = 0;
+                        let next = cur + dir * step;
+                        // Round to step grid to avoid 0.30000000000004
+                        // float drift when stepping fractional values.
+                        const decimals = (input.step.split('.')[1] || '').length;
+                        if (decimals > 0) {
+                            next = parseFloat(next.toFixed(decimals));
+                        }
+                        next = Math.min(max, Math.max(min, next));
+                        input.value = String(next);
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                    });
+                    return b;
+                };
+
+                const minus = mkBtn('−', -1);
+                const plus = mkBtn('+', +1);
+
+                const parent = input.parentNode;
+                parent.insertBefore(wrap, input);
+                wrap.appendChild(minus);
+                wrap.appendChild(input);
+                wrap.appendChild(plus);
+            }
         },
 
         // Auto-scale to B/s · KB/s · MB/s with one decimal. Caller

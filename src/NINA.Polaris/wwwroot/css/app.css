@@ -6431,3 +6431,57 @@ label select.input-sm {
 .network-signal {
     font-size: 11px;
 }
+
+/* Touch-friendly range slider wrapper: [-] slider [+]. Injected
+   automatically by app.js _augmentRangeInputs() on init() and on
+   any future DOM mutations. The wrapper inherits any flex:1 the
+   original slider had so it still stretches inside flex labels. */
+.range-with-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.range-with-controls > input[type="range"] {
+    flex: 1;
+    min-width: 0;
+}
+.range-step-btn {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    /* Browsers add a 300ms delay before synthesizing click on touch
+       unless touch-action is set; we use pointerdown anyway, but
+       this also kills the double-tap-zoom that punishes power
+       users tapping fast. */
+    touch-action: manipulation;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--transition), border-color var(--transition);
+}
+.range-step-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+.range-step-btn:active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+.range-step-btn:disabled,
+.range-with-controls > input[type="range"]:disabled ~ .range-step-btn,
+.range-with-controls:has(input:disabled) .range-step-btn {
+    opacity: 0.4;
+    cursor: not-allowed;
+}

@@ -129,16 +129,13 @@ public class BahtinovAnalyzerTests {
                                                 double centralRho) {
         var px = new ushort[w * h];
         for (int i = 0; i < px.Length; i++) px[i] = BackgroundLevel;
-        // Add a bright "core" so StarDetector locks on (even though
-        // the test passes starX/starY explicitly, the analyser
-        // re-uses the starpoint without re-detecting).
-        for (int dy = -3; dy <= 3; dy++) {
-            for (int dx = -3; dx <= 3; dx++) {
-                var y = starY + dy; var x = starX + dx;
-                if (x < 0 || x >= w || y < 0 || y >= h) continue;
-                px[y * w + x] = 55000;
-            }
-        }
+        // Add a 1px bright core so StarDetector locks on. Bigger
+        // cores break the rho refinement — at the centre of the
+        // ROI the line integration always wins regardless of the
+        // spike's perpendicular offset because it crosses the
+        // bright core. Real Bahtinov masks don't show a separate
+        // core; the diffraction spikes ARE the star's response.
+        px[starY * w + starX] = 55000;
         DrawSpike(px, w, h, starX, starY, outerAngle1Deg, rho: 0);
         DrawSpike(px, w, h, starX, starY, outerAngle2Deg, rho: 0);
         DrawSpike(px, w, h, starX, starY, centralAngleDeg, rho: centralRho);

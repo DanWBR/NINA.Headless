@@ -104,6 +104,83 @@ rigs + the new rig's policy auto-loads. Different setups (cold APO vs
 SCT with active dew heater) have different thermal characteristics,
 so per-rig makes sense.
 
+## Refocus suggestion (trend-based, manual focuser friendly)
+
+The auto re-focus path above only fires when you have a motorized
+focuser AND have turned on **RefocusEnabled** in the rig. Plenty of
+setups don't qualify, manual Crayford focusers, the cheap rack &
+pinion on a kid's scope, or motorized rigs where you prefer to
+refocus by hand. Without either condition Polaris would otherwise
+be silent about degrading focus, you'd only notice after several
+blurry frames piled up in the stack.
+
+Polaris fills that gap with a **trend-based suggestion**. It watches
+the same per-frame HFR + star count stream the auto-fire path uses
+and raises an advisory chip + LIVE-tab callout when the numbers are
+trending the wrong way. Nothing moves the focuser, you refocus
+manually, then click "I refocused" to acknowledge.
+
+### How the detection works
+
+The detection is automatic, no thresholds to tune.
+
+1. **Warm-up**: the service buffers the first 15 valid samples
+   (HFR > 0, star count >= 5) without raising anything.
+2. **Baseline**: once warmed up, the 5th-percentile HFR over the
+   last 20 samples becomes the "best stable HFR" reference, plus
+   the median star count.
+3. **Trend test** on every subsequent frame:
+   - Linear regression of the last 10 HFR samples gives a slope.
+   - The rolling mean of the last 5 HFR samples is compared to
+     baseline.
+   - Fires when **slope > 0** AND **mean > baseline x 1.15** AND
+     **5-frame extrapolated change > 30% of baseline**.
+4. **Star-count secondary**: a 30% drop in average star count vs
+   the baseline median fires on its own. Covers very-out-of-focus
+   where HFR looks deceptively stable because dim stars dropped out
+   entirely and HFR is computed on a shrinking set of bright cores.
+5. **Auto-dismiss** once the rolling means recover to within 5% of
+   baseline for 3 consecutive frames.
+
+These constants live in `Services/RefocusSuggestionService.cs` as
+`private const` so a future tuning pass touches one file.
+
+### When you'll see it
+
+- A toast appears the first time the detector fires.
+- A `Refocus: HFR rising 18% over 10 frames` chip joins the activity
+  bar at the bottom of every tab. Click the chip to jump straight to
+  FOCUS, Manual Assist.
+- A yellow callout appears in the LIVE tab above the auto-refocus
+  panel with three buttons:
+  - **I refocused** dismisses and replaces the baseline with the
+    post-refocus HFR (the new "good").
+  - **Open FOCUS** jumps to FOCUS, Manual Assist without dismissing.
+  - **Dismiss** clears the chip without resetting the baseline
+    (useful if you trust the original baseline and just want to
+    acknowledge).
+
+### When it stays silent
+
+- **Auto-refocus is enabled in the rig**: the suggestion does
+  nothing, LSTR-3 already covers you. Toggle one or the other in
+  the LIVE tab's "Auto re-focus / re-center" panel.
+- **First 15 frames of any session**, warm-up gate.
+- **Frames with HFR == 0 or star count < 5**, dropped as
+  unreliable. Bad seeing / clouds won't poison the detector.
+- **No live stacking running**, the detector subscribes to
+  FrameIntegrated events.
+
+### API
+
+- `POST /api/livestack/refocus-suggestion/dismiss` with body
+  `{ "resetBaseline": true }` (default) replaces the baseline with
+  the rolling mean. `false` clears the chip without changing the
+  baseline.
+- `GET /api/livestack/refocus-suggestion/status` for direct polling.
+  The same payload also rides inside `liveStack.refocusSuggestion`
+  on the WS tick.
+
 ## WebSocket payload
 
 For automation / external dashboards, the live stack state is in the
@@ -127,6 +204,15 @@ For automation / external dashboards, the live stack state is in the
       "referenceRaHours": 23.234, "referenceDecDeg": 12.583,
       "referenceSolved": true,
       "lastError": null
+    },
+    "refocusSuggestion": {
+      "suggesting": true,
+      "reason": "HFR rising 18% over 10 frames",
+      "baselineHfr": 1.92, "currentHfr": 2.27,
+      "slopePerFrame": 0.04,
+      "framesSinceBaseline": 28, "sampleCount": 28,
+      "baselineStarCount": 87,
+      "suggestedAt": "2026-05-22T23:05:11Z"
     }
   }
 }

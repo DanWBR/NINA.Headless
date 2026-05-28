@@ -728,6 +728,49 @@
                         </label>
                     </div>
 
+                    <!-- REFSUG-3: refocus-suggestion callout. Visible only
+                         when the trend-based detector raised an advisory
+                         (auto-refocus must be OFF for this to fire, see
+                         RefocusSuggestionService). Yellow box with the
+                         reason text + two buttons for the user to either
+                         confirm they refocused (reset baseline) or just
+                         dismiss without resetting. -->
+                    <div class="livestack-refocus-callout text-warn"
+                         x-show="liveStackStatus?.refocusSuggestion?.suggesting">
+                        <div class="livestack-refocus-callout-head">
+                            <span>🎯 Refocus suggested</span>
+                            <span class="text-muted"
+                                  x-text="liveStackStatus?.refocusSuggestion?.reason"></span>
+                        </div>
+                        <div class="livestack-refocus-callout-stats text-muted">
+                            HFR baseline
+                            <strong x-text="(liveStackStatus?.refocusSuggestion?.baselineHfr || 0).toFixed(2)"></strong>
+                            → current
+                            <strong x-text="(liveStackStatus?.refocusSuggestion?.currentHfr || 0).toFixed(2)"></strong>
+                            <span x-show="liveStackStatus?.refocusSuggestion?.suggestedAt">
+                                · fired
+                                <span x-text="formatRelativeTime(liveStackStatus?.refocusSuggestion?.suggestedAt)"></span>
+                            </span>
+                        </div>
+                        <div class="livestack-refocus-callout-actions">
+                            <button class="btn btn-sm btn-primary"
+                                    @click="refocusSuggestionResolved()"
+                                    title="I refocused. Reset the baseline so the next evaluation uses the new HFR as the reference.">
+                                ✓ I refocused
+                            </button>
+                            <button class="btn btn-sm"
+                                    @click="tab = 'focus'; focusTab = 'assist'"
+                                    title="Open FOCUS → Manual Assist">
+                                Open FOCUS
+                            </button>
+                            <button class="btn btn-sm"
+                                    @click="refocusSuggestionDismiss()"
+                                    title="Dismiss without resetting baseline">
+                                Dismiss
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- LSTR-5: Auto refocus + recenter triggers. Visible
                          whenever live stack toggle is shown (independent of
                          on/off state, user might want to configure before
@@ -7186,8 +7229,12 @@
         <div class="activity-bar-ops">
             <template x-for="chip in activityChips()" :key="chip.id">
                 <span class="activity-chip"
-                      :class="'activity-chip-' + (chip.kind || 'info')"
-                      :title="chip.label">
+                      :class="[
+                          'activity-chip-' + (chip.kind || 'info'),
+                          chip.onClick ? 'activity-chip-clickable' : ''
+                      ]"
+                      :title="chip.tooltip || chip.label"
+                      @click="chip.onClick && chip.onClick()">
                     <span class="activity-chip-icon" x-text="chip.icon"></span>
                     <span class="activity-chip-label" x-text="chip.label"></span>
                     <span class="activity-chip-progress" x-show="chip.progress != null">

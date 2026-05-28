@@ -17,12 +17,18 @@ public static class LiveStackEndpoints {
             return Results.Ok(new { status = "stopped", frameCount = stack.FrameCount });
         });
 
-        group.MapPost("/reset", (LiveStackingService stack, LiveStackTriggersService triggers) => {
+        group.MapPost("/reset", (LiveStackingService stack,
+                                 LiveStackTriggersService triggers,
+                                 RefocusSuggestionService refocusSuggest) => {
             stack.Reset();
             // Trigger state (last-refocus snapshot, reference RA/Dec, etc.)
             // is meaningless after a stack reset, clear it too so the
             // next first frame re-establishes the reference.
             triggers.ResetTriggerState();
+            // REFSUG-1: same applies to the trend-based suggestion.
+            // Without this the rolling window would carry samples
+            // from a different target / focus state across the reset.
+            refocusSuggest.Reset();
             return Results.Ok(new { status = "reset" });
         });
 
@@ -61,6 +67,22 @@ public static class LiveStackEndpoints {
             await triggers.FireRecenterNowAsync();
             return Results.Ok(new { fired = true });
         });
+
+        // ----- REFSUG-1: dismiss the refocus suggestion -----
+        //
+        // resetBaseline=true is the "I refocused" path, replaces the
+        // baseline with the rolling mean so the next evaluation uses
+        // the post-refocus HFR as the new good. false just clears the
+        // chip without touching the baseline (rare; user wants to
+        // acknowledge but trust the old reference).
+        group.MapPost("/refocus-suggestion/dismiss",
+            (RefocusSuggestionService suggest, DismissRefocusSuggestionRequest? req) => {
+                suggest.Dismiss(resetBaseline: req?.ResetBaseline ?? true);
+                return Results.NoContent();
+            });
+
+        group.MapGet("/refocus-suggestion/status",
+            (RefocusSuggestionService suggest) => Results.Ok(suggest.CurrentStatus));
 
         // ----- CLST-6: persist a client-stacked result as FITS -----
         //
@@ -134,4 +156,9 @@ public static class LiveStackEndpoints {
             return Results.Ok(new { savedPath = saved, frameCount });
         }).DisableAntiforgery();
     }
+
+    /// <summary>Body of POST /api/livestack/refocus-suggestion/dismiss.
+    /// resetBaseline defaults to true (the common case: user just
+    /// refocused, take the new HFR as the reference).</summary>
+    public record DismissRefocusSuggestionRequest(bool ResetBaseline = true);
 }

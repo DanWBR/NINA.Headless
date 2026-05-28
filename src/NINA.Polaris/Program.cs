@@ -77,6 +77,12 @@ builder.Services.AddSingleton<NINA.Polaris.Services.Planetary.PlanetaryStackerSe
 // Eagerly resolved alongside PHD2ProfileSyncService below so the
 // subscription wires at startup, not on first /api/livestack/triggers/* hit.
 builder.Services.AddSingleton<LiveStackTriggersService>();
+// REFSUG-1: trend-based refocus suggestion. Listens to the same
+// FrameIntegrated event as LSTR-3 but only when RefocusEnabled is
+// OFF — covers manual-focuser users who cannot be auto-fired.
+// Eager-resolved below alongside LSTR so the subscription is wired
+// before the first /api/livestack/start hit.
+builder.Services.AddSingleton<RefocusSuggestionService>();
 // Auto-shows live camera feed while mount is slewing (no-op when any
 // capture surface is active). Singleton + hosted service so the
 // background poll loop runs.
@@ -223,6 +229,10 @@ app.Services.GetRequiredService<PHD2ProfileSyncService>();
 // is hit, and any frames stacked before then would skip auto-refocus
 // / auto-recenter evaluation.
 app.Services.GetRequiredService<LiveStackTriggersService>();
+// REFSUG-1: same eager-resolve rationale. RefocusSuggestionService
+// hooks LiveStackingService.FrameIntegrated in its constructor and
+// must be alive before the first live-stack frame arrives.
+app.Services.GetRequiredService<RefocusSuggestionService>();
 
 // CLST-5 + CLST-7: pick the live-stack compute target based on
 //   (a) the active rig's LiveStackComputeMode override ("auto" /

@@ -176,6 +176,18 @@ setup keeps its own thermal + drift policy. UI is a collapsible
 `<details>` panel inside the LIVE tab below the stack controls;
 ▶ Now buttons bypass gates for manual fires.
 
+**Refocus suggestion** (REFSUG): trend-based advisory chip + LIVE-tab
+callout for manual-focuser users (or motorized rigs with auto-refocus
+disabled). The detector watches per-frame HFR + star count, sets a
+baseline equal to the 5th-percentile of the last 20 stable samples,
+and fires when the rolling mean + slope show systematic degradation
+(>15% above baseline + positive slope + 5-frame extrapolated change
+> 30% of baseline). Star-count crash (>30% drop) is a secondary
+trigger. Auto-clears when HFR + star count both recover for 3
+consecutive frames; "I refocused" button manually resets the
+baseline. No profile fields, detection is fully automatic. See
+[`docs/user-guide/live-stacking.md`](docs/user-guide/live-stacking.md).
+
 ### Plate Solving & Centering
 
 Strategy-based plate-solving dispatcher with four interchangeable backends and

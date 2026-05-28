@@ -5834,6 +5834,17 @@ label select.input-sm {
 }
 .activity-chip-warn { border-color: rgba(245, 158, 11, 0.55); }
 .activity-chip-error { border-color: rgba(239, 68, 68, 0.6); }
+/* REFSUG-2: clickable chips (refocus suggestion routes to FOCUS tab).
+   Hover lifts slightly so the user can tell the difference from
+   purely informational chips. */
+.activity-chip-clickable {
+    cursor: pointer;
+    transition: background-color 0.15s ease, transform 0.1s ease;
+}
+.activity-chip-clickable:hover {
+    background: rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
+}
 
 .activity-chip-icon { font-size: 12px; }
 .activity-chip-label {
@@ -6392,6 +6403,40 @@ label select.input-sm {
     border-radius: 2px;
     z-index: 1;
     pointer-events: none;
+}
+
+/* REFSUG-3: Refocus-suggestion advisory callout in the LIVE tab.
+   Yellow box that appears above the triggers panel when the trend
+   detector flagged degrading focus. Mirrors the activity-bar chip
+   so the user sees the same advisory in two places (chip
+   = global, callout = LIVE-tab contextual + action buttons). */
+.livestack-refocus-callout {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: rgba(245, 158, 11, 0.10);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    border-radius: var(--radius);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.livestack-refocus-callout-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px;
+}
+.livestack-refocus-callout-head > span:first-child {
+    font-weight: 600;
+}
+.livestack-refocus-callout-stats {
+    font-size: 11px;
+}
+.livestack-refocus-callout-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
 }
 
 /* LSTR-5: Live-stack triggers expandable panel inside the LIVE tab.

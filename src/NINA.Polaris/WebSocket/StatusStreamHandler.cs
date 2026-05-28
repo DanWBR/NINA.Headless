@@ -25,6 +25,7 @@ public static class StatusStreamHandler {
         var videoStacker = context.RequestServices.GetRequiredService<NINA.Polaris.Services.Planetary.PlanetaryStackerService>();
         var slewPreview = context.RequestServices.GetRequiredService<SlewPreviewService>();
         var liveStackTriggers = context.RequestServices.GetRequiredService<LiveStackTriggersService>();
+        var refocusSuggest = context.RequestServices.GetRequiredService<RefocusSuggestionService>();
         var liveStack = context.RequestServices.GetRequiredService<LiveStackingService>();
         var sequence = context.RequestServices.GetRequiredService<SequenceEngine>();
         var phd2 = context.RequestServices.GetRequiredService<PHD2Client>();
@@ -214,7 +215,11 @@ public static class StatusStreamHandler {
                             // raw frames the server relays ARE the accumulated
                             // stack and re-stacking would compound.
                             mode = liveStack.GetStatus().Mode,
-                            triggers = liveStackTriggers.CurrentStatus
+                            triggers = liveStackTriggers.CurrentStatus,
+                            // REFSUG-1: trend-based advisory. Always
+                            // emitted so the UI can decide whether to
+                            // render the chip / callout without polling.
+                            refocusSuggestion = refocusSuggest.CurrentStatus
                         },
                         guider = guiderPayload,
                         autoFocus = autoFocusPayload,

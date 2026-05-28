@@ -9122,6 +9122,38 @@ function ninaApp() {
                 this.toast('Recenter fired', 'info');
             } catch (e) { this.toast('Recenter failed: ' + e.message, 'error'); }
         },
+
+        // REFSUG-2: dismiss the refocus-suggestion chip / callout.
+        // resolved=true is the "I refocused" path, replaces the
+        // baseline with the recent rolling HFR so the next eval uses
+        // the post-refocus state as the new good. dismissOnly=true
+        // just clears the chip without changing baseline (rare,
+        // user wants to ack but trust the old reference).
+        async refocusSuggestionResolved() {
+            try {
+                await this.apiPost('/api/livestack/refocus-suggestion/dismiss',
+                    null, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ resetBaseline: true })
+                    });
+                this.toast('Baseline reset', 'ok');
+            } catch (e) {
+                this.toast('Dismiss failed: ' + e.message, 'error');
+            }
+        },
+        async refocusSuggestionDismiss() {
+            try {
+                await this.apiPost('/api/livestack/refocus-suggestion/dismiss',
+                    null, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ resetBaseline: false })
+                    });
+            } catch (e) {
+                this.toast('Dismiss failed: ' + e.message, 'error');
+            }
+        },
         // Format helpers used by the trigger status lines.
         formatRelativeTime(iso) {
             if (!iso) return ', ';
@@ -12698,6 +12730,27 @@ function ninaApp() {
                     icon: (this.liveStackStatus?.mode === 'metricsonly') ? '🌐' : '🖥',
                     kind: 'info',
                     label: `Live stack ${this.liveStackFrames || 0}f`
+                });
+            }
+
+            // REFSUG-2: trend-based refocus suggestion. Server fires
+            // this when LSTR-3 auto-fire is OFF and HFR is trending
+            // bad. Clicking the chip jumps to FOCUS Manual Assist
+            // where the user can refocus by hand, then the LIVE-tab
+            // callout (REFSUG-3) lets them mark it resolved.
+            const rs = this.liveStackStatus?.refocusSuggestion;
+            if (rs && rs.suggesting) {
+                out.push({
+                    id: 'refocus-suggest',
+                    icon: '🎯',
+                    kind: 'warn',
+                    label: 'Refocus: ' + (rs.reason || 'HFR drifting'),
+                    tooltip: (rs.reason || 'HFR drifting')
+                        + '\nClick to open FOCUS → Manual Assist.',
+                    onClick: () => {
+                        this.tab = 'focus';
+                        this.focusTab = 'assist';
+                    }
                 });
             }
 

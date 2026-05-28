@@ -137,6 +137,26 @@ public static class CameraEndpoints {
             return Results.Ok(new { red = req.Red, blue = req.Blue });
         });
 
+        // VIDEO tab FOV / ROI selection. Planetary capture needs the
+        // sensor cropped to a tight box around the planet (Jupiter is
+        // ~50 arcsec at typical focal lengths so a 640 x 480 box at
+        // sensor center is plenty), so the SER file stays small + fps
+        // climbs. width=0 / height=0 clears the ROI and returns to
+        // the full sensor.
+        group.MapPost("/subframe", async (EquipmentManager equip, SubframeRequest req) => {
+            if (equip.Camera == null)
+                return Results.BadRequest(new { error = "No camera selected" });
+            if (!equip.Camera.Capabilities.SupportsRoi)
+                return Results.Json(new { error = "Camera does not support ROI / subframe" },
+                    statusCode: 501);
+            await equip.Camera.SetSubframeAsync(req.X, req.Y, req.Width, req.Height);
+            return Results.Ok(new {
+                x = req.X, y = req.Y,
+                width = req.Width, height = req.Height,
+                full = req.Width <= 0 || req.Height <= 0
+            });
+        });
+
         group.MapPost("/cooler", async (EquipmentManager equip, CoolerRequest request) => {
             if (equip.Camera == null)
                 return Results.BadRequest(new { error = "No camera selected" });
@@ -262,6 +282,7 @@ public static class CameraEndpoints {
     /// typically 0..100 with 50 = neutral; UI bounds the slider to that
     /// per default and lets the user push outside.</summary>
     public record WhiteBalanceRequest(double Red, double Blue);
+    public record SubframeRequest(int X, int Y, int Width, int Height);
 
     /// <summary>Start-stream body. ForceLoop=true skips native streaming
     /// even when the camera supports it (debugging the fallback).</summary>

@@ -375,6 +375,10 @@ function ninaApp() {
             maxDurationSec: 60,
             wbR: 50,
             wbB: 50,
+            // 0 = full sensor, otherwise the side of a centered square
+            // ROI applied via POST /api/camera/subframe. Used by the
+            // FOV pills in the VIDEO Capture tab.
+            roiSize: 0,
             // Process side
             processSerPath: '',
             serList: [],          // [{ path, label }]
@@ -382,11 +386,14 @@ function ninaApp() {
             outputName: 'stack'
         },
         // Per-camera capability flags loaded from /api/camera/status on
-        // tab open. Drives WB-slider visibility + future
-        // ROI / cooler / ISO conditional UI inside VIDEO Capture.
+        // tab open. Drives WB-slider visibility + ROI / cooler / ISO
+        // conditional UI inside VIDEO Capture. maxX/maxY come from
+        // the same status payload so the FOV pills can clamp options
+        // larger than the actual sensor.
         cameraCaps: {
             cooler: false, binning: false, roi: false, iso: false,
-            bulb: false, videoStream: false, whiteBalance: false
+            bulb: false, videoStream: false, whiteBalance: false,
+            maxX: 0, maxY: 0
         },
         videoRecording: {
             recording: false, path: null, frames: 0, bytes: 0,
@@ -7813,9 +7820,45 @@ function ninaApp() {
                 if (r && r.capabilities) {
                     this.cameraCaps = Object.assign({}, this.cameraCaps, r.capabilities);
                 }
+                // Sensor dimensions feed the FOV pills (so a 1920 pill
+                // greys out on a 1280-wide sensor) + the "centered ·
+                // 640 × 640 on a 4144 × 2822 sensor" hint line.
+                if (r && typeof r.maxX === 'number') this.cameraCaps.maxX = r.maxX;
+                if (r && typeof r.maxY === 'number') this.cameraCaps.maxY = r.maxY;
                 if (r && typeof r.whiteBalanceR === 'number') this.video.wbR = r.whiteBalanceR;
                 if (r && typeof r.whiteBalanceB === 'number') this.video.wbB = r.whiteBalanceB;
             } catch (e) { /* no camera connected yet */ }
+        },
+
+        // POST /api/camera/subframe with a square ROI centered on the
+        // sensor. size=0 clears the ROI and shoots the full sensor;
+        // any other size is clamped to fit + centered via (max - size)/2.
+        // Driver applies the new geometry on the next capture; if a
+        // stream / record is in flight the UI disables the pills, so
+        // we don't have to restart the stream here.
+        async videoSetRoi(size) {
+            let x = 0, y = 0, w = 0, h = 0;
+            if (size > 0) {
+                const mx = this.cameraCaps.maxX | 0;
+                const my = this.cameraCaps.maxY | 0;
+                const sw = mx > 0 ? Math.min(size, mx) : size;
+                const sh = my > 0 ? Math.min(size, my) : size;
+                x = mx > sw ? Math.floor((mx - sw) / 2) : 0;
+                y = my > sh ? Math.floor((my - sh) / 2) : 0;
+                w = sw;
+                h = sh;
+            }
+            try {
+                const resp = await this.apiPost('/api/camera/subframe',
+                    { x, y, width: w, height: h });
+                await resp.json();
+                this.video.roiSize = size;
+                this.toast(size === 0
+                    ? 'FOV: full sensor'
+                    : `FOV: ${w} × ${h} centered`, 'ok');
+            } catch (e) {
+                this.toast('ROI set failed: ' + (e.message || 'driver rejected'), 'warn');
+            }
         },
         async videoSetWhiteBalance() {
             try {

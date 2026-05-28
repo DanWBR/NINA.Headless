@@ -1388,6 +1388,39 @@
                             </label>
                         </div>
 
+                        <!-- FOV / ROI: crop the sensor down to a tight
+                             box centered on the planet so the SER file
+                             stays small + fps climbs (planetary capture
+                             does not need 6000x4000, ~640x480 around
+                             Jupiter is plenty). FULL clears the ROI.
+                             Hidden when the camera reports SupportsRoi
+                             false (DSLRs, most Alpaca remotes). -->
+                        <div class="control-row"
+                             x-show="cameraCaps.roi !== false">
+                            <span style="font-size:11px; color:var(--text-muted); min-width:34px">FOV</span>
+                            <span class="bin-presets" role="group" aria-label="Field of view / ROI">
+                                <button type="button" class="bin-preset"
+                                        :data-active="video.roiSize === 0"
+                                        :disabled="cameraStream.running || videoRecording.recording"
+                                        @click="videoSetRoi(0)">FULL</button>
+                                <template x-for="sz in [320, 640, 800, 1024, 1280, 1920]" :key="sz">
+                                    <button type="button" class="bin-preset"
+                                            :data-active="video.roiSize === sz"
+                                            :disabled="cameraStream.running || videoRecording.recording
+                                                       || (cameraCaps.maxX > 0 && sz > cameraCaps.maxX)
+                                                       || (cameraCaps.maxY > 0 && sz > cameraCaps.maxY)"
+                                            @click="videoSetRoi(sz)"
+                                            x-text="sz"></button>
+                                </template>
+                            </span>
+                            <span class="text-muted" style="font-size:11px"
+                                  x-show="cameraCaps.maxX > 0 && cameraCaps.maxY > 0"
+                                  x-text="video.roiSize === 0
+                                      ? ('full sensor · ' + cameraCaps.maxX + ' × ' + cameraCaps.maxY)
+                                      : ('centered · ' + video.roiSize + ' × ' + video.roiSize
+                                         + ' on a ' + cameraCaps.maxX + ' × ' + cameraCaps.maxY + ' sensor')"></span>
+                        </div>
+
                         <!-- White-balance row, only visible for OSC color
                              cameras that expose WB_R + WB_B (ZWO ASI224MC,
                              QHY5III678C, etc.). Hidden on mono cams. -->

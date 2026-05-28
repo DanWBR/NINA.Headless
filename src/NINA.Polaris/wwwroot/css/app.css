@@ -6807,6 +6807,36 @@ label select.input-sm {
     background: rgba(56, 132, 255, 0.08);
 }
 
+/* MFOC-4: Bahtinov mask block in the manual focus sidebar. Slots
+   under the live metrics, so the user sees the in-focus / offset
+   readout next to HFR. The .manual-focus-metric inside picks up
+   the colour-class set per offset magnitude. */
+.manual-focus-bahtinov {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.manual-focus-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+.manual-focus-toggle input[type="checkbox"] {
+    accent-color: var(--accent);
+}
+.manual-focus-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.35;
+}
+
 @media (max-width: 900px) {
     .manual-focus-pane {
         flex-direction: column;

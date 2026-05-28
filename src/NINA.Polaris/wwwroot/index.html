@@ -1216,6 +1216,41 @@
                         </div>
                         <div class="text-warn" x-show="manualFocus.lastError" style="font-size:11px"
                              x-text="'⚠ ' + manualFocus.lastError"></div>
+
+                        <!-- MFOC-4: Bahtinov mask analysis toggle +
+                             readout. Off by default because most users
+                             don't have a Bahtinov mask installed. When
+                             on, the loop POSTs /api/focus/bahtinov
+                             after each capture and the overlay canvas
+                             draws the 3 spike lines + cross marker. -->
+                        <div class="manual-focus-bahtinov">
+                            <label class="manual-focus-toggle">
+                                <input type="checkbox"
+                                       x-model="manualFocus.showBahtinov"
+                                       @change="manualFocusBahtinovToggle()">
+                                <span>Bahtinov mask analysis</span>
+                            </label>
+                            <p class="text-muted manual-focus-hint">
+                                Install a physical Bahtinov mask over
+                                the scope aperture and point at a
+                                bright star (magnitude &lt; 3, e.g.
+                                Vega, Sirius, Polaris).
+                            </p>
+                            <template x-if="manualFocus.showBahtinov && manualFocus.bahtinovResult && manualFocus.bahtinovResult.ok">
+                                <div class="manual-focus-metric"
+                                     :class="manualFocusBahtinovClass()">
+                                    <span class="manual-focus-metric-label">Bahtinov offset</span>
+                                    <span class="manual-focus-metric-value"
+                                          x-text="(manualFocus.bahtinovResult.offsetPx >= 0 ? '+' : '') + manualFocus.bahtinovResult.offsetPx.toFixed(2) + ' px'"></span>
+                                    <span class="manual-focus-metric-trend"
+                                          x-text="manualFocusBahtinovDirection()"></span>
+                                </div>
+                            </template>
+                            <p class="text-warn manual-focus-hint"
+                               x-show="manualFocus.showBahtinov && manualFocus.bahtinovError"
+                               x-text="'⚠ Bahtinov: ' + manualFocus.bahtinovError"
+                               style="font-size:11px"></p>
+                        </div>
                     </div>
 
                     <!-- MFOC-2: HFR trend chart. Below the canvas +

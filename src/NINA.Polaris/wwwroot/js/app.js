@@ -132,10 +132,18 @@ function ninaApp() {
             samples: [],
             bestHfr: null,
             lastError: null,
-            // MFOC-4 hooks, populated when the Bahtinov checkbox is
-            // ticked; live UI lives in the next subtask.
+            // MFOC-4: Bahtinov mask analysis. When showBahtinov is on
+            // the loop POSTs /api/focus/bahtinov after each capture
+            // and overlays the spike geometry on the manual-focus
+            // canvas. lastFrameWidth/Height come back with the
+            // /api/camera/capture stats so we can scale frame-pixel
+            // coords (analyser output) to canvas-pixel coords (display
+            // is a fitted scale).
             showBahtinov: false,
-            bahtinovResult: null
+            bahtinovResult: null,
+            bahtinovError: null,
+            lastFrameWidth: 0,
+            lastFrameHeight: 0
         },
         _manualFocusTimer: null,
 
@@ -8490,6 +8498,19 @@ function ninaApp() {
             // clicking Start.
             this._manualFocusTick();
         },
+        // MFOC-4: invoked when the user toggles the Bahtinov checkbox.
+        // Off → clear the cached result + wipe overlay. On → trigger
+        // one immediate analysis if we have a cached frame, so the
+        // overlay appears without waiting for the next loop tick.
+        manualFocusBahtinovToggle() {
+            if (!this.manualFocus.showBahtinov) {
+                this.manualFocus.bahtinovResult = null;
+                this.manualFocus.bahtinovError = null;
+                this._renderBahtinovOverlay();
+            } else {
+                this._manualFocusBahtinovOnce();
+            }
+        },
         manualFocusStop() {
             this.manualFocus.running = false;
             if (this._manualFocusTimer) {
@@ -8512,7 +8533,12 @@ function ninaApp() {
             this.manualFocus.samples = [];
             this.manualFocus.bestHfr = null;
             this.manualFocus.lastError = null;
+            // MFOC-4: clear the Bahtinov overlay too so the canvas
+            // doesn't keep stale spike lines after a Reset.
+            this.manualFocus.bahtinovResult = null;
+            this.manualFocus.bahtinovError = null;
             this._renderManualFocusChart();
+            this._renderBahtinovOverlay();
         },
         // Captures one exposure, parses the stats, appends a sample,
         // updates bestHfr, re-renders the chart. Used by both the
@@ -8555,11 +8581,48 @@ function ninaApp() {
                 this.manualFocus.lastError = goodStarCount
                     ? null
                     : `Only ${stats.starCount} stars detected (need ${this.manualFocus.minStars}+). HFR ignored.`;
+                this.manualFocus.lastFrameWidth = r.width | 0;
+                this.manualFocus.lastFrameHeight = r.height | 0;
                 this._renderManualFocusChart();
+                // MFOC-4: Bahtinov analysis runs piggyback on the same
+                // cached frame the capture call just produced. Cheap
+                // enough (~50-200 ms) to do after every tick while the
+                // checkbox is on. Failures stay non-fatal: the manual
+                // focus loop keeps running, just without the overlay.
+                if (this.manualFocus.showBahtinov) {
+                    await this._manualFocusBahtinovOnce();
+                }
             } catch (e) {
                 this.manualFocus.lastError = 'Capture failed: '
                     + (e?.message || String(e));
             }
+        },
+
+        // MFOC-4: hit POST /api/focus/bahtinov and stash the result.
+        // The endpoint pulls the last frame from ImageRelayService so
+        // we don't pay for a second exposure here. Result lives on
+        // manualFocus.bahtinovResult and feeds the sidebar readout +
+        // the overlay drawn over manualFocusOverlayCanvas.
+        async _manualFocusBahtinovOnce() {
+            try {
+                const resp = await this.apiPost('/api/focus/bahtinov', {});
+                const r = await resp.json();
+                if (r && r.ok) {
+                    this.manualFocus.bahtinovResult = r;
+                    this.manualFocus.bahtinovError = null;
+                } else {
+                    this.manualFocus.bahtinovResult = null;
+                    this.manualFocus.bahtinovError = (r && r.error)
+                        ? r.error : 'analysis failed';
+                }
+            } catch (e) {
+                this.manualFocus.bahtinovResult = null;
+                this.manualFocus.bahtinovError = 'request failed: '
+                    + (e?.message || String(e));
+            }
+            // Draw on next animation frame so the canvas has settled
+            // any pending resize from the JPEG mirror.
+            this.$nextTick(() => this._renderBahtinovOverlay());
         },
         async _manualFocusTick() {
             if (!this.manualFocus.running) return;
@@ -8679,6 +8742,136 @@ function ninaApp() {
                 c.data.datasets[1].data = [];
             }
             c.update('none');
+        },
+
+        // MFOC-4: draw the Bahtinov result on the manual-focus overlay
+        // canvas. Always clears first (so toggling the checkbox off
+        // wipes stale art). Draws:
+        //   - cross marker at the picked star (StarX, StarY in frame
+        //     coords, scaled to canvas dimensions);
+        //   - the 3 spike lines clipped to the canvas;
+        //   - the central spike highlighted in the offset colour
+        //     (green/amber/red on a 0.5 / 1.5 px threshold);
+        //   - a small circle at the V-bisector intersection point so
+        //     the user sees exactly where the central spike should
+        //     pass through when in focus.
+        _renderBahtinovOverlay() {
+            const live = document.getElementById('manualFocusCanvas');
+            const ovr = document.getElementById('manualFocusOverlayCanvas');
+            if (!live || !ovr) return;
+            if (ovr.width !== live.width || ovr.height !== live.height) {
+                ovr.width = live.width || 1;
+                ovr.height = live.height || 1;
+            }
+            const ctx = ovr.getContext('2d');
+            ctx.clearRect(0, 0, ovr.width, ovr.height);
+            const r = this.manualFocus.bahtinovResult;
+            if (!this.manualFocus.showBahtinov || !r || !r.ok) return;
+
+            const fw = this.manualFocus.lastFrameWidth || live.width;
+            const fh = this.manualFocus.lastFrameHeight || live.height;
+            if (!fw || !fh) return;
+            const sx = ovr.width / fw;
+            const sy = ovr.height / fh;
+            const cx = r.starX * sx;
+            const cy = r.starY * sy;
+
+            const offsetPx = Math.abs(r.offsetPx || 0);
+            const thr = r.inFocusThresholdPx || 0.5;
+            let color;
+            if (offsetPx <= thr) color = 'rgba(74, 222, 128, 0.95)';
+            else if (offsetPx <= thr * 3) color = 'rgba(245, 158, 11, 0.95)';
+            else color = 'rgba(239, 68, 68, 0.95)';
+
+            // Star cross.
+            ctx.save();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            const ch = 10;
+            ctx.beginPath();
+            ctx.moveTo(cx - ch, cy); ctx.lineTo(cx + ch, cy);
+            ctx.moveTo(cx, cy - ch); ctx.lineTo(cx, cy + ch);
+            ctx.stroke();
+
+            // Spike lines. Each spike is a line through (cx + rho*nx,
+            // cy + rho*ny) at angleDeg, extended across the canvas.
+            const spikes = [
+                { ang: r.spike1Angle, rho: r.spike1Rho, central: r.centreSpikeIndex === 0 },
+                { ang: r.spike2Angle, rho: r.spike2Rho, central: r.centreSpikeIndex === 1 },
+                { ang: r.spike3Angle, rho: r.spike3Rho, central: r.centreSpikeIndex === 2 }
+            ];
+            const maxLen = Math.hypot(ovr.width, ovr.height);
+            for (const s of spikes) {
+                if (!Number.isFinite(s.ang)) continue;
+                const theta = s.ang * Math.PI / 180.0;
+                const dx = Math.cos(theta);
+                const dy = Math.sin(theta);
+                // Perpendicular offset by rho (in frame px, scaled).
+                const rhoCanvasX = -dy * (s.rho || 0) * sx;
+                const rhoCanvasY = dx * (s.rho || 0) * sy;
+                const x0 = cx + rhoCanvasX - dx * maxLen;
+                const y0 = cy + rhoCanvasY - dy * maxLen;
+                const x1 = cx + rhoCanvasX + dx * maxLen;
+                const y1 = cy + rhoCanvasY + dy * maxLen;
+                ctx.beginPath();
+                if (s.central) {
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2.5;
+                } else {
+                    ctx.strokeStyle = 'rgba(180, 200, 255, 0.7)';
+                    ctx.lineWidth = 1.5;
+                }
+                ctx.moveTo(x0, y0);
+                ctx.lineTo(x1, y1);
+                ctx.stroke();
+            }
+
+            // Intersection marker (where the V's two outer spikes
+            // cross). When focused, the central spike passes here.
+            if (Number.isFinite(r.intersectionX) && Number.isFinite(r.intersectionY)) {
+                const ix = r.intersectionX * sx;
+                const iy = r.intersectionY * sy;
+                ctx.strokeStyle = 'rgba(180, 200, 255, 0.9)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(ix, iy, 5, 0, 2 * Math.PI);
+                ctx.stroke();
+            }
+
+            // Offset label, top-left of the overlay.
+            ctx.fillStyle = color;
+            ctx.font = '12px system-ui, sans-serif';
+            const sign = (r.offsetPx || 0) >= 0 ? '+' : '';
+            const label = `Bahtinov offset: ${sign}${(r.offsetPx || 0).toFixed(2)} px`;
+            ctx.fillText(label, 8, 16);
+            ctx.restore();
+        },
+
+        // MFOC-4: directional helper for the sidebar readout. We don't
+        // know which physical rotation direction the user's focuser
+        // maps to (depends on tube + filter + scope orientation), so
+        // we just describe the geometry: central spike is offset by
+        // +N or -N px from the V's intersection. User watches the
+        // sign change as they adjust the knob and learns which way
+        // their rig wants.
+        manualFocusBahtinovDirection() {
+            const r = this.manualFocus.bahtinovResult;
+            if (!r || !r.ok) return '';
+            const off = r.offsetPx || 0;
+            const abs = Math.abs(off);
+            const thr = r.inFocusThresholdPx || 0.5;
+            if (abs <= thr) return '✓ In focus';
+            if (abs <= thr * 3) return 'Near focus, fine-tune';
+            return off > 0 ? 'Rotate inward' : 'Rotate outward';
+        },
+        manualFocusBahtinovClass() {
+            const r = this.manualFocus.bahtinovResult;
+            if (!r || !r.ok) return '';
+            const abs = Math.abs(r.offsetPx || 0);
+            const thr = r.inFocusThresholdPx || 0.5;
+            if (abs <= thr) return 'manual-focus-metric--good';
+            if (abs <= thr * 3) return 'manual-focus-metric--flat';
+            return 'manual-focus-metric--bad';
         },
 
         async startAutoFocus() {

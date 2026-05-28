@@ -101,6 +101,11 @@ builder.Services.AddSingleton<ProfileService>();
 // AUTH-1: local-server auth (password + session store + rate limit).
 // Middleware that consumes this is wired in AUTH-2.
 builder.Services.AddSingleton<NINA.Polaris.Services.Auth.AuthService>();
+// CLOCK-1: wraps `timedatectl set-time` so the browser can nudge the
+// Pi's wall clock when the host is offline (no NTP) + has no RTC.
+// Linux only; on Windows the service refuses gracefully + the UI
+// banner explains.
+builder.Services.AddSingleton<ClockSyncService>();
 builder.Services.AddSingleton<ImageWriterService>();
 builder.Services.AddSingleton<PHD2Client>();
 builder.Services.AddSingleton<PHD2ProcessManager>();

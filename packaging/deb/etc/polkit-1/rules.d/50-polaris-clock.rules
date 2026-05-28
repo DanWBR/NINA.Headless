@@ -1,0 +1,21 @@
+// PolicyKit rule shipped by the polaris .deb. Grants the 'polaris'
+// system user (created in postinst) the ability to set the system
+// wall clock via timedatectl, used by ClockSyncService when the
+// browser POSTs /api/system/clock/sync.
+//
+// Background: a Pi without an RTC battery + offline (no NTP) drifts.
+// The browser knows the right UTC because its own host is online;
+// Polaris lets the user push that timestamp into the Pi with one
+// click. timedatectl requires PolicyKit auth, so without this rule
+// the call fails silently as "Not authorized".
+//
+// Scope is intentionally narrow: only set-time + set-ntp (the two
+// actions ClockSyncService invokes), only the polaris user. Other
+// users keep their normal PolicyKit defaults.
+polkit.addRule(function(action, subject) {
+    if (subject.user != "polaris") return;
+    if (action.id == "org.freedesktop.timedate1.set-time"
+        || action.id == "org.freedesktop.timedate1.set-ntp") {
+        return polkit.Result.YES;
+    }
+});

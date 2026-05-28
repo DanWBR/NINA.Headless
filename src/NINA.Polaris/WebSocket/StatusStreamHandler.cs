@@ -35,6 +35,7 @@ public static class StatusStreamHandler {
         var meridianFlip = context.RequestServices.GetRequiredService<MeridianFlipService>();
         var profile = context.RequestServices.GetRequiredService<ProfileService>();
         var hostMetrics = context.RequestServices.GetRequiredService<HostMetricsService>();
+        var clockSync = context.RequestServices.GetRequiredService<ClockSyncService>();
         var siril = context.RequestServices
             .GetRequiredService<NINA.Polaris.Services.External.SirilService>();
         var graxpert = context.RequestServices
@@ -283,6 +284,15 @@ public static class StatusStreamHandler {
                         host = hostMetrics.Latest,
                         sirilJobs = sirilJobsPayload,
                         graXpertJobs = graXpertJobsPayload,
+                        // CLOCK-1: serverUtcNow lets the client compute
+                        // wall-clock skew against its own Date.now()
+                        // every tick. When |skew| > 30s the activity
+                        // bar shows a "Clock N off" chip and the
+                        // Settings card surfaces a Sync button.
+                        server = new {
+                            utcNow = DateTime.UtcNow.ToString("o"),
+                            clockSyncSupported = clockSync.IsSupported
+                        },
                         // Server-pushed toasts (auto-connect outcomes,
                         // simulator events, etc.). Client de-dups by id
                         //, see toast pump in app.js.

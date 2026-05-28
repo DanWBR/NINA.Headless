@@ -131,6 +131,20 @@ function ninaApp() {
             booting: true        // hides app shell until /status responds
         },
 
+        // CLOCK-3: server / client wall-clock skew tracker. Driven
+        // by the WS status payload's server.utcNow (refreshed every
+        // 1s). When |skew| > 30s the activity bar shows a chip; the
+        // Settings card surfaces a Sync button that POSTs the
+        // client's UTC into /api/system/clock/sync.
+        clockSync: {
+            serverUtc: '',
+            skewSeconds: 0,
+            supported: false,
+            busy: false,
+            lastSyncAt: null,
+            lastError: null
+        },
+
         // HELP-1: in-app tutorial state. tutorial null = landing
         // (4-card picker); otherwise one of 'firstNight', 'capture',
         // 'workflowsPicker', 'lrgb', 'planetary', 'pcc', 'troubleshoot'.
@@ -2376,6 +2390,68 @@ function ninaApp() {
                     }
                 ]
             };
+        },
+
+        // ---- CLOCK-3: wall-clock sync helpers --------------------------
+
+        // Posts the client's current UTC to the server. Server applies
+        // it via timedatectl (Linux + polkit) and returns the post-
+        // sync residual skew. Disables the button while in flight to
+        // avoid double-fires.
+        async clockSyncFromClient() {
+            if (this.clockSync.busy) return;
+            this.clockSync.busy = true;
+            this.clockSync.lastError = null;
+            try {
+                const r = await this.apiPost('/api/system/clock/sync', {
+                    clientUtc: new Date().toISOString()
+                });
+                const j = await r.json();
+                if (j.ok) {
+                    this.clockSync.lastSyncAt = new Date();
+                    this.toast('Pi clock synced from this device', 'ok');
+                    // Force next WS payload to refresh skew quickly.
+                    this.clockSync.skewSeconds = 0;
+                } else {
+                    this.clockSync.lastError = j.error || 'Sync failed';
+                    this.toast(this.clockSync.lastError, 'error');
+                }
+            } catch (e) {
+                let msg = 'Network error';
+                if (e && e.body) {
+                    try { msg = JSON.parse(e.body).error || msg; } catch {}
+                }
+                this.clockSync.lastError = msg;
+                this.toast('Clock sync failed: ' + msg, 'error');
+            } finally {
+                this.clockSync.busy = false;
+            }
+        },
+
+        // Human-readable skew label. Positive = server is AHEAD,
+        // negative = server is BEHIND. Pluralizes + scales seconds /
+        // minutes / hours, returns null when |skew| <= 30s so the
+        // chip stays hidden in the normal case.
+        clockSkewLabel() {
+            const s = this.clockSync.skewSeconds | 0;
+            const abs = Math.abs(s);
+            if (abs <= 30) return null;
+            const direction = s > 0 ? 'ahead' : 'behind';
+            if (abs < 90) return abs + 's ' + direction;
+            if (abs < 60 * 60) return Math.round(abs / 60) + 'm ' + direction;
+            if (abs < 24 * 60 * 60) return Math.round(abs / 3600) + 'h ' + direction;
+            return Math.round(abs / 86400) + 'd ' + direction;
+        },
+
+        // Bigger threshold for the loud "drift is serious" styling
+        // (vs the soft warning at 30s). 5 minutes is the line where
+        // sequence timing + dither + plate-solve hint expirations
+        // start breaking, so the chip turns from amber to red there.
+        clockSkewClass() {
+            const abs = Math.abs(this.clockSync.skewSeconds | 0);
+            if (abs > 300) return 'host-red';
+            if (abs > 30) return 'host-amber';
+            return 'host-green';
         },
 
         // ---- Exposure preset dropdown source --------------------------
@@ -13735,6 +13811,19 @@ function ninaApp() {
             // the equipment + sequence state that handlers above
             // already populated).
             if (msg.host) this.host = msg.host;
+            // CLOCK-3: server pushes utcNow on every tick. Compare
+            // to Date.now() to compute wall-clock skew the user can
+            // act on. Skew is positive when the server is AHEAD of
+            // the client, negative when BEHIND.
+            if (msg.server && msg.server.utcNow) {
+                this.clockSync.serverUtc = msg.server.utcNow;
+                this.clockSync.supported = !!msg.server.clockSyncSupported;
+                const serverMs = Date.parse(msg.server.utcNow);
+                if (Number.isFinite(serverMs)) {
+                    this.clockSync.skewSeconds = Math.round(
+                        (serverMs - Date.now()) / 1000);
+                }
+            }
             // SIM-6: simulator backend status (kind/installed/version/
             // running/runningDevices). The Settings panel binds to this.
             if (msg.simulator) this.simulator = msg.simulator;

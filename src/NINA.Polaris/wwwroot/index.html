@@ -6297,6 +6297,57 @@
                     </div>
                 </div>
 
+                <!-- CLOCK-3: server-vs-client wall-clock card. Drift
+                     surfaces here so the user can sync explicitly
+                     instead of Polaris jumping the wall clock during
+                     a running sequence. id="clock-card" so the
+                     activity-bar chip can scrollIntoView() on click. -->
+                <div class="settings-section" id="clock-card">
+                    <h3><span class="settings-card-icon">⏰</span>Clock</h3>
+                    <p class="text-muted" style="font-size:12px; max-width:560px; margin-top:4px">
+                        Sync the Pi's wall clock from this device when
+                        the host is offline (no NTP) and the Pi has no
+                        RTC battery. Action is explicit so the wall
+                        clock never jumps during a running sequence.
+                    </p>
+                    <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; font-size:12px">
+                        <div>
+                            Server UTC:
+                            <strong x-text="clockSync.serverUtc || '—'"></strong>
+                        </div>
+                        <div>
+                            Difference vs this device:
+                            <strong :class="clockSkewClass()"
+                                    x-text="(clockSync.skewSeconds >= 0 ? '+' : '') + clockSync.skewSeconds + 's'"></strong>
+                            <span class="text-muted"
+                                  x-show="clockSkewLabel() !== null"
+                                  x-text="' (' + clockSkewLabel() + ')'"></span>
+                        </div>
+                        <div x-show="clockSync.lastSyncAt"
+                             style="color:var(--text-muted)">
+                            Last sync:
+                            <span x-text="clockSync.lastSyncAt ? clockSync.lastSyncAt.toLocaleString() : ''"></span>
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px">
+                        <button class="btn btn-sm btn-primary"
+                                @click="clockSyncFromClient()"
+                                :disabled="!clockSync.supported || clockSync.busy">
+                            <span x-show="!clockSync.busy">⏱ Sync Pi clock from this device</span>
+                            <span x-show="clockSync.busy">Syncing…</span>
+                        </button>
+                    </div>
+                    <p class="text-warn" x-show="!clockSync.supported"
+                       style="font-size:11px; margin-top:8px">
+                        ⚠ Clock sync is Linux-only (uses
+                        <code>timedatectl</code>). On Windows /
+                        macOS use the OS clock settings or NTP.
+                    </p>
+                    <p class="text-warn" x-show="clockSync.lastError"
+                       style="font-size:11px; margin-top:8px"
+                       x-text="'⚠ ' + clockSync.lastError"></p>
+                </div>
+
                 <div class="settings-section network-section">
                     <h3><span class="settings-card-icon">📡</span>Network (WiFi)</h3>
                     <!-- Body wrapper: forces consistent padding on the
@@ -7165,6 +7216,19 @@
             </span>
         </div>
         <div class="activity-bar-host" x-show="host.cpuPercent != null || host.device" x-cloak>
+            <!-- CLOCK-3: wall-clock skew chip. Only shown when the
+                 server is more than 30s off from the client clock.
+                 Click jumps to Settings → Clock so the user can hit
+                 Sync without hunting for the card. -->
+            <span class="activity-host-stat activity-host-clock"
+                  x-show="clockSkewLabel() !== null"
+                  :title="'Server: ' + clockSync.serverUtc + ' (UTC)\nDifference vs this device: ' + clockSync.skewSeconds + 's\nClick to open Settings → Clock'"
+                  @click="tab = 'settings'; $nextTick(() => document.getElementById('clock-card')?.scrollIntoView({behavior:'smooth', block:'center'}))"
+                  style="cursor:pointer">
+                <span class="activity-host-icon">⏰</span>
+                <span class="activity-host-value" :class="clockSkewClass()"
+                      x-text="'Clock ' + clockSkewLabel()"></span>
+            </span>
             <!-- Hardware identification, detected once at startup
                  (HostInfo.cs). Tooltip carries the full model/OS;
                  short label fits in the bar. -->

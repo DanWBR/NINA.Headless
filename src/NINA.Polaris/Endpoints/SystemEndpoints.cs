@@ -198,6 +198,46 @@ public static class SystemEndpoints {
             return Results.NotFound(new { error = "Profile not found" });
         });
 
+        // CLOCK-1: client-driven wall-clock sync. The /clock GET is
+        // cheap status (used by Settings + the activity-bar chip);
+        // POST /clock/sync writes the client's UTC into the system
+        // clock via timedatectl (Linux only, polkit-allowed for the
+        // polaris user). Both are gated by AuthMiddleware like every
+        // other /api/* route.
+        group.MapGet("/clock", (ClockSyncService clock) => {
+            return Results.Ok(new {
+                serverUtcNow = clock.ServerUtcNow().ToString("o"),
+                supported = clock.IsSupported
+            });
+        });
+
+        group.MapPost("/clock/sync", async (ClockSyncService clock,
+                ClockSyncRequest req, CancellationToken ct) => {
+            if (req == null || string.IsNullOrWhiteSpace(req.ClientUtc)) {
+                return Results.BadRequest(new { error = "clientUtc is required (ISO-8601)" });
+            }
+            if (!DateTime.TryParse(req.ClientUtc, null,
+                    System.Globalization.DateTimeStyles.RoundtripKind
+                    | System.Globalization.DateTimeStyles.AssumeUniversal
+                    | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                    out var parsed)) {
+                return Results.BadRequest(new { error = "clientUtc must be ISO-8601" });
+            }
+            var result = await clock.SetUtcAsync(parsed, ct);
+            if (!result.Ok) {
+                return Results.Json(new {
+                    ok = false,
+                    error = result.Error,
+                    serverUtcNow = result.ServerUtcNow.ToString("o")
+                }, statusCode: 500);
+            }
+            return Results.Ok(new {
+                ok = true,
+                serverUtcNow = result.ServerUtcNow.ToString("o"),
+                residualSkewSeconds = result.ResidualSkewSeconds
+            });
+        });
+
         // Legacy settings (redirect to profile)
         group.MapGet("/settings", (ProfileService profiles) => {
             var p = profiles.Active;
@@ -217,4 +257,5 @@ public static class SystemEndpoints {
     }
 
     record SaveAsRequest(string Name);
+    record ClockSyncRequest(string ClientUtc);
 }

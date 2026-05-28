@@ -28,6 +28,7 @@ Browser (laptop / tablet / phone)        Raspberry Pi / Mini PC
   - [Live Stacking (EAA)](#live-stacking-eaa)
   - [Plate Solving & Centering](#plate-solving--centering)
   - [Guiding (PHD2), full management](#guiding-phd2--full-management)
+  - [Manual Focus Assist (no motor required)](#manual-focus-assist-no-motor-required)
   - [Auto-Focus (V-Curve)](#auto-focus-v-curve)
   - [Meridian Flip Automation](#meridian-flip-automation)
   - [Advanced Sequencer (tree-based)](#advanced-sequencer-tree-based)
@@ -216,6 +217,29 @@ PHD2 is a first-class managed device, not just a black box we send commands to.
 - **Smart Calibrate**, one button: Polaris reads pixel scale, computes a sane calibration step from `(distance_px × pixel_scale) / guide_rate`, optionally slews the main mount to the celestial equator, clears calibration, finds a star, triggers `guide(recalibrate=true)`, monitors the calibration to completion via the AppState event stream, validates orthogonality + non-zero rate, and surfaces results. State machine + progress streamed live via `/ws/status` → `guider.calibrateJob`.
 - **Algorithm tuning presets**, `Default` / `Reactive` / `Smooth` curated bundles for Hysteresis (RA) + Resist-Switch (DEC) algorithms; applied via `set_algo_param` with silent skip for params the current algorithm doesn't expose. Advanced disclosure shows every live knob (`get_algo_param_names` + per-name `get_algo_param`); editing any knob flips the preset to `Custom` and persists the bag on the rig.
 - **Embedded PHD2 GUI** (Linux only), the GUIDE tab has a tabstrip: **Control** (JSON-RPC UI) | **PHD2 GUI** (xpra HTML5 client embedded via reverse-proxy). Lets you run PHD2's native Profile Wizard, Brain dialog, Guiding Assistant, dark library, etc. remotely without VNC/SSH. See [docs/phd2-gui-embedding.md](docs/phd2-gui-embedding.md) for install instructions. On Windows/macOS the Control tab still works fully; the GUI tab shows a clear OS-not-supported banner.
+
+### Manual Focus Assist (no motor required)
+
+A client-driven capture loop that turns the FOCUS tab into a manual-focus
+aid, designed for rigs without an electronic focuser **and** as a
+fine-tune helper after V-curve completes on motorised rigs.
+
+- **HFR trend loop**: captures a frame every N seconds, parses HFR / FWHM
+  / star count / Laplacian variance from the standard stats pipeline,
+  plots HFR vs time on a 60-sample scrolling chart. A dashed baseline at
+  the lowest HFR seen since the last Reset shows immediately when you've
+  overshot focus.
+- **Bahtinov mask analysis**: optional checkbox runs a radial line
+  integration on the brightest star, finds the 3 diffraction spikes,
+  identifies the central spike, and reports the perpendicular offset of
+  the central line from the V's intersection. Canvas overlay draws the
+  star cross + 3 spike lines + intersection circle + offset label.
+  Sidebar surfaces a colour-coded readout (green / amber / red) with a
+  rotate-inward / rotate-outward cue.
+- **Coexists with motorised focusers**: subtabs `Manual Assist` (default
+  when no motor) and `Auto V-curve`, with the manual stepper always
+  available above the subtabs.
+- See [docs/user-guide/focus.md](docs/user-guide/focus.md#manual-assist-subtab) for the full workflow.
 
 ### Auto-Focus (V-Curve)
 

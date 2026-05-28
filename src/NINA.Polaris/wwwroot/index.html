@@ -130,11 +130,29 @@
                     return '<button type="button" class="exposure-preset-item" data-exposure-value="'
                         + v + '">' + v + ' s</button>';
                 }).join('');
-                var rect = input.getBoundingClientRect();
-                p.style.left = rect.left + 'px';
-                p.style.top = (rect.bottom + 2) + 'px';
-                p.style.minWidth = Math.max(rect.width, 80) + 'px';
+                p.style.minWidth = Math.max(input.getBoundingClientRect().width, 80) + 'px';
+                // Render off-screen first to measure actual rendered
+                // height (depends on preset count + font + max-height
+                // CSS cap), then decide flip direction.
+                p.style.visibility = 'hidden';
+                p.style.left = '-9999px';
+                p.style.top = '0px';
                 p.hidden = false;
+                var rect = input.getBoundingClientRect();
+                var popH = p.offsetHeight;
+                var vh = window.innerHeight || document.documentElement.clientHeight;
+                var roomBelow = vh - rect.bottom;
+                var roomAbove = rect.top;
+                // Flip up when there's not enough room below AND
+                // there's MORE room above. Otherwise keep the default
+                // "down" placement; the popover's own max-height +
+                // overflow-y handles spillover.
+                var openUp = (popH + 8 > roomBelow) && (roomAbove > roomBelow);
+                p.style.left = rect.left + 'px';
+                p.style.top = openUp
+                    ? Math.max(4, rect.top - popH - 2) + 'px'
+                    : (rect.bottom + 2) + 'px';
+                p.style.visibility = '';
             }
 
             function hide() {

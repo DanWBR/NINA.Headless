@@ -389,6 +389,21 @@ public class UserProfile {
     public string OnnxDefaultDenoiseVersion { get; set; } = "2.0.0";
     public bool OnnxPreferCli { get; set; } = false;
 
+    // AUTH-1: basic auth for the local HTTP API + WebSockets. Default
+    // enabled, but with no hash configured. The frontend's first-run
+    // wizard forces the user to set a password before any other tab
+    // becomes accessible. Loopback (127.0.0.1) bypasses regardless.
+    // AuthEnabled toggle covers the "closed LAN, no friction" case
+    // (Settings -> Authentication -> uncheck, requires current pwd).
+    // Hash + salt are base64; HashAlgo lets us migrate to Argon2 later
+    // without breaking existing installs. Session timeout drives the
+    // sliding-expiration TTL inside AuthService's in-memory store.
+    public bool AuthEnabled { get; set; } = true;
+    public string AuthPasswordHash { get; set; } = "";
+    public string AuthPasswordSalt { get; set; } = "";
+    public string AuthHashAlgo { get; set; } = "pbkdf2-sha256-100000";
+    public int AuthSessionTimeoutHours { get; set; } = 24;
+
     // Image output
     public string ImageOutputDir { get; set; } = "";
     public string ImageNamePattern { get; set; } = "{target}_{filter}_{exposure}s_{date}_{seq}";

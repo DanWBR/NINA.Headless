@@ -97,6 +97,9 @@ builder.Services.AddSingleton<NINA.Polaris.Services.PlateSolving.AstrometryNetLo
 builder.Services.AddSingleton<PlateSolveService>();
 builder.Services.AddSingleton<SlewCenterService>();
 builder.Services.AddSingleton<ProfileService>();
+// AUTH-1: local-server auth (password + session store + rate limit).
+// Middleware that consumes this is wired in AUTH-2.
+builder.Services.AddSingleton<NINA.Polaris.Services.Auth.AuthService>();
 builder.Services.AddSingleton<ImageWriterService>();
 builder.Services.AddSingleton<PHD2Client>();
 builder.Services.AddSingleton<PHD2ProcessManager>();
@@ -464,6 +467,10 @@ app.MapAutoFocusEndpoints();
 // metric, gaussian FWHM fit, ...).
 app.MapFocusEndpoints();
 app.MapMeridianFlipEndpoints();
+// AUTH-1: /api/auth/{status,setup,login,logout,change-password,
+// disable,enable}. Mapped here; AuthMiddleware (AUTH-2) exempts the
+// whole /api/auth/* prefix so these are reachable without a token.
+app.MapAuthEndpoints();
 app.MapPolarAlignmentEndpoints();
 app.MapFlatWizardEndpoints();
 app.MapAlpacaEndpoints();

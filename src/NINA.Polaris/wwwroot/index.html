@@ -4149,6 +4149,17 @@
                                     title="Reset all sliders to defaults (zero edits)">
                                 ↺ Reset
                             </button>
+                            <!-- CROP — same modal as the FILES toolbar.
+                                 Pre-processing pass before BGE/decon/
+                                 denoise; produces a sibling _crop.fits.
+                                 User reopens that crop file in the
+                                 editor to keep going. -->
+                            <button class="btn btn-sm"
+                                    @click="cropOpenForFile(editorState.sourcePath)"
+                                    :disabled="!editorState.session || !editorState.sourcePath"
+                                    title="Crop a rectangle from this image (saves as _crop.fits next to it)">
+                                ✂ Crop
+                            </button>
                         </div>
 
                         <!-- LUZ / LIGHT -->
@@ -6534,6 +6545,19 @@
                             title="Open this file in the Lightroom-style editor">
                         🎨 Edit
                     </button>
+                    <!-- CROP — quick crop before BGE/Decon/Denoise.
+                         Pre-processing step the user normally does in
+                         GraXpert; pull it into FILES so they can stay
+                         in Polaris for the trim → BGE → decon → denoise
+                         chain. One file at a time (the picker is a
+                         single-image overlay). -->
+                    <button class="btn btn-sm"
+                            :disabled="files.selectedPaths.length !== 1
+                                       || filesSelectedDir() != null"
+                            @click="cropOpenForFile(files.selectedPaths[0])"
+                            title="Crop a rectangle from this image (saves as _crop.fits)">
+                        ✂ Crop
+                    </button>
                     <!-- GraXpert dropdown, visible when EITHER the CLI
                          is installed on the host OR the matching ONNX
                          model is detected by the server. The modal's
@@ -8408,13 +8432,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
             <div class="siril-modal-row" x-show="onnxAvailableForOp(graxpert.modalOp)">
                 <label class="checkbox-label">
                     <input type="checkbox" x-model="graxpert.modalRunInBrowser">
-                    Run in browser (ONNX, no CLI subprocess)
+                    Process here on this device
                 </label>
                 <p class="hint" style="margin-top:4px">
-                    Inference runs locally in this tab, works on any device with
-                    WebGPU or WASM SIMD, no GraXpert install required on the
-                    server. First use of each model downloads its ONNX bytes
-                    from the Polaris host.
+                    The work runs on the computer or tablet you're using right
+                    now, not on the Polaris server. That's usually much faster.
+                    The first time you use this filter, it'll download the
+                    AI model (a one-time wait); after that it's instant.
                 </p>
                 <!-- GX-10: when the client is on plain HTTP and HTTPS
                      is available, surface the upgrade. Without WebGPU
@@ -8426,12 +8450,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                            && httpsInfo?.httpsEnabled
                            && httpsInfo?.exampleHttpsUrls?.length"
                    style="margin-top:8px; color:var(--accent-warn,#f59e0b)">
-                    ⚠ Plain HTTP, Chrome blocks WebGPU here.
+                    ⚠ You're on the slow address. Open
                     <a :href="httpsInfo.exampleHttpsUrls[0]"
-                       x-text="'Open ' + httpsInfo.exampleHttpsUrls[0] + ' instead'"
+                       x-text="httpsInfo.exampleHttpsUrls[0]"
                        style="color:inherit; text-decoration: underline"></a>
-                    for GPU-accelerated inference (one-time
-                    cert-trust click in Chrome).
+                    instead to use your device's graphics card,
+                    much faster. (The browser will ask you to trust
+                    the certificate the first time, just click through.)
                 </p>
             </div>
             <!-- Browser-mode progress (separate from the CLI progress
@@ -8451,9 +8476,11 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
             <p class="hint text-warn"
                x-show="(graxpert.modalOp === 'deconvolution' || graxpert.modalOp === 'denoising')
                        && graxpertPathsLookLikeLights()">
-                ⚠ Decon and Denoise are best applied to integrated masters,
-                not individual lights. The selection looks like lights,
-                results may degrade SNR rather than improve it.
+                ⚠ These look like single-exposure photos. Denoise and
+                Deconvolution work much better on a stacked image
+                (the combined result of many exposures). Running
+                them on single shots can make the picture worse,
+                not better.
             </p>
 
             <!-- BGE controls -->
@@ -8567,6 +8594,83 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                 <button class="btn btn-primary"
                         x-show="!graxpert.currentJob"
                         @click="graxpertStartRun()">Start</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CROP modal: pick a rectangle on the source preview, server
+         slices the FITS, writes a `_crop.fits` sibling. Same visual
+         frame as the GraXpert modal (siril-modal classes) so the user
+         sees a consistent shape. The ROI picker is a plain canvas
+         overlay on top of the preview JPEG; mouse-drag updates a
+         `cropRoi` rectangle in DISPLAY pixels, then `cropStartRun`
+         converts to IMAGE pixels using the natural-width ratio
+         before posting. -->
+    <div class="siril-modal" x-show="crop.open" x-cloak
+         @click.self="cropClose()"
+         @keydown.escape.window="cropClose()">
+        <div class="siril-modal-frame">
+            <h2 style="font-size:18px;font-weight:600;display:flex;align-items:center;gap:8px">
+                ✂ Crop
+            </h2>
+            <p class="hint">
+                Drag a rectangle on the picture below to choose the area
+                you want to keep. Everything outside the rectangle gets
+                trimmed off. The original file stays untouched —
+                Polaris saves a new file named
+                <code><span x-text="crop.outputName || '&lt;source&gt;_crop.fits'"></span></code>
+                next to it.
+            </p>
+
+            <!-- Picker stage: preview <img> + overlay <canvas> stacked.
+                 Canvas captures pointer events so we can draw a
+                 rectangle. The img is the actual image source —
+                 letting it size naturally so aspect-ratio is right;
+                 the canvas matches via position:absolute + same w/h. -->
+            <div class="crop-picker"
+                 x-show="crop.previewUrl"
+                 @mousedown.prevent="cropOnPointerDown($event)"
+                 @mousemove="cropOnPointerMove($event)"
+                 @mouseup="cropOnPointerUp($event)"
+                 @mouseleave="cropOnPointerUp($event)"
+                 @touchstart.prevent="cropOnPointerDown($event)"
+                 @touchmove.prevent="cropOnPointerMove($event)"
+                 @touchend="cropOnPointerUp($event)">
+                <img class="crop-picker-img"
+                     :src="crop.previewUrl"
+                     @load="cropOnImageLoaded($event)"
+                     alt="Source preview" draggable="false">
+                <div class="crop-picker-overlay"
+                     x-show="crop.roi.startX !== null"
+                     :style="cropRoiStyle()"></div>
+            </div>
+
+            <p class="hint" x-show="crop.error" style="color:var(--danger)"
+               x-text="crop.error"></p>
+
+            <p class="hint" x-show="crop.roi.startX !== null && !crop.busy">
+                Selected: <strong x-text="cropRoiSummary()"></strong>
+            </p>
+
+            <div class="siril-modal-progress" x-show="crop.busy">
+                <p class="hint">Cropping... saving the new file.</p>
+            </div>
+
+            <div class="siril-modal-actions">
+                <button class="btn" @click="cropClose()" :disabled="crop.busy">
+                    Cancel
+                </button>
+                <button class="btn"
+                        @click="cropResetRoi()"
+                        :disabled="crop.roi.startX === null || crop.busy">
+                    Clear rectangle
+                </button>
+                <button class="btn btn-primary"
+                        @click="cropStartRun()"
+                        :disabled="crop.roi.startX === null || crop.busy">
+                    <span x-show="!crop.busy">Crop and save</span>
+                    <span x-show="crop.busy">Saving...</span>
+                </button>
             </div>
         </div>
     </div>

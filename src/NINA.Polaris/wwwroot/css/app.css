@@ -6095,6 +6095,45 @@ label select.input-sm {
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
 }
+/* CROP modal picker. The <img> sizes naturally so the aspect ratio
+   stays right; the overlay <div> tracks the user-drawn rectangle in
+   DISPLAY pixels (cropOnPointerMove computes left/top/w/h against
+   the picker's bounding rect). Cursor is a crosshair so the
+   "drag a rectangle" affordance is obvious.
+
+   max-height is capped so even a 4K master doesn't push the modal
+   off-screen on a laptop — the img scales down via the natural
+   width / height ratio. */
+.crop-picker {
+    position: relative;
+    display: inline-block;
+    margin: 12px 0;
+    max-width: 100%;
+    cursor: crosshair;
+    user-select: none;
+    -webkit-user-select: none;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.crop-picker-img {
+    display: block;
+    max-width: 100%;
+    max-height: 60vh;
+    object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+.crop-picker-overlay {
+    position: absolute;
+    border: 2px dashed #4caf50;
+    background: rgba(76, 175, 80, 0.15);
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
 .siril-modal-actions {
     display: flex;
     justify-content: flex-end;

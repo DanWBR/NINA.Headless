@@ -1098,6 +1098,35 @@ function ninaApp() {
             browserProgress: 0,
         },
 
+        // CROP-2: drag-rectangle crop picker state. open=true while the
+        // modal is showing. roi tracks the rectangle the user drew in
+        // DISPLAY pixels (relative to the picker's bounding rect), with
+        // start/end captured on pointer down / up. cropStartRun converts
+        // DISPLAY → IMAGE coords using imgNaturalWidth / imgDisplayWidth
+        // ratio before POST /api/crop/run so the server slice math
+        // operates in real pixel space regardless of how the browser
+        // scaled the preview.
+        crop: {
+            open: false,
+            sourcePath: '',     // single file path being cropped
+            outputName: '',     // basename for the toast on success
+            previewUrl: '',     // /api/files/preview?path=... + auth token
+            error: '',
+            busy: false,
+            // Drag rectangle in DISPLAY-pixel coordinates relative to
+            // .crop-picker bounding rect. Both null when no selection.
+            roi: { startX: null, startY: null, endX: null, endY: null },
+            dragging: false,
+            // Captured on <img> load — image's intrinsic dimensions
+            // (the FITS source resolution) and how the browser laid
+            // them out after max-height/max-width clamping. Used to
+            // convert ROI back to image coords before POST.
+            imgNaturalWidth: 0,
+            imgNaturalHeight: 0,
+            imgDisplayWidth: 0,
+            imgDisplayHeight: 0,
+        },
+
         // GX-5: editor "AI" section runtime state. Single in-flight
         // button across the section, pipelines are heavy + don't
         // compose with each other anyway. phase is a user-facing
@@ -11652,6 +11681,200 @@ function ninaApp() {
             if (this.graxpert._pollTimer) {
                 clearInterval(this.graxpert._pollTimer);
                 this.graxpert._pollTimer = null;
+            }
+        },
+
+        // ── CROP picker ───────────────────────────────────────────────
+        // Pre-BGE/Decon/Denoise step the user normally does in GraXpert:
+        // pick a rectangle on the master, slice it out as a new FITS
+        // sibling _crop.fits, and continue processing on the smaller
+        // frame. Same JPEG preview pipe FILES uses for thumbnails;
+        // ROI is drawn in DISPLAY pixels, converted to IMAGE pixels
+        // at submit-time using the natural-vs-display width ratio
+        // captured when the <img> loaded.
+
+        cropOpenForFile(path) {
+            if (!path) return;
+            this.crop.sourcePath = path;
+            // Derive a friendly output name for the toast/log so the
+            // user can locate the result without copying the full
+            // server path.
+            const base = path.split(/[\\/]/).pop() || path;
+            const stem = base.replace(/\.[^.]+$/, '');
+            this.crop.outputName = stem + '_crop.fits';
+            // Reuse the same FILES preview endpoint that ships the
+            // auto-stretched JPEG of the master — keeps the preview
+            // visually consistent with what the user sees in FILES.
+            this.crop.previewUrl = this.authUrl(
+                '/api/files/preview?path=' + encodeURIComponent(path)
+                + '&maxDim=2400');
+            this.crop.error = '';
+            this.crop.busy = false;
+            this.cropResetRoi();
+            this.crop.imgNaturalWidth = 0;
+            this.crop.imgNaturalHeight = 0;
+            this.crop.imgDisplayWidth = 0;
+            this.crop.imgDisplayHeight = 0;
+            this.crop.open = true;
+        },
+
+        cropClose() {
+            this.crop.open = false;
+            this.crop.previewUrl = '';
+            this.cropResetRoi();
+        },
+
+        cropResetRoi() {
+            this.crop.roi = { startX: null, startY: null, endX: null, endY: null };
+            this.crop.dragging = false;
+        },
+
+        // Capture natural-vs-display dimensions once the <img> finishes
+        // loading. These ratios are what cropStartRun uses to map the
+        // ROI back to image pixel coordinates the server slicer expects.
+        cropOnImageLoaded(ev) {
+            const img = ev.target;
+            if (!img) return;
+            this.crop.imgNaturalWidth = img.naturalWidth || 0;
+            this.crop.imgNaturalHeight = img.naturalHeight || 0;
+            this.crop.imgDisplayWidth = img.clientWidth || img.width || 0;
+            this.crop.imgDisplayHeight = img.clientHeight || img.height || 0;
+        },
+
+        _cropPointerXY(ev, pickerEl) {
+            const rect = pickerEl.getBoundingClientRect();
+            // Touch events nest the coords under changedTouches[0];
+            // fall back to clientX/Y for plain pointer/mouse.
+            const cx = ev.clientX != null ? ev.clientX :
+                (ev.changedTouches && ev.changedTouches[0] ? ev.changedTouches[0].clientX : 0);
+            const cy = ev.clientY != null ? ev.clientY :
+                (ev.changedTouches && ev.changedTouches[0] ? ev.changedTouches[0].clientY : 0);
+            // Clamp to picker bounds so a drag that overshoots the
+            // image edge still produces a valid ROI snapped to the
+            // displayed image area.
+            const x = Math.max(0, Math.min(rect.width, cx - rect.left));
+            const y = Math.max(0, Math.min(rect.height, cy - rect.top));
+            return { x, y };
+        },
+
+        cropOnPointerDown(ev) {
+            if (this.crop.busy) return;
+            const picker = ev.currentTarget;
+            const { x, y } = this._cropPointerXY(ev, picker);
+            this.crop.dragging = true;
+            this.crop.roi = { startX: x, startY: y, endX: x, endY: y };
+        },
+
+        cropOnPointerMove(ev) {
+            if (!this.crop.dragging) return;
+            const picker = ev.currentTarget;
+            const { x, y } = this._cropPointerXY(ev, picker);
+            this.crop.roi.endX = x;
+            this.crop.roi.endY = y;
+        },
+
+        cropOnPointerUp(ev) {
+            if (!this.crop.dragging) return;
+            this.crop.dragging = false;
+            // Treat a click-without-drag (< 4 px in either axis) as a
+            // clear instead of an accidental zero-size rectangle.
+            const r = this.crop.roi;
+            if (r.startX == null || Math.abs((r.endX || 0) - (r.startX || 0)) < 4
+                                  || Math.abs((r.endY || 0) - (r.startY || 0)) < 4) {
+                this.cropResetRoi();
+            }
+        },
+
+        // Returns inline-style props for the .crop-picker-overlay <div>.
+        // Always normalises (startX/Y → top-left) so a drag in any
+        // direction produces a sane rectangle.
+        cropRoiStyle() {
+            const r = this.crop.roi;
+            if (r.startX == null || r.endX == null) return 'display:none';
+            const x = Math.min(r.startX, r.endX);
+            const y = Math.min(r.startY, r.endY);
+            const w = Math.abs(r.endX - r.startX);
+            const h = Math.abs(r.endY - r.startY);
+            return `left:${x}px; top:${y}px; width:${w}px; height:${h}px;`;
+        },
+
+        // Human-readable summary shown beneath the picker. Reports
+        // dimensions in IMAGE pixels (what the server will actually
+        // crop), not display pixels — that's the number the user
+        // cares about because it determines final master resolution.
+        cropRoiSummary() {
+            const img = this._cropRoiInImagePixels();
+            if (!img) return '';
+            return `${img.width} × ${img.height} px`;
+        },
+
+        // Returns ROI in IMAGE pixel coordinates (server-space) or null
+        // if the user hasn't drawn yet or the <img> hasn't measured.
+        _cropRoiInImagePixels() {
+            const r = this.crop.roi;
+            if (r.startX == null || r.endX == null) return null;
+            const dispW = this.crop.imgDisplayWidth;
+            const dispH = this.crop.imgDisplayHeight;
+            const natW = this.crop.imgNaturalWidth;
+            const natH = this.crop.imgNaturalHeight;
+            if (!dispW || !dispH || !natW || !natH) return null;
+            const sx = natW / dispW;
+            const sy = natH / dispH;
+            const x = Math.round(Math.min(r.startX, r.endX) * sx);
+            const y = Math.round(Math.min(r.startY, r.endY) * sy);
+            const w = Math.round(Math.abs(r.endX - r.startX) * sx);
+            const h = Math.round(Math.abs(r.endY - r.startY) * sy);
+            // Clamp inside image bounds — float math + the picker's
+            // bounding-rect clamp can leave a 1-pixel overshoot near
+            // the right/bottom edges that the server would reject.
+            const cw = Math.min(w, natW - x);
+            const ch = Math.min(h, natH - y);
+            if (cw < 1 || ch < 1) return null;
+            return { x, y, width: cw, height: ch };
+        },
+
+        async cropStartRun() {
+            if (this.crop.busy) return;
+            const roi = this._cropRoiInImagePixels();
+            if (!roi) {
+                this.crop.error = 'Draw a rectangle on the image first.';
+                return;
+            }
+            this.crop.busy = true;
+            this.crop.error = '';
+            try {
+                const body = {
+                    paths: [this.crop.sourcePath],
+                    x: roi.x, y: roi.y,
+                    width: roi.width, height: roi.height
+                };
+                const r = await this.apiFetch('/api/crop/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await r.json();
+                const fail = (data.failures && data.failures[0]);
+                if (fail) {
+                    this.crop.error = fail.error || 'Crop failed';
+                    return;
+                }
+                const ok = (data.results && data.results[0]);
+                const out = ok ? (ok.outputPath.split(/[\\/]/).pop() || ok.outputPath)
+                               : this.crop.outputName;
+                this.toast(`Cropped — saved as ${out}`, 'success');
+                this.cropClose();
+                // Refresh the FILES library so the new sibling shows
+                // up without a manual rescan. RescanAsync on the
+                // server already runs but the client cache needs a
+                // re-fetch.
+                if (typeof this.studioRescan === 'function') {
+                    try { this.studioRescan(); } catch {}
+                }
+            } catch (e) {
+                this.crop.error = (e && e.message) ? e.message : String(e);
+            } finally {
+                this.crop.busy = false;
             }
         },
 

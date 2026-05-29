@@ -15,7 +15,65 @@
   verbatim, only the prose around them was translated.
 -->
 
-# Current chapter: Pi 5 hardening sweep (auth + transport + native deps)
+# Current chapter: CROP — quick rectangular trim before BGE/decon/denoise
+
+> The user normally drops their masters into GraXpert to crop off
+> the noisy stack borders before running BGE, deconvolution, or
+> denoise. Bringing that pre-trim step into Polaris removes the
+> "leave the app to crop" interruption in the FILES → process
+> chain.
+
+## What shipped
+
+- **CROP-1 (backend, `CropService` + `/api/crop/run` + 6 tests)**
+  Pure FITS in / FITS out: `FITSReader.Read(stream)` → slice each
+  channel plane via `Array.Copy(src, srcRow, out, dstRow, w)` →
+  `FITSWriter.Write(BaseImageData, path)`. Writes a `_crop.fits`
+  sibling next to the source, preserves source dims in custom
+  keywords (`CROPSRCX/Y/W/H`). Validates bounds + non-empty.
+  Endpoint accepts batch (list of paths, single ROI in image
+  pixels), calls `FrameLibraryService.RescanAsync()` after writes
+  so STUDIO and FILES auto-refresh.
+
+- **CROP-2 (Crop modal + drag-rectangle picker)**
+  Modal reuses the `siril-modal` shell so it visually matches BGE
+  / decon / denoise. The picker is an `<img>` (auto-stretched
+  JPEG from `/api/files/preview`) plus an overlay `<div>` that
+  tracks the user-drawn rectangle in DISPLAY pixels. On submit
+  the client converts to IMAGE pixels using the natural-vs-display
+  width ratio captured when the `<img>` loaded — keeps server
+  slice math in real pixel space regardless of how the browser
+  scaled the preview. Touch + mouse both supported via pointer
+  helpers. Click-without-drag clears instead of producing a
+  zero-size rectangle.
+
+- **CROP-3 (FILES toolbar button)**
+  `✂ Crop` button next to the GraXpert dropdown in the FILES
+  toolbar. Gated to a single non-directory selection (picker is a
+  single-image overlay); opens the modal pre-loaded with that
+  path.
+
+- **CROP-4 (Editor controls header button)**
+  Same `cropOpenForFile` entry point added to the editor's
+  controls header next to ✨ Auto / ↺ Reset. User can crop the
+  master they're editing without going back to FILES; the
+  resulting `_crop.fits` shows up in the library and can be
+  reopened in the editor as the new working frame.
+
+## Verification
+
+- `dotnet build src/NINA.Polaris/NINA.Polaris.csproj` clean
+- `dotnet test --filter "FullyQualifiedName~CropService"`
+  → 6/6 pass (mono region, RGB plane preservation, out-of-bounds
+  throws, zero-size throws, missing-file throws, full-image
+  round-trip)
+- Manual UX: open a master in FILES → click ✂ Crop → drag a
+  rectangle on the preview → "Crop and save" → toast confirms
+  `{stem}_crop.fits` + the file appears in the library.
+
+---
+
+# Previous chapter: Pi 5 hardening sweep (auth + transport + native deps)
 
 > No big new feature this round. A diagnostic session on the user's
 > Pi 5 surfaced a cascade of issues that LOOKED like 5 different

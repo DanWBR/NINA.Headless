@@ -196,6 +196,7 @@ builder.Services.AddSingleton<NINA.Polaris.Services.Onnx.OnnxFileService>();
 builder.Services.AddSingleton<FileBrowserService>();
 builder.Services.AddSingleton<NINA.Polaris.Services.External.SirilService>();
 builder.Services.AddSingleton<NINA.Polaris.Services.External.GraXpertService>();
+builder.Services.AddSingleton<NINA.Polaris.Services.CropService>();
 // Host CPU + memory sampler. AddResourceMonitoring wires the
 // platform-specific provider (Job Objects on Windows, cgroups on
 // Linux). HostMetricsService loops in the background, exposes the
@@ -528,6 +529,7 @@ app.MapOnnxEndpoints();
 app.MapFilesEndpoints();
 app.MapSirilEndpoints();
 app.MapGraXpertEndpoints();
+app.MapCropEndpoints();
 
 // GX-1: kick off an initial walk of the configured Onnx:ModelsPath
 // so /api/onnx/manifest is populated before the first browser request.

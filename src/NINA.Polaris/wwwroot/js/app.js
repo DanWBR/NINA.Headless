@@ -4312,7 +4312,17 @@ function ninaApp() {
 
         // Aim the engine camera at RA (hours) / Dec (degrees). fovDeg
         // optional. Use this in place of the old Celestial.rotate.
+        //
+        // Pushes observer + UTC FIRST so the bridge's RA/Dec → Alt/Az
+        // conversion uses fresh inputs. Without this, look-ats issued
+        // long after page-load (e.g. clicking "Center" on a Tonight
+        // card after the user has been parked on another tab for an
+        // hour) compute against a stale LST and pan to the wrong patch
+        // of sky — sometimes below the horizon, which looks like
+        // "Center didn't do anything". Cheap: three postMessage calls,
+        // delivered in order to the iframe.
         _skyLookAt(raHours, decDeg, fovDeg, objectName) {
+            this._skyPushObserverAndTime();
             this._skySendMessage({
                 type: 'look-at',
                 raDeg: (raHours || 0) * 15,
@@ -4367,17 +4377,23 @@ function ninaApp() {
                             this._skyEngineMissingToasted = true;
                             this.toast('Sky engine not built yet, run scripts/build-stellarium-web.sh', 'warn', 6000);
                         }
+                        // SWE-4: push observer + time BEFORE draining
+                        // queued messages. If a queued message is a
+                        // look-at, its RA/Dec → Alt/Az conversion
+                        // depends on observer.latitude / utc /
+                        // longitude being set — otherwise the bridge
+                        // silently returns false and the pan never
+                        // happens (this was the "Center from Tonight
+                        // doesn't centre" bug). Pushing first means
+                        // the queued look-at lands on a configured
+                        // engine. Replacing the engine's default of
+                        // Geneva, 2009 also keeps the sky reflecting
+                        // the active site + current UTC immediately.
+                        this._skyPushObserverAndTime();
                         // Flush anything queued before the bridge was up.
                         const queued = this._skyPending || [];
                         this._skyPending = [];
                         for (const q of queued) this._skySendMessage(q);
-                        // SWE-4: push the observer + time once the
-                        // engine is ready so the sky reflects the
-                        // active site + current UTC immediately
-                        // rather than the engine's default (Geneva,
-                        // 2009, that's what the unconfigured engine
-                        // starts at).
-                        this._skyPushObserverAndTime();
                         // SWE: honour persisted DSS toggle. The bridge
                         // defaults to ON during data-source registration,
                         // so we only need to push a message if the user

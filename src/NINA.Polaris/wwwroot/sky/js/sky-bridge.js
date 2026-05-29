@@ -1299,6 +1299,23 @@
                     __from: 'sky-bridge'
                 });
                 console.log('[Sky] engine onReady fired — bridge v' + BRIDGE_VERSION);
+                // Turn on real-time clock advance. core.time_speed defaults
+                // to 0 in stellarium-web-engine (built for snapshot
+                // rendering with user-controlled scrubbing), which made
+                // the sky freeze at whatever observer.utc the parent last
+                // pushed — so the Sun/Moon/planets visibly froze in
+                // between the 30 s parent pushes, and a tab-switch left
+                // the engine showing a stale sky until the next push or
+                // a page reload. With time_speed = 1, the engine
+                // advances observer.tt at real-time rate every frame
+                // and the parent's periodic push only serves as a
+                // drift-correction.
+                try {
+                    stel.core.time_speed = 1;
+                    console.log('[Sky] time_speed = 1 (real-time clock)');
+                } catch (e) {
+                    console.warn('[Sky] could not set time_speed=1', e);
+                }
                 // SWE-5: install the change-hook that emits 'center'
                 // when the user drags the sky. Must run AFTER stel is
                 // populated; before that stel.change is undefined.

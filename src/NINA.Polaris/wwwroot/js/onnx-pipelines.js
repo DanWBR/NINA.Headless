@@ -391,22 +391,52 @@
             if (onProgress) onProgress('cache-hit');
         } else {
             if (onProgress) onProgress('downloading', 0);
-            const resp = await fetch('/api/onnx/model/' + family + '/' + version);
+            // AUTH: inject the bearer token apiFetch normally adds.
+            // onnx-pipelines.js is a plain script that doesn't have
+            // access to the Alpine `auth.token` reactive ref, so we
+            // read the same storage slot app.js writes to.
+            const token = sessionStorage.getItem('polaris_token')
+                || localStorage.getItem('polaris_token');
+            const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+            const resp = await fetch('/api/onnx/model/' + family + '/' + version,
+                { headers });
             if (!resp.ok) throw new Error('Model fetch HTTP ' + resp.status);
             // Stream the body so we can report progress incrementally
             // for the multi-hundred-MB downloads.
             const total = parseInt(resp.headers.get('content-length') || '0', 10);
+            // XFER: also register a transfer chip so the activity bar
+            // shows the same progress the modal does — useful when the
+            // user clicks away from the editor while the download runs.
+            const xferLabel = 'AI model ' + family + ' v' + version;
+            const transferId =
+                (window.__polarisRegisterTransfer
+                    && window.__polarisRegisterTransfer({
+                        label: xferLabel, direction: 'down', total
+                    })) || null;
             const reader = resp.body.getReader();
             const chunks = [];
             let received = 0;
-            for (; ;) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                chunks.push(value);
-                received += value.byteLength;
-                if (total > 0 && onProgress) {
-                    onProgress('downloading', received / total);
+            try {
+                for (; ;) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    received += value.byteLength;
+                    if (total > 0 && onProgress) {
+                        onProgress('downloading', received / total);
+                    }
+                    if (transferId != null && window.__polarisTransferProgress) {
+                        window.__polarisTransferProgress(transferId, received);
+                    }
                 }
+                if (transferId != null && window.__polarisTransferEnd) {
+                    window.__polarisTransferEnd(transferId, true);
+                }
+            } catch (e) {
+                if (transferId != null && window.__polarisTransferEnd) {
+                    window.__polarisTransferEnd(transferId, false);
+                }
+                throw e;
             }
             const merged = new Uint8Array(received);
             let off = 0;

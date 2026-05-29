@@ -15,7 +15,283 @@
   verbatim, only the prose around them was translated.
 -->
 
-# Current plan: Auto-edit in the editor (AUTOED-1..3)
+# Current plan: Transfer progress bars in the activity bar (XFER-1..4)
+
+> Reading order top-to-bottom (newest first): XFER → AUTOED → CAT
+> → FW → SHUT → REFSUG → HELP → AUTH → MFOC → WIFI → CCALB → CC →
+> GX → NET → ED → SWE → PA → SIM → Pi 5 packaging → CLST → LSTR →
+> VIDEO → PHD2 deep → RIGS → PREVIEW → Activity bar →
+> Siril+GraXpert → FILES → DSLR → Gap analysis → STUDIO →
+> Weather → Tonight.
+>
+> One small bug fix shipped alongside XFER without its own plan
+> section: 14 bare `fetch()` sites in app.js were bypassing the
+> auth header injection that AUTH-1..5 wired into apiFetch. The
+> editor upload was the visible symptom (HTTP 401 when dragging a
+> FITS into the editor on the Pi 5). Swept every `/api/*` bare
+> fetch over to `this.apiFetch` so the bearer token rides along —
+> the three `/api/auth/*` sites stay bare on purpose (the auth
+> middleware exempts them so they can run pre-login).
+
+## Context
+
+The activity bar (NET-1) already showed ambient rx / tx rates,
+but the user had no way to tell *what specifically* was in
+flight: a 73 MB editor open looked identical to a 200 MB ONNX
+model download or a 60 MB FITS upload. ASIAIR-style per-transfer
+progress bars let you see "Upload M31.fits 42 / 73 MB" or
+"AI model bge v1.0.1 ↓ 180 / 208 MB" the moment a transfer
+starts, so big operations don't masquerade as a frozen UI.
+
+The HTTP layer already routes everything through `apiFetch`
+(post-AUTH-4 sweep), which uses `fetch()`. fetch has two
+limitations that need workarounds for real progress:
+
+- **Upload progress**: not exposed at all by fetch. Must drop to
+  XMLHttpRequest, which still gives upload.onprogress events.
+- **Download progress**: exposed via `response.body.getReader()`
+  (ReadableStream), but each caller would have to wire its own
+  reader + counter.
+
+Decisions confirmed via AskUserQuestion:
+
+- **UI location**: single chip per transfer, parked in the
+  activity bar between the operation chips and the host metrics.
+  Multiple parallel transfers stack horizontally with overflow
+  scroll. Auto-removed ~800ms after completion (3000ms when failed
+  so the error stays readable).
+- **Scope**: all four checkboxes — editor + FILES + ONNX + WS
+  image-stream frames. Maximum coverage.
+
+## Architecture
+
+Two helpers + one piece of state + a chip row in the bar:
+
+### 1. Transfer registry (`transfers` state + helpers)
+
+`src/NINA.Polaris/wwwroot/js/app.js` adds:
+
+```js
+transfers: [],          // array of { id, label, direction, loaded, total, done, ok }
+_nextTransferId: 1,
+
+_transferStart({ label, direction, total }) → id
+_transferProgress(id, loaded)
+_transferEnd(id, ok = true)
+```
+
+`_transferEnd` flips `done=true`, then drops the chip after a
+short hold (800ms for success, 3000ms for failure). Computed
+helpers `formatTransferLine(t)` + `transferPercent(t)` drive the
+chip template; both return null/empty for total=0 so the chip
+falls back to an indeterminate bar.
+
+### 2. `apiUpload(url, body, opts)` — XHR-based
+
+Drop-in replacement for `apiFetch` when the body has a meaningful
+size. Returns a `Response` so callers can still `.json()` /
+`.blob()` / `.text()` the same way. Internally:
+
+- Sets the same `Authorization: Bearer` header `apiFetch` injects.
+- Pre-computes the upload total from `FormData` (sum of file sizes
+  + string lengths) / `ArrayBuffer.byteLength` / string length.
+- Registers a transfer chip, then wires `xhr.upload.onprogress`
+  to call `_transferProgress` + the existing `_netTx` byte
+  counter (so the ambient activity-bar TX rate stays correct).
+- On completion wraps the response blob + headers into a real
+  `Response` object before resolving.
+- 401 → calls `_handle401` exactly like `apiFetch`.
+
+### 3. `apiDownload(url, opts)` — fetch + ReadableStream
+
+Wraps `apiFetch` (so all existing auth + dedup + 401 plumbing
+keeps working) then pumps the response body through a reader,
+counting chunks. Buffers the chunks back into a Blob + Response
+so callers see no difference. `Content-Length` header drives the
+determinate bar; missing → indeterminate animation.
+
+### 4. Chip row in the activity bar
+
+`wwwroot/index.html` (`.activity-bar-transfers`): one chip per
+in-flight transfer, with direction arrow (`↑` green for uploads,
+`↓` blue for downloads, red on failure), label, mini progress
+bar, and `loaded / total` text. Indeterminate bars use a CSS
+gradient + `xfer-indeterminate` keyframe sweep.
+
+`wwwroot/css/app.css` (`.activity-transfer*`): pill style
+mirroring the existing chips but a bit roomier so the bar fits.
+`@keyframes xfer-indeterminate` cycles a partial fill across the
+track for downloads without a known total.
+
+### 5. Bridge for non-Alpine scripts
+
+`onnx-pipelines.js` runs as a plain script (outside Alpine
+scope), so it can't see `this._transferStart`. `init()` publishes
+three globals as a tiny RPC bridge:
+
+```js
+window.__polarisRegisterTransfer(opts) → id
+window.__polarisTransferProgress(id, loaded)
+window.__polarisTransferEnd(id, ok)
+```
+
+`onnx-pipelines.js` calls these from its own internal stream
+reader so the AI-model download (typically 200-500 MB on first
+use) shows the same chip as everything else.
+
+### 6. Sites wired in v1
+
+- **Editor upload** (`/api/editor/upload`) — via `apiUpload`.
+  Label: "Upload {filename}".
+- **Editor raw download** (`/api/editor/raw/{sessionId}`) — via
+  `apiDownload`. Label: "Load editor session". This is the
+  50-200 MB blob ED-6 fetches when WASM compute mode opens; used
+  to feel like a freeze on first open.
+- **FILES download-zip** (`/api/files/download-zip`) — via
+  `apiDownload`. Label: "Download {fileName}.zip".
+- **ONNX model fetch** (`/api/onnx/model/{family}/{version}`) —
+  via the global bridge from `onnx-pipelines.js`. Also fixed an
+  AUTH miss (bare `fetch()` without bearer token would have 401-d
+  here too).
+- **ONNX save** (`/api/onnx/save`) — via `apiUpload`. Label:
+  "Save {filename}".
+- **ONNX source pixels** (`/api/onnx/source-pixels?path=`) — via
+  `apiDownload`. Label: "Read {filename}".
+- **Livestack upload-result** (`/api/livestack/upload-result?...`)
+  — via `apiUpload`. Label: "Save stack ({target})".
+- **WS image-stream frames** — `handleImageFrame` registers a
+  pre-completed transfer (loaded = total = byteLength) so the
+  chip flashes the frame size for ~800ms. Skipped for frames
+  < 64 KB (thumbnails / stats-only payloads). Browsers don't
+  expose mid-frame WS progress, so a "done" pulse is the best
+  we can do — fills the gap between rx-rate ambient signal and
+  "I just received a 12 MB frame" awareness.
+
+## Phases (one commit each)
+
+### XFER-1: state + apiUpload + apiDownload helpers
+
+- `transfers` Alpine state + `_transferStart` / `_transferProgress`
+  / `_transferEnd` helpers
+- `apiUpload(url, body, opts)` (XHR-based, returns Response)
+- `apiDownload(url, opts)` (fetch + reader, returns Response)
+- `formatTransferLine` + `transferPercent` template helpers
+
+### XFER-2: activity bar chip row + CSS
+
+- `.activity-bar-transfers` insert between ops chips and host
+  metrics
+- `.activity-transfer*` styles (pill, bar, indeterminate sweep,
+  up/down/failed colour variants)
+
+### XFER-3: migrate the large-payload sites
+
+- editor upload + raw + files download-zip + onnx model + onnx
+  save + onnx source-pixels + livestack upload-result
+- `init()` publishes the `window.__polaris*Transfer*` bridge for
+  `onnx-pipelines.js`
+- AUTH header injected into the bare fetch in `onnx-pipelines.js`
+  (latent bug: would have 401-d once AUTH-1..5 landed)
+
+### XFER-4: WS image-stream frame chip
+
+- `handleImageFrame` registers a pre-completed transfer with the
+  frame size as both loaded + total, so the chip flashes the
+  format ("JPEG frame" / "RAW frame") + size for ~800ms and
+  fades. Threshold 64 KB to skip thumbnails / stats-only payloads.
+
+## Files created / modified
+
+### Modified
+- `src/NINA.Polaris/wwwroot/js/app.js` — `transfers` state,
+  helpers, `apiUpload`, `apiDownload`, init() bridge globals,
+  six call-site migrations, WS image-frame chip
+- `src/NINA.Polaris/wwwroot/js/onnx-pipelines.js` — AUTH header +
+  bridge wiring around the model fetch stream reader
+- `src/NINA.Polaris/wwwroot/index.html` — `.activity-bar-transfers`
+  chip row
+- `src/NINA.Polaris/wwwroot/css/app.css` — `.activity-transfer*`
+  pill + bar + indeterminate animation
+
+### Reuse of existing code
+
+- **`apiFetch`** (AUTH-3 / AUTH-4) — apiDownload wraps it so all
+  the auth + dedup + 401 retries keep working without duplication
+- **`_netTx` / `_netRx`** (NET-1) — apiUpload calls `_netTx` on
+  each upload progress delta so the ambient rate stays accurate
+  (apiDownload doesn't call `_netRx` to avoid double-counting,
+  the Performance API entry covers it)
+- **`_handle401`** (AUTH-3) — apiUpload calls it for 401
+  responses, so an expired token mid-upload pops the login overlay
+- **`formatBytes`** (existing helper) — drives the chip's
+  loaded/total display
+
+## End-to-end verification
+
+### Smoke
+
+1. Drag a 60 MB FITS into the editor → activity bar shows
+   "↑ Upload {name}.fits" chip with bar going 0→100% in real time
+2. Editor opens → "↓ Load editor session" chip flashes during the
+   raw-buffer fetch
+3. FILES → multi-select 5 large FITS → Download as ZIP →
+   "↓ Download {dir}-files.zip" chip with progress
+4. AI section → BGE for the first time (model not yet cached) →
+   "↓ AI model bge v1.0.1" chip showing the 208 MB download
+5. Live stack running → each frame arrival flashes a brief
+   "↓ JPEG frame" or "↓ RAW frame" chip with the frame size
+
+### Edge cases
+
+- Server doesn't send `Content-Length` (chunked transfer) → bar
+  goes indeterminate (CSS gradient sweep) but the chip still
+  appears + dismisses on completion
+- 401 mid-upload (token expired) → chip shows red "failed" with
+  the longer 3s hold, login overlay opens automatically
+- Multiple parallel transfers (editor upload + AI model download
+  + WS frames) → chips stack horizontally, scroll if they overflow
+- Small frame < 64 KB → no WS chip (avoids spam)
+
+## Design notes
+
+- **Why XHR for upload + fetch for download**: fetch() doesn't
+  expose request body progress events. Two paths is unavoidable
+  without losing real progress. The XHR upload path wraps
+  everything back into a `Response` so callers see one API.
+- **Why not double-count `_netRx` in `apiDownload`**: the
+  Performance API entry already credits the bytes when the
+  network transfer completes. Per-chunk `_netRx` from the reader
+  would double-bill. Per-chunk `_netTx` in `apiUpload` is fine
+  because Performance API doesn't surface request body size.
+- **Why pre-completed chip for WS frames**: WebSocket API
+  delivers binary messages as a single `onmessage` after the full
+  message arrives. There's no mid-message progress to surface.
+  A "done flash" with the size is the most we can do without
+  changing the wire protocol.
+- **Why 64 KB threshold for WS frames**: thumbnails, stats-only
+  pushes, and tiny preview deltas would spam the chip row at
+  high frame rates. 64 KB cleanly excludes those while still
+  catching real capture frames (a 6Mpix uint16 buffer is ~12 MB).
+
+## Out of scope (deferred)
+
+- **Camera exposure-time progress bar**: would tie a determinate
+  bar to elapsed/total exposure during a capture. Requires the
+  server to publish `exposureStartUtc` + `exposureSec` on the
+  status payload reliably (today the camera state string is the
+  only signal). Reasonable follow-up.
+- **WS message-size header preamble**: if the server sent a small
+  text message ("incoming-frame size=N") before the binary, the
+  client could show a real progress bar during the WS download.
+  Requires protocol change.
+- **Bandwidth limit per transfer**: e.g. cap an editor open at
+  10 MB/s to keep room for the live stack stream. Out of scope.
+- **Retry button on failed chip**: failed chip just hangs for 3s
+  then disappears. No re-fire affordance. Reasonable follow-up.
+
+---
+
+# Previous plan: Auto-edit in the editor (AUTOED-1..3)
 
 > Reading order top-to-bottom (newest first): AUTOED → CAT → FW →
 > SHUT → REFSUG → HELP → AUTH → MFOC → WIFI → CCALB → CC → GX →

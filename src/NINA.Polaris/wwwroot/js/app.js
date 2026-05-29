@@ -616,6 +616,18 @@ function ninaApp() {
             rxPulse: false, txPulse: false,
             rxTotal: 0, txTotal: 0,
         },
+
+        // XFER-1: in-flight HTTP transfers. ASIAIR-style per-transfer
+        // progress bar in the activity bar so the user sees real
+        // upload / download progress instead of guessing from the
+        // ambient rxRate / txRate. Wired by apiUpload (XHR-based, gives
+        // upload.onprogress) and apiDownload (fetch + ReadableStream
+        // reader, counts bytes as chunks arrive). Each transfer has:
+        //   { id, label, direction: 'up'|'down', loaded, total, done }
+        // total=0 means "size unknown" — the chip shows an indeterminate
+        // bar. done=true triggers a short "✓ Done" hold before removal.
+        transfers: [],
+        _nextTransferId: 1,
         // Internal: deltas accumulated since last meter tick. Tick
         // reads + zeroes them. Separate from the rolling window samples
         // so the meter can compute "bytes in last 3s" cheaply.
@@ -1358,6 +1370,16 @@ function ninaApp() {
             setInterval(() => this.updateClock(), 1000);
             this.updateFov();
 
+            // XFER: expose transfer helpers to plain scripts that can't
+            // reach the Alpine component directly (e.g. onnx-pipelines.js
+            // running outside Alpine scope). They register a transfer
+            // chip + update its progress as their internal stream
+            // reader pulls bytes, so the activity bar shows the same
+            // download the AI-modal progress indicator does.
+            window.__polarisRegisterTransfer = (opts) => this._transferStart(opts);
+            window.__polarisTransferProgress = (id, loaded) => this._transferProgress(id, loaded);
+            window.__polarisTransferEnd = (id, ok) => this._transferEnd(id, ok);
+
             // SKY engine refresh on tab-visibility return. Browsers
             // pause requestAnimationFrame while a tab is hidden, so
             // the stellarium-web-engine's internal observer.utc
@@ -1705,6 +1727,223 @@ function ninaApp() {
         async apiGet(url, opts = {}) {
             const resp = await this.apiFetch(url, opts);
             return resp.json();
+        },
+
+        // ─── XFER-1: per-transfer progress helpers ─────────────────────
+
+        _transferStart({ label, direction, total }) {
+            const id = this._nextTransferId++;
+            this.transfers.push({
+                id,
+                label: label || (direction === 'up' ? 'Uploading' : 'Downloading'),
+                direction,
+                loaded: 0,
+                total: total || 0,
+                done: false,
+                startedAt: Date.now()
+            });
+            return id;
+        },
+        _transferProgress(id, loaded) {
+            const t = this.transfers.find(x => x.id === id);
+            if (t) t.loaded = loaded;
+        },
+        _transferEnd(id, ok = true) {
+            const t = this.transfers.find(x => x.id === id);
+            if (!t) return;
+            t.done = true;
+            t.ok = ok;
+            // Hold the completed chip for ~800ms so the user gets to
+            // see the 100% / Done state, then drop it. Failed transfers
+            // hang around a bit longer so the error stays readable.
+            const holdMs = ok ? 800 : 3000;
+            setTimeout(() => {
+                const i = this.transfers.findIndex(x => x.id === id);
+                if (i >= 0) this.transfers.splice(i, 1);
+            }, holdMs);
+        },
+
+        // Format helper used by the activity-bar template.
+        formatTransferLine(t) {
+            const loaded = this.formatBytes(t.loaded);
+            if (t.total > 0) {
+                return `${loaded} / ${this.formatBytes(t.total)}`;
+            }
+            return loaded;
+        },
+        transferPercent(t) {
+            if (!t.total || t.total <= 0) return null;
+            return Math.max(0, Math.min(100, Math.round(100 * t.loaded / t.total)));
+        },
+
+        // XHR-based upload that exposes real per-chunk progress.
+        // fetch() doesn't surface upload progress events (only download
+        // via response.body reader), so for any POST/PUT that ships a
+        // meaningful payload size we go through XHR. Drop-in replacement
+        // for apiFetch: returns a Response so callers can .json() etc.
+        //
+        // opts: { method?, headers?, label?, signal? }
+        apiUpload(url, body, opts = {}) {
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                const method = opts.method || 'POST';
+                xhr.open(method, url);
+
+                // AUTH: same bearer token apiFetch injects.
+                if (this.auth?.token) {
+                    xhr.setRequestHeader('Authorization', 'Bearer ' + this.auth.token);
+                }
+                // Caller-provided headers (Content-Type for JSON etc).
+                // FormData: don't set Content-Type, the browser writes
+                // the multipart boundary header for us.
+                const headers = opts.headers || {};
+                for (const [k, v] of Object.entries(headers)) {
+                    if (!(body instanceof FormData) ||
+                        k.toLowerCase() !== 'content-type') {
+                        xhr.setRequestHeader(k, v);
+                    }
+                }
+
+                // Estimate the upload payload size up front so the
+                // progress chip can render a determinate bar.
+                let total = 0;
+                if (body instanceof FormData) {
+                    for (const [, v] of body) {
+                        if (v?.size != null) total += v.size;
+                        else if (typeof v === 'string') total += v.length;
+                    }
+                } else if (body instanceof ArrayBuffer) {
+                    total = body.byteLength;
+                } else if (body?.byteLength != null) {
+                    total = body.byteLength;
+                } else if (typeof body === 'string') {
+                    total = body.length;
+                }
+
+                const tid = this._transferStart({
+                    label: opts.label, direction: 'up', total
+                });
+
+                let lastLoaded = 0;
+                xhr.upload.onprogress = (e) => {
+                    if (!e.lengthComputable && total <= 0) {
+                        // Indeterminate — best we can do is advance the
+                        // "loaded" counter so the chip shows activity.
+                        this._transferProgress(tid, e.loaded);
+                    } else {
+                        this._transferProgress(tid, e.loaded);
+                    }
+                    const delta = e.loaded - lastLoaded;
+                    if (delta > 0) this._netTx(delta);
+                    lastLoaded = e.loaded;
+                };
+
+                xhr.onload = () => {
+                    this._transferEnd(tid, xhr.status >= 200 && xhr.status < 400);
+                    if (xhr.status === 401) {
+                        let payload = null;
+                        try { payload = JSON.parse(xhr.responseText); } catch {}
+                        this._handle401(payload);
+                        reject(new ApiError(401, xhr.responseText));
+                        return;
+                    }
+                    if (xhr.status < 200 || xhr.status >= 300) {
+                        reject(new ApiError(xhr.status, xhr.responseText));
+                        return;
+                    }
+                    // Wrap as a Response so callers can .json()/.blob()/
+                    // .text() like with apiFetch.
+                    const blob = xhr.response instanceof Blob
+                        ? xhr.response
+                        : new Blob([xhr.responseText || '']);
+                    const responseHeaders = new Headers();
+                    const raw = xhr.getAllResponseHeaders().trim().split(/[\r\n]+/);
+                    for (const line of raw) {
+                        const idx = line.indexOf(':');
+                        if (idx > 0) {
+                            responseHeaders.set(
+                                line.slice(0, idx).trim(),
+                                line.slice(idx + 1).trim());
+                        }
+                    }
+                    resolve(new Response(blob, {
+                        status: xhr.status,
+                        statusText: xhr.statusText,
+                        headers: responseHeaders
+                    }));
+                };
+                xhr.onerror = () => {
+                    this._transferEnd(tid, false);
+                    reject(new Error('Upload network error'));
+                };
+                xhr.onabort = () => {
+                    this._transferEnd(tid, false);
+                    reject(new Error('Upload aborted'));
+                };
+                if (opts.signal) {
+                    opts.signal.addEventListener('abort', () => xhr.abort());
+                }
+                xhr.responseType = 'blob';
+                xhr.send(body);
+            });
+        },
+
+        // fetch + ReadableStream reader so we can show real download
+        // progress without losing the response object. The body is
+        // buffered as it streams so callers can still call .arrayBuffer()
+        // / .json() / .blob() on the returned Response. apiFetch handles
+        // auth + 401 + abort + deduplication; we just wrap the body read.
+        async apiDownload(url, opts = {}) {
+            const resp = await this.apiFetch(url, opts);
+            if (!resp || !resp.ok) return resp;
+
+            const totalHeader = resp.headers.get('Content-Length');
+            const total = totalHeader ? parseInt(totalHeader, 10) : 0;
+            const tid = this._transferStart({
+                label: opts.label, direction: 'down', total
+            });
+
+            // Older browsers / opaque responses skip the stream and just
+            // fall back to .blob(). Still gives the user a one-shot
+            // completion mark even without mid-transfer progress.
+            if (!resp.body || !resp.body.getReader) {
+                try {
+                    const blob = await resp.blob();
+                    this._transferProgress(tid, blob.size);
+                    this._transferEnd(tid, true);
+                    return new Response(blob, {
+                        status: resp.status,
+                        statusText: resp.statusText,
+                        headers: resp.headers
+                    });
+                } catch (e) {
+                    this._transferEnd(tid, false);
+                    throw e;
+                }
+            }
+
+            try {
+                const reader = resp.body.getReader();
+                const chunks = [];
+                let loaded = 0;
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    loaded += value.byteLength;
+                    this._transferProgress(tid, loaded);
+                }
+                this._transferEnd(tid, true);
+                const blob = new Blob(chunks);
+                return new Response(blob, {
+                    status: resp.status,
+                    statusText: resp.statusText,
+                    headers: resp.headers
+                });
+            } catch (e) {
+                this._transferEnd(tid, false);
+                throw e;
+            }
         },
 
         // ---- AUTH-3: client-side auth boot + login + wizard ----------
@@ -2906,6 +3145,27 @@ function ninaApp() {
                     + ' · serverMode=' + (this.liveStackStatus?.mode || 'full'));
             }
 
+            // XFER-4: ephemeral chip for each image-stream frame that
+            // arrived. WebSocket API doesn't expose mid-frame progress
+            // (browsers buffer until the full message is delivered),
+            // so we can't show "downloading 40%" — but we CAN flash a
+            // chip showing the frame size + format the moment it lands.
+            // Skip tiny frames (< 64 KB) which are usually thumbnails
+            // or stats-only payloads and would just spam the chip row.
+            //
+            // The chip starts already at 100% (loaded=total=byteLength)
+            // and _transferEnd's natural ~800ms hold gives the user
+            // time to read it before it fades.
+            if (arrayBuffer.byteLength >= 64 * 1024) {
+                const tid = this._transferStart({
+                    label: (isJpeg ? 'JPEG' : 'RAW') + ' frame',
+                    direction: 'down',
+                    total: arrayBuffer.byteLength
+                });
+                this._transferProgress(tid, arrayBuffer.byteLength);
+                this._transferEnd(tid, true);
+            }
+
             if (isJpeg) {
                 this._renderJpegFrame(arrayBuffer);
             } else {
@@ -3340,10 +3600,13 @@ function ninaApp() {
 
             this.toast('Uploading stack...', 'info');
             try {
-                const resp = await this.apiFetch(url, {
+                // XFER: apiUpload via XHR so the activity bar shows
+                // upload progress for the multi-MB stacked buffer
+                // (24Mpix mono 16-bit ~46 MB; RGB triples it).
+                const resp = await this.apiUpload(url, bytes, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/octet-stream' },
-                    body: bytes
+                    label: 'Save stack (' + target + ')'
                 });
                 if (!resp.ok) {
                     const err = await resp.text();
@@ -5522,7 +5785,13 @@ function ninaApp() {
                 return;
             }
             try {
-                const r = await this.apiFetch('/api/editor/raw/' + this.editorState.session);
+                // XFER: apiDownload so the user sees a real progress
+                // bar — the raw working buffer is typically 50-200 MB
+                // (full-res 8-bit per channel) and used to feel like
+                // a freeze on first open.
+                const r = await this.apiDownload(
+                    '/api/editor/raw/' + this.editorState.session,
+                    { label: 'Load editor session' });
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const w  = parseInt(r.headers.get('X-Width')  || '0', 10);
                 const h  = parseInt(r.headers.get('X-Height') || '0', 10);
@@ -5592,10 +5861,13 @@ function ninaApp() {
             try {
                 const fd = new FormData();
                 fd.append('file', file);
-                // NET-1: account for the upload size (Performance API
-                // doesn't surface request body size, only response).
-                if (file?.size) this._netTx(file.size);
-                const r = await this.apiFetch('/api/editor/upload', { method: 'POST', body: fd });
+                // XFER: apiUpload via XHR so the activity-bar transfer
+                // chip can show real bytes-uploaded progress (fetch()
+                // doesn't expose request body progress). _netTx is
+                // wired inside apiUpload's upload.onprogress.
+                const r = await this.apiUpload('/api/editor/upload', fd, {
+                    label: 'Upload ' + (file.name || 'file')
+                });
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 const j = await r.json();
                 await this.editorLoad(j.path);
@@ -6713,10 +6985,15 @@ function ninaApp() {
             try {
                 const fileName = (this.files.cwd.split(/[\\/]+/).filter(Boolean).pop()
                                   || 'polaris') + '-files.zip';
-                const r = await this.apiFetch('/api/files/download-zip', {
+                // XFER: apiDownload streams the ZIP body through the
+                // ReadableStream reader so the activity-bar transfer
+                // chip can show progress. Zips of 50+ FITS easily run
+                // into GB; without a bar the browser just looks frozen.
+                const r = await this.apiDownload('/api/files/download-zip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ paths, rootForNames: this.files.cwd, fileName })
+                    body: JSON.stringify({ paths, rootForNames: this.files.cwd, fileName }),
+                    label: 'Download ' + fileName
                 });
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const blob = await r.blob();
@@ -11681,8 +11958,12 @@ function ninaApp() {
         },
 
         async _onnxFetchSourcePixels(path) {
-            const r = await this.apiFetch('/api/onnx/source-pixels?path='
-                + encodeURIComponent(path));
+            // XFER: source-pixels can be tens of MB for a stretched
+            // full-res ushort buffer, show the transfer chip so the
+            // user sees the wait isn't a freeze.
+            const r = await this.apiDownload(
+                '/api/onnx/source-pixels?path=' + encodeURIComponent(path),
+                { label: 'Read ' + (path.split(/[\\/]/).pop() || 'pixels') });
             if (!r.ok) return null;
             const w  = parseInt(r.headers.get('X-Width'),    10);
             const h  = parseInt(r.headers.get('X-Height'),   10);
@@ -11706,7 +11987,12 @@ function ninaApp() {
             // Blob constructor accepts BufferSource without copying.
             const blob = new Blob([pixels.buffer]);
             fd.append('pixels', blob, 'pixels.bin');
-            const r = await this.apiFetch('/api/onnx/save', { method: 'POST', body: fd });
+            // XFER: apiUpload so the activity bar shows real upload
+            // progress (these FITS blobs can be 50+ MB after GraXpert
+            // expands the working buffer).
+            const r = await this.apiUpload('/api/onnx/save', fd, {
+                label: 'Save ' + (source.split(/[\\/]/).pop() || 'ONNX result')
+            });
             if (!r.ok) {
                 const e = await r.json().catch(() => null);
                 throw new Error(e?.error || ('HTTP ' + r.status));

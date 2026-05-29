@@ -6215,6 +6215,128 @@ label select.input-sm {
     transition: width 0.3s ease;
 }
 
+/* ─── XFER-2: per-transfer progress chips ─────────────────────────
+   ASIAIR-style "I'm transferring N MB right now" indicator. Each
+   chip is a separate visual unit from the activity ops chips
+   above, because transfers can land at any moment (not tied to a
+   captured operation) and benefit from a slightly more prominent
+   bar so the user can read the bytes/total at a glance.
+   --------------------------------------------------------------- */
+.activity-bar-transfers {
+    display: flex;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex: 0 1 auto;
+    min-width: 0;
+    margin-left: 8px;
+    scrollbar-width: thin;
+}
+.activity-bar-transfers::-webkit-scrollbar { height: 3px; }
+.activity-bar-transfers::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+}
+.activity-transfer {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(33, 150, 243, 0.10);
+    border: 1px solid rgba(33, 150, 243, 0.4);
+    color: var(--text-primary);
+    white-space: nowrap;
+    font-size: 11px;
+    line-height: 1.2;
+    max-width: 260px;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+.activity-transfer-up {
+    background: rgba(76, 175, 80, 0.10);
+    border-color: rgba(76, 175, 80, 0.4);
+}
+.activity-transfer-down {
+    background: rgba(33, 150, 243, 0.10);
+    border-color: rgba(33, 150, 243, 0.4);
+}
+.activity-transfer-done {
+    /* Brief "✓ done" fade — same colour family but dimmer +
+       slightly muted so the eye recognises completion without
+       being startled by a colour flip. */
+    opacity: 0.65;
+}
+.activity-transfer-failed {
+    background: rgba(244, 67, 54, 0.10);
+    border-color: rgba(244, 67, 54, 0.5);
+}
+.activity-transfer-arrow {
+    font-weight: 700;
+    font-size: 12px;
+}
+.activity-transfer-up .activity-transfer-arrow { color: #86efac; }
+.activity-transfer-down .activity-transfer-arrow { color: #93c5fd; }
+.activity-transfer-failed .activity-transfer-arrow { color: #fca5a5; }
+.activity-transfer-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+    color: var(--text-secondary);
+}
+.activity-transfer-bar {
+    display: inline-block;
+    width: 60px;
+    height: 5px;
+    background: rgba(0, 0, 0, 0.45);
+    border-radius: 3px;
+    overflow: hidden;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
+.activity-transfer-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.2s linear;
+}
+.activity-transfer-up .activity-transfer-fill {
+    background: #4caf50;
+}
+.activity-transfer-down .activity-transfer-fill {
+    background: var(--accent);
+}
+.activity-transfer-failed .activity-transfer-fill {
+    background: var(--danger);
+}
+/* Indeterminate bar (server didn't send Content-Length) cycles a
+   short fill across the track so the user sees activity without a
+   percent number. */
+.activity-transfer-fill.is-indeterminate {
+    width: 30% !important;
+    background: linear-gradient(90deg,
+        transparent,
+        var(--accent) 50%,
+        transparent);
+    animation: xfer-indeterminate 1.1s linear infinite;
+}
+.activity-transfer-up .activity-transfer-fill.is-indeterminate {
+    background: linear-gradient(90deg,
+        transparent,
+        #4caf50 50%,
+        transparent);
+}
+@keyframes xfer-indeterminate {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(333%); }
+}
+.activity-transfer-bytes {
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    color: var(--text-secondary);
+    min-width: 0;
+}
+
 /* NET-1: client↔server throughput readout. Two rows stacked tight
    so the pair occupies a single bar-height slot. Pulse animation
    brightens + scales the arrow briefly when bytes arrive, giving

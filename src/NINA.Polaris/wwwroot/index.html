@@ -4809,24 +4809,69 @@
                 <div class="autorun-pane" x-show="autorunTab === 'sequence'">
                 <div class="autorun-list-col">
 
-                <!-- Empty state -->
-                <div class="sequence-empty" x-show="sequence.length === 0">
-                    <p>No sequence loaded</p>
-                    <p class="hint">Add targets from Sky Explorer or use the + button below</p>
+                <!-- Compact options bar (Meridian / Dither / End Events).
+                     Three pill-style chips that show a one-line summary
+                     + ON/OFF state. Click expands the matching settings
+                     panel inline; the bar replaces the 3 stacked
+                     accordions that used to eat ~120 px of fixed
+                     vertical space even when collapsed. -->
+                <div class="autorun-options-bar">
+                    <button class="autorun-option-chip"
+                            :class="{ active: seqMfExpanded, 'chip-on': mfSettings.enabled }"
+                            @click="seqMfExpanded = !seqMfExpanded; if (seqMfExpanded) { seqDitherExpanded = false; seqEndExpanded = false; }">
+                        <span x-show="mfSettings.enabled" class="chip-dot chip-dot-on"></span>
+                        <span x-show="!mfSettings.enabled" class="chip-dot"></span>
+                        <strong>Meridian Flip</strong>
+                        <span class="chip-state" x-text="mfSettings.enabled ? 'ON' : 'OFF'"></span>
+                        <span class="chip-detail" x-show="mfState !== 'idle'"
+                              x-text="' · ' + mfState.toUpperCase()"></span>
+                    </button>
+                    <button class="autorun-option-chip"
+                            :class="{ active: seqDitherExpanded, 'chip-on': ditherSettings.enabled }"
+                            @click="seqDitherExpanded = !seqDitherExpanded; if (seqDitherExpanded) { seqMfExpanded = false; seqEndExpanded = false; }">
+                        <span x-show="ditherSettings.enabled" class="chip-dot chip-dot-on"></span>
+                        <span x-show="!ditherSettings.enabled" class="chip-dot"></span>
+                        <strong>Dithering</strong>
+                        <span class="chip-state" x-text="ditherSettings.enabled ? 'ON' : 'OFF'"></span>
+                        <span class="chip-detail" x-show="ditherSettings.enabled && seqStatus?.dithersIssued >= 0"
+                              x-text="' · ' + (seqStatus?.dithersIssued || 0) + ' dithered'"></span>
+                    </button>
+                    <button class="autorun-option-chip"
+                            :class="{ active: seqEndExpanded, 'chip-on': endActionsHasAny() }"
+                            @click="seqEndExpanded = !seqEndExpanded; if (seqEndExpanded) { seqMfExpanded = false; seqDitherExpanded = false; }">
+                        <span x-show="endActionsHasAny()" class="chip-dot chip-dot-on"></span>
+                        <span x-show="!endActionsHasAny()" class="chip-dot"></span>
+                        <strong>End Events</strong>
+                        <span class="chip-state" x-text="endActionsSummary() || 'none'"></span>
+                    </button>
                 </div>
 
-                <!-- Sequence item list -->
+                <!-- Empty state -->
+                <div class="sequence-empty" x-show="sequence.length === 0">
+                    <p>No sequence loaded — click <strong>+ Add</strong> below or pick a target in Sky Explorer.</p>
+                </div>
+
+                <!-- Sequence item card grid. CSS Grid auto-fit with
+                     a 280px min so items reflow as horizontal cards
+                     on desktop and collapse to one-column on narrow
+                     viewports. Replaces the previous vertical stack
+                     that wasted ~70% of horizontal real estate on
+                     wide screens. -->
                 <div class="sequence-list" x-show="sequence.length > 0">
                     <template x-for="(item, i) in sequence" :key="i">
                         <div class="sequence-item" :class="{
                             'seq-active': seqStatus && seqStatus.currentItemIndex === i && seqState === 'running',
                             'seq-done': seqStatus && i < seqStatus.currentItemIndex
                         }">
-                            <span class="seq-num" x-text="i + 1"></span>
-                            <div class="seq-item-body">
+                            <div class="seq-card-head">
+                                <span class="seq-num" x-text="i + 1"></span>
                                 <input type="text" class="seq-input seq-input-name" x-model="item.name"
                                        :disabled="seqState === 'running'"
                                        :placeholder="item.imageType === 'LIGHT' ? 'Target name' : (item.imageType || 'LIGHT').toLowerCase() + ' set'">
+                                <button class="btn btn-sm btn-icon-only" @click="removeSequenceItem(i)"
+                                        :disabled="seqState === 'running'" title="Remove">&times;</button>
+                            </div>
+                            <div class="seq-item-body">
                                 <!-- Frame-type pill selector (Light / Bias / Flat / Dark) -->
                                 <div class="seq-type-pills">
                                     <template x-for="t in ['LIGHT','BIAS','FLAT','DARK']" :key="t">
@@ -4911,22 +4956,20 @@
                                     <span x-text="(seqStatus?.items?.[i]?.completed || 0) + '/' + item.count"></span>
                                 </div>
                             </div>
-                            <button class="btn btn-sm btn-icon-only" @click="removeSequenceItem(i)"
-                                    :disabled="seqState === 'running'" title="Remove">&times;</button>
                         </div>
                     </template>
                 </div>
 
-                <!-- Meridian flip settings panel -->
-                <div class="seq-dither-panel">
-                    <div class="seq-dither-header" @click="seqMfExpanded = !seqMfExpanded">
-                        <span x-text="seqMfExpanded ? '▾' : '▸'"></span>
-                        <strong>Meridian Flip</strong>
-                        <label class="seq-dither-toggle" @click.stop>
+                <!-- Meridian flip settings panel.
+                     Header lives in the .autorun-options-bar chip
+                     above; this is just the expandable body. -->
+                <div class="seq-dither-panel" x-show="seqMfExpanded">
+                    <div class="autorun-option-body-head">
+                        <label class="seq-dither-toggle">
                             <input type="checkbox" x-model="mfSettings.enabled" @change="saveMfSettings()"
                                    :disabled="seqState === 'running' && mfState !== 'idle'">
                             <span :class="mfSettings.enabled ? 'text-ok' : 'text-muted'"
-                                  x-text="mfSettings.enabled ? 'ON' : 'OFF'"></span>
+                                  x-text="mfSettings.enabled ? 'Enabled' : 'Disabled'"></span>
                         </label>
                         <span class="text-muted" style="font-size: 11px;" x-show="mfTimeToMeridianMinutes !== null">
                             <span x-show="mfTimeToMeridianMinutes > 0 && mfTimeToMeridianMinutes < 6*60">
@@ -4939,7 +4982,7 @@
                             (<span x-text="mfFlipsCompleted"></span> flipped)
                         </span>
                     </div>
-                    <div class="seq-dither-body" x-show="seqMfExpanded">
+                    <div class="seq-dither-body">
                         <div class="seq-dither-row">
                             <label>Min after meridian
                                 <input type="number" x-model.number="mfSettings.minutesAfterMeridian"
@@ -4982,23 +5025,22 @@
                     </div>
                 </div>
 
-                <!-- Dither settings panel -->
-                <div class="seq-dither-panel">
-                    <div class="seq-dither-header" @click="seqDitherExpanded = !seqDitherExpanded">
-                        <span x-text="seqDitherExpanded ? '▾' : '▸'"></span>
-                        <strong>Dithering</strong>
-                        <label class="seq-dither-toggle" @click.stop>
+                <!-- Dither settings panel.
+                     Header lives in the .autorun-options-bar chip above. -->
+                <div class="seq-dither-panel" x-show="seqDitherExpanded">
+                    <div class="autorun-option-body-head">
+                        <label class="seq-dither-toggle">
                             <input type="checkbox" x-model="ditherSettings.enabled" @change="saveDitherSettings()"
                                    :disabled="seqState === 'running'">
                             <span :class="ditherSettings.enabled ? 'text-ok' : 'text-muted'"
-                                  x-text="ditherSettings.enabled ? 'ON' : 'OFF'"></span>
+                                  x-text="ditherSettings.enabled ? 'Enabled' : 'Disabled'"></span>
                         </label>
                         <span class="text-muted" style="font-size: 11px;" x-show="seqStatus?.dithersIssued >= 0">
                             <span x-text="seqStatus?.dithersIssued || 0"></span> dithered · next in
                             <span x-text="Math.max(0, (ditherSettings.everyNFrames || 1) - (seqStatus?.framesSinceDither || 0))"></span>
                         </span>
                     </div>
-                    <div class="seq-dither-body" x-show="seqDitherExpanded">
+                    <div class="seq-dither-body">
                         <div class="seq-dither-row">
                             <label>Pixels
                                 <input type="number" x-model.number="ditherSettings.pixels"
@@ -5048,14 +5090,10 @@
                     </div>
                 </div>
 
-                <!-- End-of-run actions panel -->
-                <div class="seq-dither-panel">
-                    <div class="seq-dither-header" @click="seqEndExpanded = !seqEndExpanded">
-                        <span x-text="seqEndExpanded ? '▾' : '▸'"></span>
-                        <strong>End Events</strong>
-                        <span class="text-muted" style="font-size: 11px;" x-text="endActionsSummary()"></span>
-                    </div>
-                    <div class="seq-dither-body" x-show="seqEndExpanded">
+                <!-- End-of-run actions panel.
+                     Header lives in the .autorun-options-bar chip above. -->
+                <div class="seq-dither-panel" x-show="seqEndExpanded">
+                    <div class="seq-dither-body">
                         <div class="seq-dither-row">
                             <label class="seq-dither-checkbox">
                                 <input type="checkbox" x-model="endActions.parkMount"

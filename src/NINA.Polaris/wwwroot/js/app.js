@@ -8956,8 +8956,17 @@ function ninaApp() {
             else if (ea.stopTracking) parts.push('stop tracking');
             if (ea.warmCamera) parts.push('warm camera');
             if (ea.disconnectGuider) parts.push('stop PHD2');
-            if (!parts.length) return '(none)';
+            if (!parts.length) return '';
             return parts.join(' · ') + (ea.runOnStop ? ' · also on stop' : '');
+        },
+
+        // Whether ANY end-action toggle is on — used by the compact
+        // autorun-options-bar chip to paint the green status dot
+        // without re-running endActionsSummary's string formatter.
+        endActionsHasAny() {
+            const ea = this.endActions || {};
+            return !!(ea.parkMount || ea.stopTracking || ea.warmCamera
+                   || ea.disconnectGuider || ea.autoGraXpert);
         },
 
         // Debounced PUT, fires 400ms after the last edit

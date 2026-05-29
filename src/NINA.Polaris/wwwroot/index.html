@@ -4688,9 +4688,30 @@
                                     </template>
                                 </div>
                                 <div class="seq-item-params">
+                                    <!-- FLAT-only "Auto" pill. When ON, the sequence engine
+                                         asks FlatWizardService.AutoFindExposureAsync() to
+                                         binary-search the right exposure for this
+                                         (filter, binning) at runtime, using the trained-
+                                         exposure cache as the fast path. Lets users
+                                         without a filter wheel (Flat Wizard sub-tab is
+                                         filter-wheel-gated) still get auto-exposure
+                                         flats from AUTORUN. -->
+                                    <button type="button" class="seq-type-pill"
+                                            x-show="item.imageType === 'FLAT'"
+                                            :class="{ 'seq-type-flat': item.autoExposure }"
+                                            :disabled="seqState === 'running'"
+                                            @click="item.autoExposure = !item.autoExposure"
+                                            :title="item.autoExposure
+                                                ? 'Auto-exposure ON: engine searches the right exposure at runtime'
+                                                : 'Auto-exposure OFF: engine uses the value below'">
+                                        Auto
+                                    </button>
                                     <label>Exp<input type="number" class="seq-input seq-input-num"
                                         x-model.number="item.exposure" list="exposure-presets" step="any" min="0"
-                                        :disabled="seqState === 'running' || item.imageType === 'BIAS'">s</label>
+                                        :disabled="seqState === 'running'
+                                                   || item.imageType === 'BIAS'
+                                                   || (item.imageType === 'FLAT' && item.autoExposure)"
+                                        :placeholder="(item.imageType === 'FLAT' && item.autoExposure) ? 'auto' : ''">s</label>
                                     <label>x<input type="number" class="seq-input seq-input-num"
                                         x-model.number="item.count" step="1" min="1"
                                         :disabled="seqState === 'running'"></label>

@@ -24,8 +24,10 @@ public class SequenceEngineDitherTests {
         var imageWriter = new ImageWriterService(equip, profile, NullLogger<ImageWriterService>.Instance);
         var graXpert = new NINA.Polaris.Services.External.GraXpertService(emptyConfig, profile,
             NullLogger<NINA.Polaris.Services.External.GraXpertService>.Instance);
+        var flatWizard = new FlatWizardService(equip, imageWriter, profile,
+            NullLogger<FlatWizardService>.Instance, emptyConfig);
         return new SequenceEngine(equip, relay, liveStack, phd2, meridianFlip, imageWriter,
-            graXpert, NullLogger<SequenceEngine>.Instance);
+            graXpert, flatWizard, NullLogger<SequenceEngine>.Instance);
     }
 
     [Test]

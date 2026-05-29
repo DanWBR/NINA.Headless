@@ -90,6 +90,92 @@ public class FlatWizardService {
         }
     }
 
+    /// <summary>
+    /// Public lookup into the trained-exposures cache. Returns true and
+    /// the cached exposure if a previous wizard run (or auto-find from
+    /// the sequence engine) converged on this (filter, binning). Used
+    /// by AUTORUN's "Auto" flat-exposure toggle to skip the search
+    /// when a recent value is available.
+    /// </summary>
+    public bool TryGetTrainedExposure(string filter, int binning, out double exposureSec) {
+        var key = $"{filter ?? ""}_bin{Math.Max(1, binning)}";
+        return TrainedExposures.TryGetValue(key, out exposureSec);
+    }
+
+    /// <summary>
+    /// Run the binary-search half of the wizard for a single
+    /// (filter, binning) pair without capturing the N flat frames
+    /// afterwards. Returns the converged exposure (seconds) on
+    /// success, null when convergence fails (bracket collapsed,
+    /// camera missing, etc). On success the result is also written
+    /// to the trained-exposures cache so the next call hits the
+    /// short path via <see cref="TryGetTrainedExposure"/>.
+    ///
+    /// Intended for the AUTORUN sequence engine when the user picked
+    /// "Auto" for a FLAT item's exposure: lookup → if miss, call
+    /// this once before the capture loop, then capture N frames at
+    /// the returned value. This stays out of the wizard's main
+    /// state machine (does not flip <see cref="State"/>) so the
+    /// AUTORUN run owns its own progress reporting.
+    /// </summary>
+    public async Task<double?> AutoFindExposureAsync(
+        string filter, int binning,
+        int targetAdu = 30000, double tolerance = 0.05,
+        double minExposure = 0.1, double maxExposure = 30.0,
+        int maxIterations = 10,
+        CancellationToken ct = default) {
+        var camera = _equip.Camera ?? throw new InvalidOperationException("No camera connected");
+        binning = Math.Max(1, binning);
+
+        // Honour the same trained-exposure seed the main wizard uses, so
+        // the second invocation in a session converges in 1-2 iterations
+        // instead of 5-8.
+        var key = $"{filter ?? ""}_bin{binning}";
+        double exposure = TrainedExposures.TryGetValue(key, out var trained)
+            ? trained
+            : (minExposure + maxExposure) / 2;
+        double lo = minExposure;
+        double hi = maxExposure;
+
+        try { await camera.SetBinningAsync(binning, binning, ct); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Auto-flat: set binning {B} failed", binning); }
+
+        for (int attempt = 0; attempt < maxIterations; attempt++) {
+            ct.ThrowIfCancellationRequested();
+            _logger.LogDebug("Auto-flat search iter {I} for {Filter} bin{B}: trying {Exp}s",
+                attempt + 1, filter, binning, exposure);
+
+            var img = await camera.CaptureAsync(exposure, ct);
+            img.MetaData.Exposure.ImageType = "FLAT";
+            var median = ComputeMedian(img);
+
+            var lower = targetAdu * (1 - tolerance);
+            var upper = targetAdu * (1 + tolerance);
+            if (median >= lower && median <= upper) {
+                _logger.LogInformation(
+                    "Auto-flat converged at {Exp}s for {Filter} bin{B} (median={Med}, target={Tgt})",
+                    exposure, filter, binning, median, targetAdu);
+                TrainedExposures[key] = exposure;
+                SaveTrainedExposures();
+                return exposure;
+            }
+
+            if (median > upper) { hi = exposure; exposure = (lo + exposure) / 2; }
+            else                { lo = exposure; exposure = (exposure + hi) / 2; }
+            exposure = Math.Clamp(exposure, minExposure, maxExposure);
+
+            if (Math.Abs(hi - lo) < 0.001) {
+                _logger.LogWarning("Auto-flat bracket collapsed for {Filter} bin{B} (last median {Med})",
+                    filter, binning, median);
+                return null;
+            }
+        }
+
+        _logger.LogWarning("Auto-flat did not converge for {Filter} bin{B} after {N} iterations",
+            filter, binning, maxIterations);
+        return null;
+    }
+
     private async Task RunAsync(FlatWizardRequest request, CancellationToken ct) {
         var camera = _equip.Camera!;
         var fw = _equip.FilterWheel;

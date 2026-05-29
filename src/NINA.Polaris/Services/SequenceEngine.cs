@@ -55,11 +55,13 @@ public class SequenceEngine {
     public SequenceEndActions EndActions { get; set; } = new();
 
     private readonly NINA.Polaris.Services.External.GraXpertService _graXpert;
+    private readonly FlatWizardService _flatWizard;
 
     public SequenceEngine(EquipmentManager equip, ImageRelayService relay,
         LiveStackingService liveStack, PHD2Client phd2, MeridianFlipService meridianFlip,
         ImageWriterService imageWriter,
         NINA.Polaris.Services.External.GraXpertService graXpert,
+        FlatWizardService flatWizard,
         ILogger<SequenceEngine> logger) {
         _equip = equip;
         _relay = relay;
@@ -68,6 +70,7 @@ public class SequenceEngine {
         _meridianFlip = meridianFlip;
         _imageWriter = imageWriter;
         _graXpert = graXpert;
+        _flatWizard = flatWizard;
         _logger = logger;
     }
 
@@ -217,6 +220,45 @@ public class SequenceEngine {
                         await _equip.Camera.SetBinningAsync(item.Binning, item.Binning, ct);
                     } catch (Exception ex) {
                         _logger.LogWarning(ex, "Set binning failed");
+                    }
+                }
+
+                // FLAT + AutoExposure: ask the wizard to resolve the
+                // exposure for this (filter, binning) before we enter
+                // the capture loop. Try the trained cache first (fast
+                // path; convergence skipped entirely). On miss, run the
+                // binary search and write the result back; subsequent
+                // sessions hit the fast path. On failure we keep
+                // item.Exposure as-is (whatever the user typed) so the
+                // run still produces something, with a warning log.
+                if (imageType == "FLAT" && item.AutoExposure && _equip.Camera != null) {
+                    var filterKey = item.Filter ?? "";
+                    var binKey = Math.Max(1, item.Binning);
+                    if (_flatWizard.TryGetTrainedExposure(filterKey, binKey, out var cachedExp)) {
+                        _logger.LogInformation(
+                            "Auto-flat: using trained exposure {Exp}s for filter '{F}' bin{B}",
+                            cachedExp, filterKey, binKey);
+                        item.Exposure = cachedExp;
+                    } else {
+                        _logger.LogInformation(
+                            "Auto-flat: no trained exposure for filter '{F}' bin{B}, searching...",
+                            filterKey, binKey);
+                        try {
+                            var found = await _flatWizard.AutoFindExposureAsync(
+                                filterKey, binKey, ct: ct);
+                            if (found.HasValue) {
+                                item.Exposure = found.Value;
+                            } else {
+                                _logger.LogWarning(
+                                    "Auto-flat search did not converge; keeping user exposure {Exp}s",
+                                    item.Exposure);
+                            }
+                        } catch (OperationCanceledException) { throw; }
+                        catch (Exception ex) {
+                            _logger.LogWarning(ex,
+                                "Auto-flat search threw; keeping user exposure {Exp}s",
+                                item.Exposure);
+                        }
                     }
                 }
 
@@ -518,6 +560,22 @@ public class SequenceItem {
     /// force exposure=0 for BIAS regardless of what the UI sent.
     /// </summary>
     public string ImageType { get; set; } = "LIGHT";
+
+    /// <summary>
+    /// When true and <see cref="ImageType"/> is FLAT, the engine asks
+    /// <see cref="FlatWizardService.AutoFindExposureAsync"/> to
+    /// binary-search the right exposure for this (filter, binning)
+    /// before capturing <see cref="Count"/> frames. Trained-exposure
+    /// cache short-circuits the search on subsequent runs.
+    ///
+    /// Lets users without a filter wheel (the Flat Wizard sub-tab is
+    /// filter-wheel-gated) still benefit from auto-exposure flats by
+    /// dropping a single FLAT item in AUTORUN with Auto = on.
+    ///
+    /// Ignored for every other ImageType; <see cref="Exposure"/> wins
+    /// when this flag is false.
+    /// </summary>
+    public bool AutoExposure { get; set; }
 }
 
 /// <summary>

@@ -13096,7 +13096,11 @@ function ninaApp() {
                 count: 10,
                 filter: null,
                 ra: null, dec: null,
-                imageType: 'LIGHT'
+                imageType: 'LIGHT',
+                // FLAT auto-exposure toggle (engine reads it when
+                // imageType === 'FLAT'). Defaults off so LIGHT/DARK/
+                // BIAS items don't accidentally pick up the flag.
+                autoExposure: false
             });
         },
 

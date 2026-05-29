@@ -1582,6 +1582,1071 @@ session timeout input.
 # Previous plan: Manual focus assist in the FOCUS tab (MFOC-1..5)
 
 > Previous plan (WIFI, Hotspot ↔ Station management) preserved below.
+
+## Context
+
+The FOCUS tab originally only had **V-curve auto-focus**
+(`AutoFocusService`), which requires a motorised focuser. Users
+with manual focusers (Crayford / rack&pinion without motors,
+budget refractors, kid scopes) arrived at FOCUS and found a grey
+"Connect a focuser to use" — end of story.
+
+Standard solutions in astrophotography:
+1. **Live HFR feedback**: user turns the knob, watches HFR update
+   every few seconds, stops when the number stops dropping.
+2. **Bahtinov mask**: diffraction mask creating 3 spikes on a
+   bright star. When focused, the central spike crosses exactly
+   through the intersection of the other two. Software measures
+   the central-spike offset and says "still 3.5 px off, turn in".
+3. **HFR trend over time**: chart showing "you were at 2.8 px
+   12 s ago, now jumped to 3.4 — you overshot".
+
+Research (Explore phase):
+- `AutoFocusService.MeasureHFR(image, minStars)` reusable: returns
+  `(medianHfr, starCount)` via `StarDetector.Detect()`.
+- `/api/camera/capture` already returns inline stats:
+  `{ status, width, height, stats: { hfr, starCount, ... } }`.
+  Client-side loop just calls it repeatedly.
+- `FrameQualityAnalyzer.LaplacianVariance` (used in VIDEO /
+  planetary): secondary sharpness metric useful when few stars
+  (Bahtinov uses 1 bright star).
+- Chart.js wrapper from V-curve already mountable: clone for
+  time-series.
+- `focusConnected` flag in JS state — gate to show/hide the
+  motorised Auto-focus panel.
+- **Bahtinov**: zero code in repo (`bahtinov|diffraction` no
+  match). Algorithm from scratch.
+- PREVIEW loop exists (`preview.looping` + `previewTakeSnap`) but
+  coupled to PREVIEW. Cleaner to have its own loop for Manual
+  Focus so it doesn't compete with/duplicate state.
+
+**Decisions** (AskUserQuestion):
+- **Bahtinov mask analysis in scope now** — algorithm from
+  scratch, detects 3 spikes + central offset to say "clockwise /
+  stop", visual canvas overlay.
+- **Always available** even with motor connected — user with
+  auto-focus can use Manual for fine-tuning after a V-curve, or
+  just check HFR between exposures. Tabstrip in FOCUS:
+  "Manual" + "Auto V-curve" coexist.
+
+## Architecture
+
+```
+┌─ FOCUS tab ──────────────────────────────────────────────────┐
+│ Tabstrip: [ Manual (default no-motor) ] [ Auto V-curve ]     │
+│                                                               │
+│ ┌─ Manual subtab ──────────────────────────────────────────┐ │
+│ │ ┌─ Live preview canvas + Bahtinov overlay ┐  ┌─ Sidebar ┐│ │
+│ │ │ (frame with star annotations +          │  │ Exp Gain ││ │
+│ │ │  Bahtinov overlay when on)              │  │ ▶ Start  ││ │
+│ │ │                                          │  │ Interval ││ │
+│ │ │                                          │  │ Min stars││ │
+│ │ │                                          │  │          ││ │
+│ │ │                                          │  │ Metrics  ││ │
+│ │ │                                          │  │ HFR 3.42 ││ │
+│ │ │                                          │  │ FWHM 8.05││ │
+│ │ │                                          │  │ Stars 47 ││ │
+│ │ │                                          │  │ Laplace  ││ │
+│ │ │                                          │  │          ││ │
+│ │ │                                          │  │ ☐ Bahtinov│ │
+│ │ │                                          │  │  Offset  ││ │
+│ │ │                                          │  │  -3.4 ▶▶▶││ │
+│ │ │                                          │  │          ││ │
+│ │ │                                          │  │ [Reset]  ││ │
+│ │ └──────────────────────────────────────────┘  └──────────┘│ │
+│ │ ┌─ HFR trend chart (last 60 samples) ─────────────────────┐│ │
+│ │ │ HFR (px)                                                ││ │
+│ │ │    ╱╲                                                   ││ │
+│ │ │   ╱  ╲___                                               ││ │
+│ │ │  ─────────── time →                                     ││ │
+│ │ └─────────────────────────────────────────────────────────┘│ │
+│ └──────────────────────────────────────────────────────────┘ │
+│                                                               │
+│ ┌─ Auto V-curve subtab (existing) ──────────────────────────┐│
+│ │  Steps + Step Size + Exposure + Min Stars + Backlash      ││
+│ │  Start sweep  +  V-curve chart  +  Best position fit       ││
+│ └────────────────────────────────────────────────────────────┘│
+└───────────────────────────────────────────────────────────────┘
+```
+
+### Backend: extend `/api/camera/capture` stats
+
+Add `laplacianVar` to the `stats` block. Cheap computation
+(one 3×3 convolution over center 256×256 ROI), already
+implemented in `FrameQualityAnalyzer.LaplacianVariance`. Doesn't
+break old clients.
+
+### `Services/Focus/BahtinovAnalyzer.cs` (new)
+
+Classic radial-line-integration algorithm:
+
+1. **Locate bright star**: `StarDetector.Detect` on the full
+   image, pick brightest by `Peak` (or user picks via canvas
+   click). Crop 200×200 ROI centred.
+2. **Background subtract**: global median subtracted from ROI.
+3. **Angular sampling**: for each θ ∈ [0°, 180°) at 0.5° steps,
+   integrate intensity along a line through the ROI centre at
+   angle θ. Result: 360-value array.
+4. **Peak-find**: 3 local maxima separated by at least 30°.
+   Those are the 3 spikes.
+5. **Geometry**: from the 3 detected angles, identify the central
+   one (closest to the mean of the other two). Measure
+   perpendicular distance from central spike to midpoint between
+   the other two.
+6. **Output**: `BahtinovResult { OffsetPixels, OffsetSign,
+   InFocusThreshold, StarX, StarY, Spike1, Spike2, Spike3 }`.
+
+Endpoint `POST /api/focus/bahtinov` reuses
+`ImageRelayService`'s last cached frame OR captures fresh;
+returns `BahtinovResult` JSON.
+
+### Frontend: tabstrip + Manual subtab
+
+- Tabstrip with `focusTab = 'manual' | 'auto'`. Default:
+  `focusConnected ? 'auto' : 'manual'`.
+- **Manual subtab**: 2-col layout (canvas left, controls right,
+  chart full-width below) — same pattern as VIDEO Capture.
+- **Auto subtab**: existing V-curve markup unchanged.
+
+### State + capture loop
+
+```js
+manualFocus: {
+    running: false,
+    intervalSec: 2,
+    minStars: 3,
+    showBahtinov: false,
+    bahtinovResult: null,
+    samples: [],          // {t, hfr, fwhm, starCount, laplacian}
+    bestHfr: null,
+    baselineHfr: null
+}
+
+async manualFocusToggle() { /* start/stop loop */ }
+async _manualFocusTick() {
+    const r = await this.apiPost('/api/camera/capture', {
+        exposure: this.preview.exposure || 2.0,
+        gain: this.preview.gain || 100,
+        binning: this.preview.binning || 1,
+        saveToDisk: false
+    });
+    const json = await r.json();
+    this.manualFocus.samples.push({
+        t: Date.now(),
+        hfr: json.stats.hfr,
+        fwhm: json.stats.hfr * 2.355,
+        starCount: json.stats.starCount,
+        laplacian: json.stats.laplacianVar
+    });
+    if (this.manualFocus.samples.length > 60)
+        this.manualFocus.samples.shift();
+    if (json.stats.hfr > 0 &&
+        (this.manualFocus.bestHfr == null
+         || json.stats.hfr < this.manualFocus.bestHfr)) {
+        this.manualFocus.bestHfr = json.stats.hfr;
+    }
+    if (this.manualFocus.showBahtinov) {
+        const b = await this.apiPost('/api/focus/bahtinov', {});
+        this.manualFocus.bahtinovResult = await b.json();
+    }
+    this._renderManualFocusChart();
+}
+```
+
+**Chart**: clone of V-curve wrapper. Time on X, HFR on Y. Marker
+horizontal line for `bestHfr`. Optional FWHM + Laplacian second
+series.
+
+**Bahtinov overlay**: when `showBahtinov=true` + result populated,
+draws over canvas:
+- Cross at `(StarX, StarY)`
+- 3 lines for the spikes
+- Arrow indicating central-spike offset (green if <threshold,
+  amber medium, red if >2× threshold)
+- Label `"Offset: -3.4 px ▶ rotate inward"` (sign → direction)
+
+### Tests + docs
+
+- `BahtinovAnalyzerTests.cs`: 6 synthetic cases (exact in-focus,
+  positive offset, negative offset, faint star error, 2-spike
+  error, 4+ spikes pick the 3 strongest).
+- `docs/user-guide/focus.md` — update with Manual Focus +
+  Bahtinov workflow.
+- README — short bullet.
+
+## Phases (5 commits)
+
+### MFOC-1: backend stats + tabstrip + client-side manual loop
+- `CameraEndpoints.cs`: add `laplacianVar` to response stats.
+- `index.html` FOCUS tab: tabstrip Manual / Auto, Manual subtab
+  with canvas + sidebar (no chart yet).
+- `app.js`: `manualFocus` state, `manualFocusToggle`,
+  `_manualFocusTick`, sample rolling window. Live HFR / FWHM /
+  Stars / Laplacian rendered in sidebar. No chart yet, no
+  Bahtinov.
+
+### MFOC-2: HFR trend chart
+- Clone Chart.js wrapper from V-curve.
+- HFR vs time line, horizontal marker for `bestHfr`.
+- Options to toggle FWHM + Laplacian as additional series (Y2).
+- "Reset baseline" button zeroes samples + bestHfr.
+
+### MFOC-3: BahtinovAnalyzer service + endpoint
+- `Services/Focus/BahtinovAnalyzer.cs` (~200-300 lines).
+- `Endpoints/FocusEndpoints.cs` with
+  `POST /api/focus/bahtinov`.
+- Reuses `ImageRelayService.LastFrame` if available; otherwise
+  400 ("no recent frame; click Capture first").
+- Unit tests with synthetic frames.
+
+### MFOC-4: Bahtinov UI
+- Checkbox "Bahtinov mask" in Manual subtab sidebar.
+- When on, each tick also calls `/api/focus/bahtinov` and draws
+  the overlay on canvas.
+- Numeric readout + directional text ("rotate inward").
+- Tooltip explaining how to install the mask physically.
+
+### MFOC-5: docs + verify
+- `docs/user-guide/focus.md` "Manual focus + Bahtinov" section.
+- README bullet.
+- End-to-end verify in manual / motor / bahtinov scenarios with
+  the simulator.
+
+## Reused code
+
+- `AutoFocusService.MeasureHFR` (or `StarDetector.Detect` directly).
+- `StarDetector.cs` for star detection in Bahtinov.
+- `FrameQualityAnalyzer.LaplacianVariance` for the stats response.
+- `CameraEndpoints.cs:/capture` already returns inline HFR + star
+  count.
+- `ImageRelayService.LastFrame` for Bahtinov reuse.
+- Chart.js V-curve wrapper for the HFR trend chart.
+- Tabstrip pattern from GUIDE / VIDEO / RIGS (`.video-tabstrip`).
+- 2-col VIDEO Capture sidebar layout (`.video-pane >
+  .preview-area + .quick-controls`).
+
+## Verification
+
+- Simulator OR real camera + no-motor scope.
+- FOCUS tab → tabstrip shows Manual selected (no motor).
+- Start loop Exp=2 s, Gain=100, interval=2 s.
+- Every 2 s canvas refreshes + sidebar shows HFR / FWHM / Stars /
+  Laplacian.
+- "Reset baseline" zeroes samples + bestHfr.
+- Turn focuser manually; HFR drops (focus going in), chart shows
+  descending trend, bestHfr updates.
+- Keep turning past best: HFR rises; user sees the overshoot on
+  chart.
+
+### Bahtinov workflow
+- Install Bahtinov mask on scope.
+- Point at bright star (Vega, Sirius).
+- FOCUS → Manual → Start loop → check "Bahtinov mask".
+- Canvas shows overlay: cross at star, 3 spike lines, arrow with
+  offset.
+- Turn focuser: offset drops to ~0 near focus, arrow colour
+  changes red → amber → green.
+- "In focus!" text when offset < 0.5 px.
+
+### Coexistence with auto-focus motor
+- Connect motorised focuser (simulator).
+- FOCUS → tabstrip default Auto, Manual still accessible.
+- Run V-curve, complete.
+- Switch to Manual → user fine-tunes last-minute (turn knob ±1-2
+  steps) confirming via HFR / Bahtinov.
+
+### Graceful failure
+- No camera: ▶ Start disabled, banner "Connect a camera in RIGS
+  first".
+- Frame with no detectable stars: HFR=NaN, banner "No stars
+  detected; increase exposure".
+- Bahtinov without physical mask (3 spikes not detected): endpoint
+  returns `{error: "could not detect 3 diffraction spikes"}`,
+  actionable toast.
+
+## Notes
+
+- **Bahtinov requires a bright star**. If brightest detected has
+  `Peak < 20000` (16-bit), returns "star too faint, point at a
+  magnitude < 3 star like Vega/Sirius".
+- **2 s default loop**: reasonable cadence. User turns knob,
+  waits 2 s, sees result, turns again. Configurable 1-5 s in UI.
+- **HFR vs FWHM**: HFR is native metric (StarDetector). FWHM
+  shown as `HFR * 2.355` (Gaussian approximation). Real per-star
+  gaussian fit deferred.
+- **Laplacian variance** useful when few/no stars (Bahtinov ROI,
+  lunar surface, pure nebula). Second Y axis on chart.
+- **Performance**: 2 s capture loop doesn't stress Pi 4/5.
+  Bahtinov call adds ~50-200 ms.
+- **Persistence**: nothing saved in rig profile — sample buffer
+  in-memory, clears on tab switch / reload (intentional: ad-hoc
+  focus assist).
+
+## Out of scope (deferred)
+
+- Audio beep on HFR improvement (ASIAIR-like feedback).
+- Real per-star gaussian FWHM fit.
+- Donut method (useful for refractors without Bahtinov).
+- Save focus curves historically per rig.
+- Bahtinov for mosaic / multi-star (single-star v1).
+
+---
+
+# Previous plan: WiFi management (Hotspot ↔ Station) on Polaris (WIFI-1..6)
+
+> Previous plan (CCALB, Color Calibration Siril-style) preserved below.
+
+## Context
+
+User wants to distribute Polaris on a Pi 4/5 pre-configured as a
+**WiFi hotspot** (fixed SSID `Polaris-Hotspot`, password
+`polaris1234`). Field workflow:
+
+1. Power the Pi for the first time (no ethernet cable, no monitor).
+2. Connect phone/laptop to the WiFi `Polaris-Hotspot`.
+3. Open `https://polaris-pi.local:5000` (HTTPS is already default).
+4. Accept the self-signed cert once.
+5. **NEW**: go to a "Network" panel and optionally switch to
+   **Station mode**, picking a local WiFi network + typing the
+   password. Polaris applies the switch + the Pi connects to the
+   home network.
+6. User reconnects phone/laptop to the home network +
+   re-accesses `polaris-pi.local:5000` (mDNS keeps resolving).
+
+Today Polaris has **nothing** for network management. `MdnsService`
+only announces, doesn't configure. The `.deb` creates the
+`polaris` user but doesn't touch NetworkManager or hostapd. Whoever
+wants a hotspot has to configure it manually via `nmcli` or
+`raspi-config`.
+
+**Decisions** (AskUserQuestion):
+- **Switch safety**: **try-and-revert 30 s**. When user switches
+  to Station, Polaris applies + waits for DHCP + gateway ping
+  for 30 s. If neither comes, auto-reverts to hotspot. Prevents
+  bricking access when password is wrong / network gone.
+- **Hotspot defaults**: **fixed** — SSID `Polaris-Hotspot`,
+  password `polaris1234`. Astrophotography community memorises
+  once. Paranoid user can change via UI.
+- **Distribution**: **`.deb` + bootstrap script only**. SD card
+  image via pi-gen is a follow-up. The script
+  `/opt/polaris/bin/polaris-wifi-bootstrap.sh` runs once via
+  systemd on first boot post-install and creates the
+  `polaris-hotspot` connection in NetworkManager. Pre-baked image
+  becomes a separate issue.
+
+**Target platform**: **Linux + NetworkManager only**. Pi OS
+Bookworm (Pi 4/5) uses NM by default since 2023. Pi OS Bullseye
+(pre-2023) uses `dhcpcd` + `wpa_supplicant` — we document as
+"v1 not supported, please upgrade to Bookworm". Windows/macOS:
+panel shows "Network management requires Linux + NetworkManager.
+On this OS, manage WiFi via the OS settings." Same pattern as
+`Phd2GuiSessionService`.
+
+## Architecture
+
+Five pieces, all mirroring the pattern established by
+`Phd2GuiSessionService` + `IndiWebManagerService`.
+
+### `Services/Network/NetworkManagerService.cs` (new, BackgroundService)
+
+Singleton + hosted service. Wraps `nmcli`. Identical pattern to
+`Phd2GuiSessionService.cs` (constructor → detection → loop with
+health probe → start/stop → status snapshot).
+
+```csharp
+public class NetworkManagerService : BackgroundService {
+    public bool IsSupportedOs { get; }
+    public bool NmcliInstalled { get; private set; }
+    public string? NmcliVersion { get; private set; }
+    public bool HasWifiInterface { get; private set; }
+    public string? WifiInterface { get; private set; }   // wlan0, wlx*, etc
+
+    public WifiMode CurrentMode { get; private set; }    // Hotspot|Station|Disconnected
+    public string? CurrentSsid { get; private set; }
+    public string? CurrentIp { get; private set; }
+    public int SignalStrength { get; private set; }
+    public string? HotspotSsid { get; private set; }
+    public string? LastError { get; private set; }
+
+    Task<List<WifiNetwork>> ScanAsync(CancellationToken ct);
+    Task<bool> SwitchToStationAsync(string ssid, string password, CancellationToken ct);
+    Task<bool> SwitchToHotspotAsync(CancellationToken ct);
+    Task<bool> SetHotspotCredentialsAsync(string ssid, string password, CancellationToken ct);
+    Task<NetworkSnapshot> GetSnapshotAsync();
+}
+
+public enum WifiMode { Hotspot, Station, Disconnected, Unsupported }
+```
+
+**Detection** (startup `ExecuteAsync`):
+- `which nmcli` → `NmcliInstalled`.
+- `nmcli --version` → `NmcliVersion`.
+- `nmcli -t -f DEVICE,TYPE device status | grep wifi` → first
+  `wifi` iface → `WifiInterface`.
+- If any of these missing, marks `IsSupportedOs = false` or
+  `HasWifiInterface = false` with explanatory `LastError`.
+- 5 s loop: re-parse `nmcli -t -f DEVICE,STATE,CONNECTION
+  device` to refresh `CurrentMode/Ssid/Ip/Signal`.
+
+**Try-and-revert** (`SwitchToStationAsync`):
+
+```csharp
+public async Task<bool> SwitchToStationAsync(string ssid, string password, ct) {
+    var hotspotWasUp = (CurrentMode == WifiMode.Hotspot);
+
+    // 1. Create or update the station connection
+    await RunNmcliAsync($"connection delete polaris-station", ct, ignoreExit: true);
+    var add = await RunNmcliAsync(
+        $"connection add type wifi ifname {WifiInterface} con-name polaris-station " +
+        $"ssid \"{Escape(ssid)}\" wifi-sec.key-mgmt wpa-psk wifi-sec.psk \"{Escape(password)}\"",
+        ct);
+    if (add.ExitCode != 0) { LastError = "nmcli add failed: " + add.Stderr; return false; }
+
+    // 2. Bring station up (auto-downs the hotspot)
+    var up = await RunNmcliAsync($"connection up polaris-station", ct, timeoutMs: 35000);
+    if (up.ExitCode != 0) { await RevertToHotspotAsync(hotspotWasUp, ct); return false; }
+
+    // 3. Wait up to 30 s for IPv4 lease + gateway reachability
+    var ok = await WaitForLeaseAsync(WifiInterface!, TimeSpan.FromSeconds(30), ct);
+    if (!ok) {
+        LastError = "No DHCP lease within 30s, reverting to hotspot";
+        await RevertToHotspotAsync(hotspotWasUp, ct);
+        return false;
+    }
+    return true;
+}
+```
+
+### Endpoints + WS payload
+
+5 new routes under `/api/network`: `GET /status`, `GET /scan`,
+`POST /station`, `POST /hotspot`, `PUT /hotspot/credentials`.
+
+`StatusStreamHandler` gains a `network` sub-object (mode, ssid,
+ip, signal, hotspotSsid, lastError, etc) on the 1 Hz payload.
+
+### Polkit rule (privilege)
+
+The Polaris daemon runs as `polaris:polaris` (systemd
+`User=polaris`). `nmcli connection up/down` needs NetworkManager
+auth, which NM evaluates via polkit. Without a rule, every nmcli
+fails with `Not authorized`.
+
+New file: `packaging/deb/etc/polkit-1/rules.d/50-polaris-nm.rules`:
+
+```javascript
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0
+        && subject.user == "polaris") {
+        return polkit.Result.YES;
+    }
+});
+```
+
+`postinst` already creates the `polaris` user, so the rule applies
+directly. Polkit reload via `systemctl restart polkit` in postinst
+(idempotent).
+
+### Bootstrap script + first-boot service
+
+`/opt/polaris/bin/polaris-wifi-bootstrap.sh`:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+CONN=polaris-hotspot
+SSID="Polaris-Hotspot"
+PSK="polaris1234"
+IFACE=$(nmcli -t -f DEVICE,TYPE device status | awk -F: '$2=="wifi"{print $1; exit}')
+if [ -z "$IFACE" ]; then exit 0; fi
+if nmcli -t connection show | grep -q "^${CONN}:"; then exit 0; fi
+nmcli connection add type wifi ifname "$IFACE" con-name "$CONN" \
+    autoconnect yes ssid "$SSID" \
+    802-11-wireless.mode ap 802-11-wireless.band bg \
+    ipv4.method shared ipv6.method ignore \
+    wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$PSK"
+nmcli connection up "$CONN" || true
+```
+
+Wired via
+`/lib/systemd/system/polaris-wifi-bootstrap.service`:
+
+```ini
+[Unit]
+After=NetworkManager.service
+ConditionPathExists=!/var/lib/polaris/wifi-bootstrap.done
+[Service]
+Type=oneshot
+ExecStart=/opt/polaris/bin/polaris-wifi-bootstrap.sh
+ExecStartPost=/bin/sh -c 'mkdir -p /var/lib/polaris && touch /var/lib/polaris/wifi-bootstrap.done'
+[Install]
+WantedBy=multi-user.target
+```
+
+Enabled via postinst. Sentinel file
+`/var/lib/polaris/wifi-bootstrap.done` prevents re-execution on
+upgrades — but deleting it re-runs the script (idempotent via the
+`grep -q` check).
+
+### UI (Settings → Network panel)
+
+New section in Settings, before "Equipment simulator". Shows
+current mode + SSID + IP, "Switch to Station Mode" + "Edit
+hotspot SSID/pwd" buttons.
+
+**Switch to Station modal**: scan results with signal bars, password
+input, warning explaining the Pi will disconnect from its hotspot
+(user needs to reconnect to the chosen network), 30 s auto-revert
+disclaimer.
+
+Click "Connect & switch" → POST `/api/network/station` → spinner
+"Switching..." → 30 s later `{ok: true, ip: "..."}` or
+`{ok: false, error: "..."}`. Toast with next steps.
+
+**Edge case**: the POST itself arrives via WiFi from the hotspot,
+and the response would go back the same way. When `nmcli connection
+up polaris-station` takes the hotspot down, the TCP socket for the
+POST dies before the response arrives. Mitigation:
+1. Frontend marks `pendingSwitch = true` before the POST.
+2. If the POST times out / connection-resets, frontend assumes
+   "maybe it worked", waits 35 s, tries to reconnect via WS to
+   the new IP (mDNS).
+3. Reconnected WS shows the new `network.mode` in the payload.
+
+If revert fires, the hotspot returns before the timeout → POST
+returns `{ok: false}` normally.
+
+Home tab also gets a small chip ("📡 Hotspot mode ·
+Polaris-Hotspot" or "📡 Station mode · HomeNet5G · IP
+192.168.1.42").
+
+## Phases (6 commits)
+
+### WIFI-1: NetworkManagerService core + detection
+- Service skeleton, `IsSupportedOs` + nmcli/iface detection.
+- `GetSnapshotAsync` parses `nmcli -t -f DEVICE,TYPE,STATE,CONNECTION
+  device`.
+- Tests: parse of nmcli output samples from Pi + Ubuntu desktop.
+
+### WIFI-2: Switch logic + try-and-revert
+- `SwitchToStationAsync` + `RevertToHotspotAsync` +
+  `WaitForLeaseAsync`.
+- `SwitchToHotspotAsync` + `SetHotspotCredentialsAsync`.
+- Input validation (SSID len, PSK len, shell-escape).
+- Tests with mock `RunNmcliAsync` simulating DHCP success,
+  timeout, add-failure; assert revert paths.
+
+### WIFI-3: Endpoints + WS payload
+- `NetworkEndpoints.cs` with 5 routes + platform guards.
+- `StatusStreamHandler` emits `network` block.
+- Smoke via curl.
+
+### WIFI-4: UI panel + scan modal
+- Settings → Network section (idle state, status display).
+- "Switch to Station Mode" modal with scan + password input +
+  warning.
+- "Edit hotspot SSID/pwd" small modal.
+- Home tab chip.
+- Frontend pending-switch + WS reconnect logic for socket-loss
+  case.
+
+### WIFI-5: .deb integration
+- `polaris-wifi-bootstrap.sh` + service.
+- Polkit rule.
+- postinst install + systemctl enable.
+- `control`: depends novos (`network-manager`, `policykit-1`).
+- `postrm`: cleanup of connections on purge.
+- Build + `sudo apt install ./polaris_arm64.deb` on a Pi sandbox
+  → hotspot up automatically, polaris user can `nmcli connection
+  up` without sudo.
+
+### WIFI-6: Docs + verify
+- `docs/user-guide/network-mode.md`.
+- Update `raspberry-pi-setup.md`.
+- README bullet.
+- Manual verify on real Pi.
+
+## Verification
+
+### Smoke install
+1. `sudo apt install ./polaris_arm64.deb` — postinst clean.
+2. Reboot.
+3. After ~30 s, `Polaris-Hotspot` visible on phone.
+4. Connect with `polaris1234` → IP `10.42.0.1` (NM default).
+5. Open `https://polaris-pi.local:5000`, accept cert.
+6. Settings → Network shows: Hotspot · Polaris-Hotspot · 10.42.0.1.
+
+### Switch to Station (happy path)
+7. Click "Switch to Station Mode" → modal with scan.
+8. Pick HomeNet5G, type correct password, click Connect & switch.
+9. UI spinner 10-25 s → toast success with new IP.
+10. Phone loses hotspot WiFi (Pi took it down).
+11. Reconnect phone to HomeNet5G.
+12. Open `https://polaris-pi.local:5000` → home appears.
+13. Settings → Network shows: Station · HomeNet5G · IP · signal
+    78%.
+
+### Switch to Station (revert path)
+14. Click "Switch to Station Mode", pick HomeNet5G, **wrong**
+    password.
+15. UI spinner 30 s → toast "WiFi credentials rejected, reverted
+    to hotspot".
+16. Polaris GUI still accessible on phone (never left the
+    hotspot).
+
+### Back to Hotspot
+17. (In Station mode) Click "Switch to Hotspot Mode".
+18. Pi brings hotspot up, phone loses home WiFi.
+19. Reconnect to Polaris-Hotspot, GUI functional.
+
+### Edit hotspot credentials
+20. Click "Edit hotspot SSID/pwd" → modal.
+21. Change to `My-Polaris` / `house-password` → Save.
+22. Polaris recreates hotspot with new SSID + PSK.
+23. Phone loses WiFi, reconnect to `My-Polaris` with new pwd.
+24. GUI functional.
+
+### Build + tests
+- `dotnet build` clean.
+- `dotnet test` — 700-ish atual + ~10 novos = ~710.
+
+### Windows / macOS regression
+- Windows mini-PC: Settings → Network shows banner "Network
+  management requires Linux + NetworkManager." Endpoints return
+  501. Other tabs work.
+
+## Notes (security, performance, edge cases)
+
+- **Password in transit**: POST `/api/network/station` carries
+  password in plaintext. HTTPS is default on Polaris (self-signed
+  cert on port 5000), so OK on LAN/hotspot. Doc note: "don't
+  expose the panel to the internet without Relay tokens" (same
+  posture as the rest).
+- **Password at rest**: NetworkManager stores in
+  `/etc/NetworkManager/system-connections/*.nmconnection` (mode
+  600, root-owned). Polaris doesn't persist anything in
+  `profile.json` — avoids drift + leak.
+- **Hotspot default credentials**: documented clearly as public
+  (`polaris1234`). User who cares changes on first access.
+- **Polkit reload**: `systemctl restart polkit` in postinst is
+  idempotent. If it fails (polkit not running), silent warning.
+- **Pi without onboard WiFi**: `HasWifiInterface = false`, panel
+  shows "No WiFi interface detected. Ethernet connections are
+  managed externally."
+- **Multi-WiFi**: Pi 5 has 1 onboard; if user plugs USB adapter,
+  first `wifi` reported by `nmcli device status` wins. v1 doesn't
+  support selecting between multiple WiFi NICs.
+- **Concurrent users**: two clients on the hotspot open Network
+  panel simultaneously, one switches — WS payload updates for the
+  other. No race in commands (nmcli serialises via D-Bus).
+- **Hidden SSID**: modal has "Other (hidden SSID)" opening
+  manual SSID + password input.
+- **5 GHz vs 2.4 GHz**: hotspot in 2.4 GHz (`band bg`) for max
+  compatibility with old phones + Pi 4. Pi 5 supports 5 GHz but
+  regulatory-domain confusion isn't worth the risk in v1.
+- **Ethernet connected simultaneously**: NM handles automatically.
+  Show "Ethernet: connected · 192.168.1.50" as read-only info in
+  the panel when detected, no management.
+
+## Out of scope (deferred)
+
+- Pi OS Bullseye/Buster (wpa_supplicant).
+- Bluetooth / Bluetooth tethering.
+- SD card image pre-baked via pi-gen.
+- Captive portal redirect.
+- WPA3 (NM supports it but AP-mode WPA3 breaks too many old
+  clients; stay on WPA2 v1).
+- mTLS / token auth on Polaris itself (separate, on Relay
+  roadmap).
+- Status history (signal vs time chart).
+
+---
+
+# Previous plan: Color Calibration Siril-style (CCALB-0..4)
+
+> Previous plan (CC, Mono LRGB workflow) preserved below.
+
+## Context
+
+After `ChannelCombineService` (CC-1..3) generates an RGB / LRGB
+master, the user jumps straight to GraXpert AI cleanup, then to
+the editor. Missing the step Siril does at this point: **color
+calibration**. Without it, the RGB comes out with cast (usually
+green-yellow from sensor bias + sky glow), and the user has to
+fix manually with Temp/Tint sliders in the editor — eyeball work
+and guesswork.
+
+Siril solves with 3 tools:
+
+1. **Background Neutralisation** (BG neut), picks an empty-sky
+   patch (or auto-detects), equalises background across the 3
+   channels.
+2. **Color Calibration Manual**: BG neut + a known-white region
+   (G2V star, galaxy core). Computes per-channel gains that
+   neutralise the white.
+3. **Photometric Color Calibration (PCC)**: the science feature.
+   Plate-solves the frame, queries a star catalog (Gaia DR3 /
+   APASS / Tycho-2) for B-V / Bp-Rp of each detected star,
+   adjusts per-channel gains so stellar colors match the catalog.
+   Physics-based calibration, not heuristic.
+
+**Research** (Explore Phase 1):
+- **No persisted WCS in FITS**: `AstapSolver` computes
+  CRVAL/CDELT/CROTA but doesn't write back into the file header.
+  Without WCS in the FITS, PCC can't run without re-solving.
+- **No star catalog**: `SkyCatalogService` only has DSOs (M31,
+  NGC, ...), nothing for individual stars with B-V / Bp-Rp.
+- **`StarDetector` is mono-only**, returns total `Flux`. PCC
+  needs `FluxR` / `FluxG` / `FluxB` per star.
+- **`EditPipeline.cs` has `ColorSpace.TempTintToGain`** (Kelvin
+  → RGB gains) + per-pixel multiply already. All the apply-gain
+  math exists; only the gain *computation* via scientific
+  calibration is missing.
+
+**Decisions** (AskUserQuestion Phase 3):
+- **Scope**: all 3 tools (BG + Manual + PCC).
+- **UI**: STUDIO (not Editor). Color cal operates on linear/raw
+  buffers, not 8-bit display-stretched. Output is a sibling FITS
+  re-indexed by `FrameLibraryService`, same pattern as Combine /
+  Calibrate / Integrate.
+- **PCC catalog**: APASS bundled offline (~80 MB). Remote
+  observatory without internet works; first run of a script
+  populates the bundle, then it's pure local.
+
+## Architecture
+
+```
+Server:
+  CCALB-0: Foundation (shared across the 3 tools)
+    StarPhotometer.cs (new in Image.Portable)
+      MeasureRgb(planeSequential, w, h, detectedStars)
+        → List<StarPhotometry> { X, Y, FluxR, FluxG, FluxB }
+      Aperture photometry, sum per-channel in circle r=2*HFR.
+      DetectedStar keeps total Flux; new record avoids polluting.
+
+    WcsHeaders.cs (new in Image.Portable)
+      Add(plate, customKeywords): inject CRVAL1/2, CRPIX1/2,
+        CD1_1..CD2_2, CTYPE1=RA---TAN, CTYPE2=DEC--TAN.
+      Read(headers): extract → WcsInfo { Ra0, Dec0, ScaleX,
+        ScaleY, Rotation, PxRefX, PxRefY }.
+      PixelToRaDec(x, y) + RaDecToPixel(ra, dec) helpers.
+
+    FITSWriter.cs (modify): customKeywords accepts WCS block;
+    FITSReader.cs (modify): ImageProperties.Wcs?
+    AstapSolver.cs (modify): after solve, re-stamp source FITS
+      with the WCS headers (write new .fits temp + atomic rename
+      to preserve history).
+
+  Services/Studio/ColorCalibrationService.cs (new, ~350 lines)
+    Job pattern mirroring ChannelCombineService:
+      StartJob(req) → jobId; GetStatus(jobId)
+    Three modes: BgNeutral, Manual, Photometric
+    Common: Load FITS, Validate Channels==3, compute adjustment,
+      apply per-pixel out[c,i] = (in[c,i] - offset[c]) * gain[c],
+      clamp [0, 65535], write sibling FITS with custom keywords
+      recording the recipe (CCAL_MODE, CCAL_GAINR/G/B,
+      CCAL_OFFR/G/B, CCAL_SRC = matched-star count for PCC),
+      FrameLibraryService.RescanAsync().
+
+  Services/Sky/ApassCatalog.cs (new, ~200 lines)
+    Loads SQLite (Microsoft.Data.Sqlite already in project).
+    Schema: stars(ra, dec, mag_v, mag_b, b_v, source) + R*tree
+      idx_radec(min_ra, max_ra, min_dec, max_dec).
+    QueryRegionAsync(ra, dec, radiusDeg, magLimit) → List<Star>.
+    IsAvailable check + clear "run scripts/download-apass.py"
+      error if SQLite absent.
+
+  scripts/download-apass.py (new)
+    Downloads APASS DR10 from AAVSO mirror (subset mag ≤ 13,
+    ~80 MB), builds SQLite with R*tree at
+    src/NINA.Polaris/wwwroot/catalogs/apass/apass.db
+    (gitignored, csproj Content Include for publish output).
+
+  Endpoints/StudioEndpoints.cs (extend):
+    POST /api/studio/colorcal
+      body: { frameId, mode, bgPatch?, whitePatch?,
+              referenceStarType? (G2V default) }
+      → { jobId }
+    GET  /api/studio/colorcal/{jobId}
+    GET  /api/studio/colorcal/catalog-status
+      → { available, source, starCount, version }
+
+Browser:
+  STUDIO viewer modal (new "Color calibration" item in the
+  viewer's single-frame ops menu):
+    Modal with 3 tabs (mirrors CC-6 Combine modal):
+      • BG: radio "Auto (lowest 5%)" | "Pick patch"
+      • Manual: "Pick BG patch" + "Pick white patch"
+      • PCC: catalog status badge + "Run" (auto when WCS in FITS,
+        else "Plate solve first" button)
+    Patch picker: overlay on viewer canvas, click+drag rect ROI,
+      shows median per-channel in real-time.
+    Run → POST + poll progress + toast with output path.
+```
+
+### Math per mode
+
+**BG neutralisation**:
+```
+Sample (auto = lowest 5% sorted by luminance; patch = user ROI):
+  For c in [R, G, B]:
+    median[c] = histogram median on channel c
+    offset[c] = median[c] - min(medians)
+Apply: out[c, i] = (in[c, i] - offset[c])
+Clamp [0, 65535]
+```
+
+**Manual color calibration**:
+```
+Step 1: BG neutralisation (same math), offsets applied
+Step 2: White-reference scale:
+  For c in [R, G, B]:
+    mean[c] = average of white-patch pixels on channel c
+    gain[c] = max(means) / mean[c]      (anchor brightest to 1.0)
+Apply: out[c, i] = (in[c, i] - offset[c]) * gain[c]
+```
+
+**Photometric (PCC)**:
+```
+1. WCS check: read CRVAL/CDELT/CD or fail "plate-solve first"
+2. ApassCatalog.QueryRegion(ra0, dec0, radius = half-diagonal,
+                            magLimit = 12)
+   → List<{ ra, dec, mag_v, b_v }>
+3. StarDetector + StarPhotometer.MeasureRgb on the FITS pixels
+   → List<{ x, y, fluxR, fluxG, fluxB }>
+4. Match: catalog (ra,dec) → image (x,y) via WCS inverse.
+   Pair with detected star within 3 px. Drop matches with
+   saturated pixels (any channel >= 60000), zero flux, or
+   pixelCount < 9.
+5. For each matched pair:
+     expected_R, expected_G, expected_B from G2V-relative B-V
+       (Pickles 1998 atlas sampled at common filter responses)
+     observed_R = fluxR, etc.
+     ratio_c = expected_c / observed_c per star
+6. Per-channel gain = median(ratio_c) across matched stars
+   (robust to outliers like saturated cores, hot pixels)
+7. Apply gains per pixel; offset = BG neutralisation (run first)
+8. Record matched-star count in CCAL_NSTAR header
+```
+
+### Failure modes for PCC
+
+- WCS absent in FITS: actionable error "Plate solve the source
+  first (STUDIO → Solve, or run integration with platesolve
+  enabled)".
+- APASS DB absent: "Run `scripts/download-apass.py` once on the
+  server to populate the catalog (~80 MB download)".
+- Fewer than 5 matched stars: "Too few catalog matches (need ≥5,
+  got N). Increase plate-solve accuracy, or fall back to Manual
+  color calibration".
+- All stars saturated: "All matched stars are saturated; re-run
+  on a sub-frame or use shorter total integration".
+
+## Phases (10 commits)
+
+### CCALB-0a: WCS read/write helpers
+- `WcsHeaders.cs` (new) — Add/Read/PixelToRaDec/RaDecToPixel.
+- `FITSWriter.cs` modified — accepts `WcsInfo?` and emits the
+  WCS keywords.
+- `FITSReader.cs` modified — populates `ImageProperties.Wcs`.
+- `AstapSolver.cs` modified — after solve, re-stamps source FITS
+  (write-temp + atomic rename).
+- `BatchStackingService.cs` modified — if input frames carry
+  WCS, persist the reference's WCS on the output master.
+- Tests: roundtrip; pixel↔RA/Dec invertible within 0.1 px;
+  AstapSolver stamps the source FITS.
+
+### CCALB-0b: per-channel star photometry
+- `StarPhotometer.cs` (new) — `MeasureRgb(planeSequentialUshort,
+  w, h, channels, stars)` returns
+  `List<StarPhotometry>` with X/Y + FluxR/G/B. Aperture circle
+  r = 2 * HFR. Background sub via local annulus mean. Per-pixel
+  skip if saturated.
+- Tests: synthetic 3-channel frame, known R=10000 G=20000 B=15000
+  on stars; recover within 2%.
+
+### CCALB-1: BackgroundNeutralization
+- `ColorCalibrationService.cs` skeleton + BgNeutral mode (auto +
+  patch).
+- `POST /api/studio/colorcal` + GET status.
+- UI: Modal with BG tab. Auto = direct Run. Patch mode = canvas
+  overlay click+drag picker.
+- Output sibling: `_bgneu.fits`. FITS headers `CCAL_MODE='BG'`,
+  `CCAL_OFFR/G/B`.
+- Tests: synthetic RGB with forced cast, BG neut recovers neutral
+  background.
+
+### CCALB-2: Manual color calibration
+- Add Manual mode to service (BG offset + white-ref gain).
+- Modal gets Manual tab: two pickers (BG + white).
+- Output sibling: `_ccal.fits`. Headers `CCAL_MODE='MANUAL'`,
+  `CCAL_OFFR/G/B`, `CCAL_GNR/G/B`.
+- Tests: synthetic with cast + known white reference, recover
+  neutral color.
+
+### CCALB-3a: APASS catalog service + download script
+- `ApassCatalog.cs` (new in `Services/Sky/`) — SQLite loader,
+  R*tree cone search. Graceful fail when DB missing.
+- `scripts/download-apass.py` (new) — wget APASS DR10 subset +
+  build SQLite with R*tree.
+- `.gitignore`: ignore `src/NINA.Polaris/wwwroot/catalogs/apass/`.
+- `NINA.Polaris.csproj`: `<Content Include="wwwroot\catalogs\**\*">`
+  for Docker / publish output.
+- Endpoint `GET /api/studio/colorcal/catalog-status`.
+- Tests: synthetic SQLite with 10 stars, region query works.
+
+### CCALB-3b: PCC math + Photometric mode
+- `ColorCalibrationMath.cs` (new): G2V reference B-V→RGB lookup,
+  per-star ratio computation, median-gain fit.
+- `ColorCalibrationService.Photometric` mode: orchestrates
+  WcsHeaders.Read → ApassCatalog.QueryRegion → StarDetector →
+  StarPhotometer.MeasureRgb → match → fit → apply.
+- Output sibling: `_pcc.fits`. Headers `CCAL_MODE='PCC'`,
+  `CCAL_NSTAR`, `CCAL_GNR/G/B`.
+- Tests: synthetic frame with stars at known catalog positions
+  (mock APASS), PCC recovers unity gains; with forced cast,
+  recovers the inverted cast.
+
+### CCALB-3c: PCC UI tab + catalog status badge
+- Modal Color calibration gets PCC tab.
+- Pre-flight check: WCS present? Catalog available? Show status
+  + catalog star count in FOV. Run button only enables when both
+  OK.
+- Toast on done: "N stars matched, gains R=x.xx G=x.xx B=x.xx".
+
+### CCALB-4a: Tests + lrgb-mono-workflow.md update
+- Update `docs/user-guide/lrgb-mono-workflow.md` with new
+  "Color calibration" section between Combine and GraXpert.
+- Update `docs/user-guide/end-to-end-workflow.md` with step
+  inserted between Integrate and AI cleanup.
+- Update `docs/user-guide/studio.md` with the Color calibration
+  tool.
+
+### CCALB-4b: README + APASS attribution
+- Update `README.md` with PCC note + APASS attribution
+  (DR10 license: CC-BY 4.0, requires citation).
+- `docs/user-guide/photometric-calibration.md` new: full PCC
+  walkthrough, troubleshooting, alternative via Vizier online
+  (deferred, document as future).
+
+## Files created
+
+- `src/NINA.Image.Portable/ImageAnalysis/StarPhotometer.cs`
+- `src/NINA.Image.Portable/FileFormat/FITS/WcsHeaders.cs`
+- `src/NINA.Polaris/Services/Studio/ColorCalibrationService.cs`
+- `src/NINA.Polaris/Services/Studio/ColorCalibrationMath.cs`
+- `src/NINA.Polaris/Services/Sky/ApassCatalog.cs`
+- `scripts/download-apass.py`
+- `src/NINA.Polaris/wwwroot/catalogs/apass/.gitignore`
+- `tests/NINA.Polaris.Test/Studio/ColorCalibrationServiceTests.cs`
+- `tests/NINA.Polaris.Test/Studio/StarPhotometerTests.cs`
+- `tests/NINA.Polaris.Test/Studio/WcsHeadersTests.cs`
+- `tests/NINA.Polaris.Test/Studio/ApassCatalogTests.cs`
+- `docs/user-guide/photometric-calibration.md`
+
+## Files modified
+
+- `src/NINA.Image.Portable/FileFormat/FITS/FITSWriter.cs` — WCS opcional
+- `src/NINA.Image.Portable/FileFormat/FITS/FITSReader.cs` — WCS extract
+- `src/NINA.Image.Portable/ImageData/ImageProperties.cs` — `WcsInfo?`
+- `src/NINA.Polaris/Services/PlateSolving/AstapSolver.cs` — re-stamp
+- `src/NINA.Polaris/Services/Studio/BatchStackingService.cs` —
+  propagate WCS
+- `src/NINA.Polaris/Endpoints/StudioEndpoints.cs` — 3 new endpoints
+- `src/NINA.Polaris/Program.cs` — register `ColorCalibrationService`
+  + `ApassCatalog` singletons
+- `src/NINA.Polaris/wwwroot/index.html` — new 3-tab modal + STUDIO
+  toolbar item
+- `src/NINA.Polaris/wwwroot/js/app.js` — state + methods +
+  canvas patch picker
+- `src/NINA.Polaris/wwwroot/css/app.css` — `.colorcal-*` +
+  `.patch-picker` overlay
+- `src/NINA.Polaris/NINA.Polaris.csproj` — `<Content Include>` for
+  the APASS bundle
+- `Dockerfile` — COPY of the bundle
+- Docs + README + LICENSE entries
+
+## Verification
+
+### Build + tests
+- `dotnet build` clean.
+- `dotnet test` 670 atuais + ~30 novos = ~700.
+
+### BG neutralisation
+1. STUDIO viewer opens an RGB master with forced green cast.
+2. Click Color calibration → BG tab → Auto → Run.
+3. ~5 s: output `_bgneu.fits` appears, opens in viewer showing
+   neutral grey background.
+
+### Manual calibration
+4. Same master → Color cal → Manual tab.
+5. Click "Pick BG patch" → drag rect in dark region.
+6. Click "Pick white patch" → click on known G2V star.
+7. Run → ~10 s: output `_ccal.fits` with neutral color.
+
+### PCC (offline APASS bundled)
+8. Pre-flight: `python scripts/download-apass.py` once on server
+   (generates apass.db ~80 MB).
+9. Frame master already plate-solved; if not, STUDIO → Solve
+   first.
+10. Color cal → PCC tab.
+11. Status badge shows "✓ APASS DR10 (~5M stars), 247 in FOV,
+    WCS OK".
+12. Run → ~30 s: output `_pcc.fits`. Toast shows "N=18 stars
+    matched, gains R=1.12 G=0.97 B=1.05".
+13. Compare side-by-side: original vs PCC output, stars have
+    natural colors (K stars reddish, A stars bluish, etc.).
+
+### Workflow end-to-end (M81 LRGB scenario)
+14. AUTORUN: capture mono LRGB.
+15. STUDIO: per-filter integrate (BatchStackingService).
+16. STUDIO: Combine (CC-1, LRGB tab) → `lrgb_M81_*.fits`.
+17. **STUDIO: Color calibration → PCC → `lrgb_M81_*_pcc.fits`**.
+18. FILES: GraXpert BGE → Denoise → Decon (on `_pcc` master).
+19. Editor: fine adjustment.
+20. Export: final JPEG.
+
+### Failure modes
+- PCC without WCS in FITS: error toast "Plate-solve the source
+  first" with clickable link opening STUDIO → Solve.
+- PCC without catalog: error toast "Run
+  scripts/download-apass.py" with path shown.
+- PCC with <5 matched stars: error "Too few stars (N=3), need
+  ≥5".
+
+## Notes
+
+- **Bundle size**: APASS DR10 subset mag ≤ 13 + R*tree index =
+  ~80 MB. Bundling in Docker image OK; Pi 2/3 with 16 GB card is
+  tight but viable. Documented.
+- **APASS license**: AAVSO APASS DR10 is CC-BY 4.0. Requires
+  attribution in README + footer of the PCC modal. Polaris
+  MPL 2.0 stays untouched.
+- **Memory**: cone search for 1°² returns ~200 stars; payload
+  fits trivially in RAM even on Pi 2.
+- **Performance**: PCC end-to-end ~30 s on Pi 5 (plate solve
+  ~5 s, catalog query ~1 s, photometry of ~200 stars ~10 s,
+  match + fit ~5 s, write FITS ~5 s).
+
+## Out of scope (deferred)
+
+- **PCC online via Vizier** (Gaia DR3, no bundle): second backend
+  if demand exists; bundled APASS covers the common case.
+- **Custom reference star types** (B0V, M5V beyond G2V): G2V
+  (Sun) is industry standard; others go to v2.
+- **Saturation-aware photometry with elliptical apertures**: our
+  aperture is fixed circular; eccentric stars (mount drift, coma)
+  may have sub-optimal photometry. PixInsight has this; Polaris
+  v1 doesn't.
+- **PCC integration during sequence capture** (auto after each
+  master): capture is mono per-filter, PCC only makes sense on
+  the post-combine RGB. Stays out of the hot path.
+
+---
+
+# Previous plan: Mono LRGB workflow (CC-1..7), channel combine, LRGB and PixelMath
+
+> Previous plan (GX, GraXpert ONNX in-browser) preserved below.
 > below starting at `# Previous plan: Client-side live stacking via WASM (CLST)`.
 > The entire CLST-1..8 stack is in production; this plan builds the
 > distribution and operability layer on top so a regular

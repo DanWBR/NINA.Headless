@@ -1,3 +1,4 @@
+using System.Linq;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -47,7 +48,15 @@ public class DsoCatalogTests {
                                       "Arp 273", "Sh2 279", "HCG 92" }) {
             var obj = await _catalog.GetByNameAsync(name);
             Assert.That(obj, Is.Not.Null, $"{name} should be in the DB");
-            Assert.That(obj!.Name, Is.EqualTo(name).IgnoreCase);
+            // M / C entries resolve through aliases to their canonical
+            // NGC/IC primary name (e.g. M31 -> NGC 224), so accept a
+            // match against either the primary Name or the alias list.
+            var matches = string.Equals(obj!.Name, name,
+                    System.StringComparison.OrdinalIgnoreCase)
+                || (obj.Aliases != null && obj.Aliases.Any(a =>
+                    string.Equals(a, name, System.StringComparison.OrdinalIgnoreCase)));
+            Assert.That(matches, Is.True,
+                $"Resolved row '{obj.Name}' should match '{name}' on Name or Aliases");
             Assert.That(obj.RaHours, Is.InRange(0, 24));
             Assert.That(obj.DecDeg, Is.InRange(-90, 90));
             Assert.That(obj.Type, Is.Not.Empty);

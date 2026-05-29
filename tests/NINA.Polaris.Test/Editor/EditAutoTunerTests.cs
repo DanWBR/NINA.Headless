@@ -44,9 +44,10 @@ public class EditAutoTunerTests {
 
     [Test]
     public void DarkFrame_BoostsExposureAndLiftsShadows() {
-        // Median around 0.05 -> ~13 in 0..255. Histogram with p50 ≈ 0.05 and
-        // p5 down at 0 should fire both exposure (positive) and shadows.
-        var s = EditAutoTuner.Compute(Solid(13, 1), W, H, 1);
+        // Solid frame at value 10 -> all percentiles at 10/255 ≈ 0.039,
+        // safely below ShadowLiftThreshold (0.05) and well under TargetMid
+        // (0.18). Should fire both exposure (positive) and shadows.
+        var s = EditAutoTuner.Compute(Solid(10, 1), W, H, 1);
         Assert.That(s.Light.Exposure, Is.GreaterThan(0.5),
             "Dark frame should get a positive exposure nudge");
         Assert.That(s.Light.Shadows, Is.GreaterThan(0),

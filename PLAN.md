@@ -17,16 +17,33 @@
 
 # Current plan: Expanded sky-view catalogs (CAT-1..5)
 
-> Previous plan (Pi 5 first-class deployment + .deb packaging) is
-> preserved below starting at `# Previous plan: Pi 5 first-class
-> deployment + .deb packaging + tag-driven release pipeline (DEB-* /
-> PI5-* / PHD2GUI-*)`. That stack is in production, and many other
-> feature plans landed between it and this one (PA, SWE, ED, NET,
-> GX, CC, CCALB, INDI-WEB, WIFI, MFOC, AUTH, HELP, CLOCK, REFSUG,
-> SHUT, FW) — see the project's git log for the chronological
-> commit trail; their full plan text lives only in the Portuguese
-> working notes (`~/.claude/plans/...`). The plan below is the most
-> recent one to be translated for PLAN.md.
+> The full chain of plans between Pi 5 packaging and CAT is
+> preserved below, translated from the Portuguese working notes.
+> Reading order top-to-bottom (newest first): CAT → FW → SHUT →
+> REFSUG → HELP → AUTH → MFOC → WIFI → CCALB → CC → GX → NET →
+> ED → SWE → PA → SIM → Pi 5 packaging → CLST → LSTR → VIDEO →
+> PHD2 deep → RIGS → PREVIEW → Activity bar → Siril+GraXpert →
+> FILES → DSLR → Gap analysis → STUDIO → Weather → Tonight.
+>
+> Two shipped features don't have dedicated plan sections (they
+> were small enough to ship without a formal plan file):
+>
+> - **CLOCK-1..3** (ClockSyncService + polkit + activity-bar
+>   chip + Settings card). Detects > 30 s skew between
+>   `Date.now()` on the client and `DateTime.UtcNow` on the
+>   server (broadcast on the WS payload as
+>   `server.utcNow`), pops a "Clock N off" chip the user can
+>   click to push `chronyd` / `timedatectl set-time` via the
+>   polkit-gated `/api/system/clock/sync` endpoint. Polkit rule
+>   in `packaging/deb/etc/polkit-1/rules.d/55-polaris-time.rules`,
+>   wired by postinst.
+> - **INDI-WEB-1..4** (IndiWebManager service + reverse proxy
+>   `/indi-web/*` + RIGS-tab iframe + SimulatorService
+>   coexistence). Wraps the pip-installed `indi-web` daemon
+>   (lifecycle + health probe like `Phd2GuiSessionService`),
+>   reverse-proxies its UI under `/indi-web/`, embeds it in the
+>   RIGS tab via iframe so the user can start/stop arbitrary
+>   INDI drivers without dropping to a terminal.
 
 ## Context
 
@@ -5321,9 +5338,9 @@ control file. Lets the UI checkboxes act live.
 
 ---
 
-# Previous plan: Client-side live stacking via WASM (CLST)
+# Previous plan: Pi 5 first-class deployment + .deb packaging + tag-driven release pipeline (DEB-* / PI5-* / PHD2GUI-*)
 
-> Previous plan (LSTR, auto re-focus / re-center triggers)
+> Previous plan (CLST, client-side live stacking via WASM) preserved
 > below starting at `# Previous plan: Client-side live stacking via WASM (CLST)`.
 > The entire CLST-1..8 stack is in production; this plan builds the
 > distribution and operability layer on top so a regular

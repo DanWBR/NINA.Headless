@@ -3340,7 +3340,7 @@ function ninaApp() {
 
             this.toast('Uploading stack...', 'info');
             try {
-                const resp = await fetch(url, {
+                const resp = await this.apiFetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/octet-stream' },
                     body: bytes
@@ -5522,7 +5522,7 @@ function ninaApp() {
                 return;
             }
             try {
-                const r = await fetch('/api/editor/raw/' + this.editorState.session);
+                const r = await this.apiFetch('/api/editor/raw/' + this.editorState.session);
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 const w  = parseInt(r.headers.get('X-Width')  || '0', 10);
                 const h  = parseInt(r.headers.get('X-Height') || '0', 10);
@@ -5544,7 +5544,7 @@ function ninaApp() {
             this.editorState.loading = true;
             this.editorState.error = '';
             try {
-                const r = await fetch('/api/editor/load', {
+                const r = await this.apiFetch('/api/editor/load', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ path })
@@ -5595,7 +5595,7 @@ function ninaApp() {
                 // NET-1: account for the upload size (Performance API
                 // doesn't surface request body size, only response).
                 if (file?.size) this._netTx(file.size);
-                const r = await fetch('/api/editor/upload', { method: 'POST', body: fd });
+                const r = await this.apiFetch('/api/editor/upload', { method: 'POST', body: fd });
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 const j = await r.json();
                 await this.editorLoad(j.path);
@@ -5786,7 +5786,7 @@ function ninaApp() {
         async editorSaveSidecar() {
             if (!this.editorState.session) return;
             try {
-                const r = await fetch('/api/editor/sidecar', {
+                const r = await this.apiFetch('/api/editor/sidecar', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -5840,7 +5840,7 @@ function ninaApp() {
             }
             this.editorState.exporting = true;
             try {
-                const r = await fetch('/api/editor/export', {
+                const r = await this.apiFetch('/api/editor/export', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -6171,7 +6171,7 @@ function ninaApp() {
         },
 
         async _editorRunPreviewServer(maxDim = 1600) {
-            const r = await fetch('/api/editor/preview', {
+            const r = await this.apiFetch('/api/editor/preview', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -6238,7 +6238,7 @@ function ninaApp() {
             // button. Cached for the life of the session.
             if (!this.editorState.session) return;
             try {
-                const r = await fetch('/api/editor/preview', {
+                const r = await this.apiFetch('/api/editor/preview', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -6265,7 +6265,7 @@ function ninaApp() {
                     hist = globalThis.NINA.Polaris.Wasm.Interop.EditorComputeHistogram(
                         JSON.stringify(this.editorState.edits || {}));
                 } else {
-                    const r = await fetch('/api/editor/histogram', {
+                    const r = await this.apiFetch('/api/editor/histogram', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -6713,7 +6713,7 @@ function ninaApp() {
             try {
                 const fileName = (this.files.cwd.split(/[\\/]+/).filter(Boolean).pop()
                                   || 'polaris') + '-files.zip';
-                const r = await fetch('/api/files/download-zip', {
+                const r = await this.apiFetch('/api/files/download-zip', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ paths, rootForNames: this.files.cwd, fileName })
@@ -6754,7 +6754,7 @@ function ninaApp() {
             }
             if (textExts.includes(ext)) {
                 try {
-                    const r = await fetch('/api/files/preview?path=' + encodeURIComponent(entry.fullPath));
+                    const r = await this.apiFetch('/api/files/preview?path=' + encodeURIComponent(entry.fullPath));
                     const txt = r.ok ? await r.text() : `(preview failed: HTTP ${r.status})`;
                     this.files.preview = {
                         open: true, path: entry.fullPath, name: entry.name,
@@ -11681,7 +11681,7 @@ function ninaApp() {
         },
 
         async _onnxFetchSourcePixels(path) {
-            const r = await fetch('/api/onnx/source-pixels?path='
+            const r = await this.apiFetch('/api/onnx/source-pixels?path='
                 + encodeURIComponent(path));
             if (!r.ok) return null;
             const w  = parseInt(r.headers.get('X-Width'),    10);
@@ -11706,7 +11706,7 @@ function ninaApp() {
             // Blob constructor accepts BufferSource without copying.
             const blob = new Blob([pixels.buffer]);
             fd.append('pixels', blob, 'pixels.bin');
-            const r = await fetch('/api/onnx/save', { method: 'POST', body: fd });
+            const r = await this.apiFetch('/api/onnx/save', { method: 'POST', body: fd });
             if (!r.ok) {
                 const e = await r.json().catch(() => null);
                 throw new Error(e?.error || ('HTTP ' + r.status));
@@ -14926,7 +14926,7 @@ function ninaApp() {
             const f = ev.target.files[0]; if (!f) return;
             const text = await f.text();
             try {
-                const r = await fetch('/api/sequencer/document/json', {
+                const r = await this.apiFetch('/api/sequencer/document/json', {
                     method: 'POST', headers: {'Content-Type': 'application/json'}, body: text
                 });
                 if (!r.ok) throw new Error('upload failed: ' + r.status);

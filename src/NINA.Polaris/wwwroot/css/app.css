@@ -1022,12 +1022,18 @@ html, body {
     /* Bumped 60→80 px so 3-digit values (gain 600, settle 30 s) and
        the native spinner arrows don't clip the typed text. */
     width: 80px;
-    padding: 4px 6px;
+    /* Tap-friendly height aligned with the Flat Wizard form: ~38 px
+       tall (9 px vertical padding + 14 px font + 2 px border)
+       gives a comfortable touch target on phones / tablets without
+       feeling oversized on desktop. */
+    padding: 9px 10px;
+    min-height: 38px;
+    box-sizing: border-box;
     background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 14px;
     outline: none;
     transition: border-color var(--transition);
 }
@@ -1045,12 +1051,15 @@ input[data-exposure-presets] {
 
 .input-md {
     width: 120px;
-    padding: 4px 8px;
+    /* Match .input-sm's tap-friendly height + font (see comment above). */
+    padding: 9px 10px;
+    min-height: 38px;
+    box-sizing: border-box;
     background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 14px;
     outline: none;
 }
 
@@ -1085,12 +1094,15 @@ label select.input-sm {
 
 .search-input {
     flex: 1;
-    padding: 6px 10px;
+    /* Same tap-friendly height as .input-sm / .input-md (~38 px). */
+    padding: 9px 12px;
+    min-height: 38px;
+    box-sizing: border-box;
     background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 14px;
     outline: none;
 }
 
@@ -2004,12 +2016,15 @@ label select.input-sm {
 .location-search-row input[type="text"],
 .location-search-row input[type="search"] {
     flex: 1;
-    padding: 6px 8px;
+    /* Same tap-friendly height as .input-sm / .input-md (~38 px). */
+    padding: 9px 12px;
+    min-height: 38px;
+    box-sizing: border-box;
     background: var(--bg-secondary);
     color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 14px;
     /* iOS Safari shows a native rounded-rectangle for input[type=search]
        by default that clashes with our dark theme, strip the chrome. */
     -webkit-appearance: none;
@@ -3575,9 +3590,10 @@ label select.input-sm {
     font-size: 11px; color: var(--text-muted, #94a3b8); font-weight: 600;
 }
 .prop-row input[type="text"], .prop-row input[type="number"] {
-    padding: 4px 8px; background: var(--bg, #0f172a);
+    padding: 9px 10px; min-height: 38px; box-sizing: border-box;
+    background: var(--bg, #0f172a);
     border: 1px solid var(--border, #334155); color: var(--text, #e2e8f0);
-    border-radius: 3px; font-size: 13px;
+    border-radius: 3px; font-size: 14px;
 }
 
 /* Inline warning banner (e.g. PHD2 not installed) */
@@ -3998,8 +4014,13 @@ label select.input-sm {
     border: 1px solid var(--border);
     border-radius: 3px;
     color: var(--text-primary);
-    font-size: 12px;
-    padding: 3px 6px;
+    /* Sequence rows are dense lists, so we keep them a touch shorter
+       than .input-sm (~34 px vs 38 px) but still comfortable to tap.
+       The seq-input-num below bumps width to fit "1000" + spinners. */
+    font-size: 14px;
+    padding: 7px 8px;
+    min-height: 34px;
+    box-sizing: border-box;
 }
 
 .seq-input:disabled {
@@ -4014,7 +4035,9 @@ label select.input-sm {
 }
 
 .seq-input-num {
-    width: 60px;
+    /* Bumped 60 → 80 px because the wider padding shrinks the inner
+       text area; 80 keeps 4-digit values + spinner arrows visible. */
+    width: 80px;
 }
 
 .seq-item-params {

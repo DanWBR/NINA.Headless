@@ -476,7 +476,12 @@ function ninaApp() {
             busy: false,
             looping: false,
             lastSnapAt: null,
-            lastStats: null      // { mean, median, stdev, starCount, hfr, min, max }
+            lastStats: null,     // { mean, median, stdev, starCount, hfr, min, max }
+            // SHUT-2: snapshot of when the active snap started + its
+            // exposure (seconds). Fed by previewTakeSnap() and read
+            // by previewShutterProgress() for the ring fill.
+            _snapStartedAt: null,
+            _snapExposure: 0
         },
 
         // Server-side continuous video stream. Started by the Stream
@@ -8932,6 +8937,31 @@ function ninaApp() {
             return this._shutterCountdownFor(this._captureStartedAt, this._captureExposure);
         },
 
+        /// PREVIEW tab shutter context.
+        previewShutterCtx() {
+            return {
+                isActive: () => !!(this.preview.busy || this.preview.looping),
+                disabled: () => !this.selectedCamera || this.cameraStream.running,
+                onTap: () => this.previewTakeSnap(),
+                onLongPress: () => this.previewToggleLoop(),
+                onAbort: () => this.previewAbort()
+            };
+        },
+        previewShutterProgress() {
+            if (this.armingLoop) return this._shutterArmProgress();
+            return this._shutterProgressFor(
+                this.preview._snapStartedAt, this.preview._snapExposure);
+        },
+        previewShutterDashoffset() {
+            return this._shutterDashoffsetFor(this.previewShutterProgress());
+        },
+        previewShutterCountdown() {
+            if (this.armingLoop) return 'hold for loop...';
+            if (!this.preview.busy && !this.preview.looping) return '';
+            return this._shutterCountdownFor(
+                this.preview._snapStartedAt, this.preview._snapExposure);
+        },
+
         // --- PREVIEW tab (snap-and-look) ---
 
         // Take one test shot. Reuses the LIVE capture endpoint with the
@@ -8946,6 +8976,10 @@ function ninaApp() {
                 return;
             }
             this.preview.busy = true;
+            // SHUT-2: snapshot for the PREVIEW shutter ring.
+            this.preview._snapStartedAt = Date.now();
+            this.preview._snapExposure = Number(this.preview.exposure) || 0;
+            this._startShutterTick();
             try {
                 // apiPost returns a Response object, we need .json()
                 // to get the actual { stats, saved, ... } payload.
@@ -8982,6 +9016,9 @@ function ninaApp() {
                 this.preview.looping = false;
             } finally {
                 this.preview.busy = false;
+                if (!this.preview.looping) {
+                    this.preview._snapStartedAt = null;
+                }
             }
             // Loop kicks the next snap only after the previous one
             // fully resolved. $nextTick yields so the UI updates

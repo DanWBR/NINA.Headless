@@ -1626,6 +1626,9 @@
                 </div>
 
                 <div class="quick-controls">
+                    <!-- SHUT-2: same three-block layout LIVE uses
+                         (.shutter-inputs / .shutter-wrap / .shutter-secondary). -->
+                    <div class="shutter-inputs">
                     <div class="control-row">
                         <label>Exp
                             <input type="number" x-model.number="preview.exposure"
@@ -1682,21 +1685,52 @@
                                    placeholder="snap">
                         </label>
                     </div>
-                    <div class="control-row actions">
-                        <button class="btn btn-primary" @click="previewTakeSnap()"
-                                :disabled="preview.busy || preview.looping || !selectedCamera">
-                            <span x-text="preview.busy ? 'Exposing…' : '📸 Take snap'"></span>
-                        </button>
-                        <button class="btn"
-                                :class="preview.looping ? 'btn-active' : ''"
-                                @click="previewToggleLoop()"
-                                :disabled="!selectedCamera || cameraStream.running">
-                            <span x-text="preview.looping ? '⏹ Stop loop' : '↻ Loop'"></span>
-                        </button>
-                        <!-- Server-side continuous stream. Auto-picks native
-                             (CCD_VIDEO_STREAM, ~10-30 fps) when the camera
-                             supports it, else falls back to a tight loop on
-                             the server (frame rate bounded by exposure). -->
+                    </div><!-- /.shutter-inputs -->
+
+                    <!-- SHUT-2: Polaris Shutter for snap + loop + abort.
+                         Stream is intentionally NOT bound here (it's a
+                         distinct mode, not a single-shot or loop), so it
+                         stays as its own toggle button below. -->
+                    <div class="shutter-wrap">
+                        <div class="polaris-shutter"
+                             :class="{
+                                 'shutter-active': preview.busy || preview.looping,
+                                 'shutter-arming': armingLoop
+                             }"
+                             :aria-disabled="!selectedCamera || cameraStream.running"
+                             role="button"
+                             :aria-label="(preview.busy || preview.looping) ? 'Abort snap' : 'Take snap'"
+                             @pointerdown="shutterPointerDown($event, previewShutterCtx())"
+                             @pointerup="shutterPointerUp($event, previewShutterCtx())"
+                             @pointercancel="shutterPointerCancel()"
+                             @pointerleave="shutterPointerCancel()">
+                            <svg class="shutter-svg" viewBox="0 0 100 100">
+                                <circle class="shutter-track" cx="50" cy="50" r="46"></circle>
+                                <circle class="shutter-progress" cx="50" cy="50" r="46"
+                                        :style="'stroke-dashoffset: '
+                                            + (armingLoop
+                                                ? (289 * (1 - _shutterArmProgress()))
+                                                : previewShutterDashoffset())"></circle>
+                            </svg>
+                            <span class="shutter-icon">
+                                <svg viewBox="0 0 24 24" x-show="!(preview.busy || preview.looping)">
+                                    <circle cx="12" cy="12" r="7"></circle>
+                                </svg>
+                                <svg viewBox="0 0 24 24" x-show="preview.busy || preview.looping">
+                                    <rect x="7" y="7" width="10" height="10" rx="1.5"></rect>
+                                </svg>
+                            </span>
+                            <span class="shutter-countdown" x-text="previewShutterCountdown()"></span>
+                        </div>
+                    </div>
+
+                    <div class="shutter-secondary">
+                    <div class="control-row">
+                        <!-- Server-side continuous stream. Distinct from
+                             snap/loop — keeps its own toggle. Auto-picks
+                             native (CCD_VIDEO_STREAM, ~10-30 fps) when
+                             supported, else falls back to a tight server
+                             loop bounded by exposure. -->
                         <button class="btn"
                                 :class="cameraStream.running ? 'btn-active' : ''"
                                 @click="toggleCameraStream()"
@@ -1710,14 +1744,11 @@
                                 + (cameraStream.mode === 'native' ? 'native' : 'loop')
                                 + ' · ' + (cameraStream.fps?.toFixed?.(1) || '0.0') + ' fps)'"></span>
                         </button>
-                        <button class="btn btn-danger" @click="previewAbort()"
-                                :disabled="!preview.busy && !preview.looping && !cameraStream.running">
-                            Abort
-                        </button>
                         <button class="btn" @click="openImageViewer()"
                                 :disabled="!selectedCamera"
                                 title="Full-resolution zoom/pan viewer">⛶ View</button>
                     </div>
+                    </div><!-- /.shutter-secondary -->
                 </div>
                 </div><!-- /.preview-pane -->
 

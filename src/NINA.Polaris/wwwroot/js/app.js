@@ -768,9 +768,15 @@ function ninaApp() {
 
         // Sky Atlas filters + altitude chart
         showAtlasFilters: false,
-        atlasFilter: { type: '', minMag: null, maxMag: null, minDec: null, maxDec: null },
+        atlasFilter: { type: '', catalog: '', constellation: '',
+                       minMag: null, maxMag: null, minDec: null, maxDec: null },
         atlasResults: [],
         atlasTypes: [],
+        // CAT-4: list of catalog sources available in the DSO DB
+        // ('NGC','IC','M','C','Arp','Sh2','HCG','AGC'). Empty array
+        // when the bundled DB is missing — the catalog dropdown
+        // hides itself via x-show in that case.
+        atlasCatalogs: [],
         altitudeData: null,
 
         // Weather forecast (7Timer via /api/weather/forecast).
@@ -12565,11 +12571,27 @@ function ninaApp() {
             try {
                 this.atlasTypes = await this.apiGet('/api/sky/catalog/types');
             } catch (e) { }
+            // CAT-4: pull the catalog source list at the same time so
+            // the Atlas filter's catalog dropdown is ready when the
+            // user expands the filters panel. Empty array (or 503)
+            // when the expanded DSO DB is missing.
+            try {
+                const cats = await this.apiGet('/api/sky/catalog/catalogs');
+                this.atlasCatalogs = Array.isArray(cats) ? cats : [];
+            } catch (e) {
+                this.atlasCatalogs = [];
+            }
         },
 
         async atlasSearch() {
             const params = new URLSearchParams();
             if (this.atlasFilter.type) params.set('type', this.atlasFilter.type);
+            // CAT-4: backend param is `catalogId=` (the C# parameter
+            // name); the dropdown stores it as filter.catalog locally
+            // to match the data shape.
+            if (this.atlasFilter.catalog) params.set('catalogId', this.atlasFilter.catalog);
+            if (this.atlasFilter.constellation)
+                params.set('constellation', this.atlasFilter.constellation);
             if (this.atlasFilter.minMag != null) params.set('minMag', this.atlasFilter.minMag);
             if (this.atlasFilter.maxMag != null) params.set('maxMag', this.atlasFilter.maxMag);
             if (this.atlasFilter.minDec != null) params.set('minDec', this.atlasFilter.minDec);
@@ -12583,7 +12605,8 @@ function ninaApp() {
         },
 
         resetAtlasFilters() {
-            this.atlasFilter = { type: '', minMag: null, maxMag: null, minDec: null, maxDec: null };
+            this.atlasFilter = { type: '', catalog: '', constellation: '',
+                                 minMag: null, maxMag: null, minDec: null, maxDec: null };
             this.atlasResults = [];
         },
 

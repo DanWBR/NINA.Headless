@@ -3585,6 +3585,18 @@
 
                 <!-- Sky Atlas filters -->
                 <div class="sky-survey-row" x-show="showAtlasFilters" x-cloak>
+                    <!-- CAT-4: catalog source dropdown. Empty when the
+                         expanded DSO DB is missing (legacy fallback
+                         doesn't surface catalog sources), so the row
+                         silently disappears for old installs. -->
+                    <label x-show="atlasCatalogs.length > 0">Catalog
+                        <select x-model="atlasFilter.catalog" class="input-sm" @change="atlasSearch()">
+                            <option value="">Any</option>
+                            <template x-for="c in atlasCatalogs" :key="c">
+                                <option :value="c" x-text="c"></option>
+                            </template>
+                        </select>
+                    </label>
                     <label>Type
                         <select x-model="atlasFilter.type" class="input-sm" @change="atlasSearch()">
                             <option value="">Any</option>
@@ -3592,6 +3604,14 @@
                                 <option :value="t" x-text="t"></option>
                             </template>
                         </select>
+                    </label>
+                    <label x-show="atlasCatalogs.length > 0">Constellation
+                        <!-- 3-letter IAU abbrev (And, Cyg, Ori, ...).
+                             Free-text since the constellation set is
+                             fixed + tiny — quicker to type than scroll. -->
+                        <input type="text" x-model="atlasFilter.constellation"
+                               maxlength="3" placeholder="Cyg"
+                               class="input-sm" @change="atlasSearch()" style="width: 70px;">
                     </label>
                     <label>Min mag
                         <input type="number" x-model.number="atlasFilter.minMag" step="0.5" class="input-sm" @change="atlasSearch()">

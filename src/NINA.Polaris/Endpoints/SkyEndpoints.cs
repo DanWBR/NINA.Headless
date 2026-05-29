@@ -130,11 +130,23 @@ public static class SkyEndpoints {
             return Results.Ok(catalog.GetObjectTypes());
         });
 
+        // CAT-4: list of distinct catalog sources present in the DB
+        // (NGC / IC / M / C / Arp / Sh2 / HCG / AGC). Feeds the Atlas
+        // panel's catalog dropdown. Empty list when running on the
+        // legacy hardcoded fallback (no DsoCatalog).
+        group.MapGet("/catalog/catalogs", (SkyCatalogService catalog) => {
+            return Results.Ok(catalog.GetCatalogs());
+        });
+
         group.MapGet("/catalog/filter", (string? query, string? type,
+            string? catalogId, string? constellation,
             double? minMag, double? maxMag, double? minDec, double? maxDec,
             int? limit, SkyCatalogService catalog) => {
             var results = catalog.Filter(new CatalogFilter {
                 Query = query, Type = type,
+                // CAT-4: new optional filters. Old clients omit these
+                // and behaviour matches the pre-CAT-4 endpoint.
+                Catalog = catalogId, Constellation = constellation,
                 MinMagnitude = minMag, MaxMagnitude = maxMag,
                 MinDec = minDec, MaxDec = maxDec
             }, Math.Clamp(limit ?? 50, 1, 500));
@@ -145,7 +157,41 @@ public static class SkyEndpoints {
                     name = o.Name, ra = o.Ra, dec = o.Dec,
                     raFormatted = o.RaFormatted, decFormatted = o.DecFormatted,
                     magnitude = o.Magnitude, type = o.Type,
-                    commonName = o.CommonName, aliases = o.Aliases
+                    commonName = o.CommonName, aliases = o.Aliases,
+                    // CAT-4: new optional fields. Old UIs ignore them.
+                    catalog = o.Catalog, catalogId = o.CatalogId,
+                    constellation = o.Constellation, sizeArcmin = o.SizeArcmin
+                })
+            });
+        });
+
+        // CAT-4: cone search. Returns DSO catalog entries within
+        // `radius` degrees of (`ra` hours, `dec` deg), optionally
+        // mag-limited. Used for "what's in my FOV" overlays + future
+        // Mosaic auto-suggest. Returns 503 when the expanded DB
+        // isn't available (legacy fallback can't answer this).
+        group.MapGet("/catalog/near", (double ra, double dec, double radius,
+            double? maxMag, int? limit,
+            NINA.Polaris.Services.Sky.DsoCatalog dso) => {
+            if (!dso.IsAvailable) {
+                return Results.Json(new {
+                    error = "Expanded DSO catalog not available. " +
+                            "Run `python scripts/build-dso-catalog.py` to populate it."
+                }, statusCode: 503);
+            }
+            var hits = dso.QueryRegionAsync(ra, dec,
+                Math.Max(0.01, radius), maxMag,
+                Math.Clamp(limit ?? 200, 1, 1000)
+            ).GetAwaiter().GetResult();
+            return Results.Ok(new {
+                count = hits.Count,
+                results = hits.Select(o => new {
+                    name = o.Name, ra = o.RaHours, dec = o.DecDeg,
+                    magnitude = o.Magnitude, type = o.Type,
+                    commonName = o.CommonName,
+                    catalog = o.Catalog, catalogId = o.CatalogId,
+                    constellation = o.Constellation,
+                    sizeArcmin = o.SizeArcmin, aliases = o.Aliases
                 })
             });
         });

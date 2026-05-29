@@ -7060,14 +7060,16 @@ function ninaApp() {
             if (imgExts.includes(ext)) {
                 // Reuse the same OpenSeadragon viewer STUDIO uses. Set
                 // the URL to the FILES preview endpoint.
-                // authUrl appends ?token=... so OSD's internal <img>
-                // request authenticates without relying on the session
-                // cookie (which is HttpOnly + browser-close lifetime
-                // and silently drops if the session expired or the
-                // user re-opened the tab via mDNS hostname switch).
-                const url = this.authUrl(
-                    '/api/files/preview?path=' + encodeURIComponent(entry.fullPath)
-                    + '&maxDim=2400&t=' + Date.now());
+                //
+                // DO NOT pre-apply authUrl here, _initOsdViewer +
+                // reloadImageViewer wrap the URL with authUrl right
+                // before they hand it to OpenSeadragon. Double-applying
+                // appends ?token= twice and Query["token"] then resolves
+                // to "abc,abc" (comma-joined StringValues), which fails
+                // validation and 401s. Single auth point keeps the
+                // round-trip clean.
+                const url = '/api/files/preview?path=' + encodeURIComponent(entry.fullPath)
+                          + '&maxDim=2400&t=' + Date.now();
                 this._openImageViewerWithUrl(url, entry.name);
                 // Kick off the FITS header fetch in parallel with the
                 // image load. The overlay panel renders as soon as the

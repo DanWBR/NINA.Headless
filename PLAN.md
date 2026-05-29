@@ -405,9 +405,617 @@ without any frontend changes.
 
 ---
 
-# Previous plan: Pi 5 first-class deployment + .deb packaging + tag-driven release pipeline (DEB-* / PI5-* / PHD2GUI-*)
+# Previous plan: Flat Wizard UI (FW-1..3)
 
-> Previous plan (CLST, client-side live stacking via WASM) preserved
+> Previous plan (SHUT-1..5, Polaris Shutter) preserved below.
+
+## Context
+
+Flat capture is essential to a normal workflow: divides the lights
+to normalise vignetting and dust motes. Polaris already had a
+`FlatWizardService` doing a binary search on exposure until the
+target median ADU (default 30000) was hit, then captured N frames
+per filter and persisted the trained time in `trained-flats.json`
+for the next session to reuse.
+
+Until FW-1..3, that service was reachable only via curl to
+`/api/flatwizard/start` — users operating Polaris from the browser
+had no way to run flats without dropping to a terminal. This plan
+adds the missing UI panel.
+
+**Decisions** (AskUserQuestion):
+- **Location**: sub-tab inside AUTORUN. AUTORUN already got a
+  2-column sidebar in SHUT-4; wrap the existing pane in a
+  "Sequence" | "Flat Wizard" tabstrip (same pattern as FOCUS /
+  GUIDE / VIDEO). Thematically right: flats are part of a capture
+  session, and trained exposures feed sequence items.
+- **Per-rig persistence**: new fields on
+  `EquipmentProfile.FlatWizard` (same pattern as
+  `LiveStackTriggers`). Each rig (70 mm refractor vs 8" SCT) has
+  its own illumination profile; per-rig TargetADU / tolerance /
+  framesPerFilter / min-max exposure / binning / brightness
+  defaults.
+
+## Architecture
+
+### Backend persistence
+
+**`Services/FlatWizardSettings.cs`** (new):
+
+```csharp
+public class FlatWizardSettings {
+    public int TargetAdu { get; set; } = 30000;
+    public double Tolerance { get; set; } = 0.05;
+    public int FramesPerFilter { get; set; } = 20;
+    public double MinExposureSec { get; set; } = 0.1;
+    public double MaxExposureSec { get; set; } = 30.0;
+    public int Binning { get; set; } = 1;
+    public int MaxSearchIterations { get; set; } = 10;
+    public int PanelBrightness { get; set; } = 0;
+}
+```
+
+`ProfileService.cs`: adds `FlatWizardSettings FlatWizard` to
+`EquipmentProfile` with clone-path coverage (all fields copied
+explicitly, same pattern used for `LiveStackTriggers` in LSTR-2).
+Migration safe: a profile without the block loads defaults.
+
+`EquipmentEndpoints.cs`: the PUT `/rigs/{id}` accepts `FlatWizard`
+in the body and copies it defensively (null = leave the existing
+field untouched).
+
+`StatusStreamHandler.cs`: injects `FlatWizardService` and emits a
+`flatWizard` sub-object on the 1 Hz payload (state + progress +
+lastError). Progress is null when never-ran and idle.
+
+### Frontend: AUTORUN tabstrip + Flat Wizard panel
+
+`index.html` AUTORUN tab wraps the existing pane in a tabstrip
+("Sequence" | "Flat Wizard") and adds a sibling `.flatwiz-pane`
+with the same 2-column layout (`.live-pane,.preview-pane,
+.autorun-pane,.flatwiz-pane` CSS comma-list pattern).
+
+Left column (config):
+- **Pre-flight**: ✓/⚠/✗ rows reading `selectedCamera`,
+  `filterWheel.connected`, `flatDevice.connected`.
+- **Filter pick**: multi-select chips fed from
+  `filterWheel.filters` with select-all/clear helpers.
+- **Settings form**: TargetADU, tolerance (%), frames per filter,
+  min/max exposure, binning, max iterations. Each input
+  debounce-saves (~400 ms) into the active rig via the existing
+  `saveRig()` PUT.
+- **Trained exposures table**: lazy-fetched from
+  `GET /api/flatwizard/trained`, grouped by filter+binning.
+
+Right column (sidebar, 320 px):
+- **Panel brightness slider** (0..100), visible only when a flat
+  device is connected. 0 = "don't touch the panel" (sky/T-shirt
+  flats). When > 0, `POST /api/flatdevice/brightness` runs before
+  the wizard kicks.
+- **Polaris Shutter** (SHUT-1 component) with the new
+  `flatWizardShutterCtx`. Tap = start, long-press = start (no
+  loop concept), tap during active = abort. Ring shows composite
+  progress `(filtersDone + frames-in-current-filter) /
+  totalFilters`.
+- **Live readout**: filter index/name, search attempt + median
+  ADU, capture frame counter, per-filter results.
+
+### Alpine wiring
+
+- New state: `autorunTab` (`'sequence'` | `'flat'`),
+  `flatWizard.{state, progress, lastError, trained, form fields,
+  selectedFilters}`.
+- Methods: `flatWizardOpenTab` (hydrates form + fetches trained),
+  `SelectAll` / `ClearFilters` / `ToggleFilter`, `Save` (debounced
+  rig PUT), `Start` (sets panel brightness first if connected,
+  then POST `/start`), `Abort`, `ShutterCtx` / `ShutterProgress`
+  / `ShutterDashoffset` / `ShutterCountdown`.
+- WS handler absorbs `msg.flatWizard` each tick; auto-fires the
+  shutter tick on idle→running; auto-refreshes trained cache on
+  run completion.
+- `_anyShutterActive()` includes flat-wizard running so the tick
+  loop doesn't stop mid-run.
+
+## Phases (3 commits)
+
+### FW-1: backend persistence + WS payload
+- `FlatWizardSettings.cs` + `EquipmentProfile.FlatWizard` +
+  clone path + EquipmentEndpoints PUT + StatusStreamHandler
+  flatWizard sub-object. Tests pin defaults + JSON round-trip +
+  per-rig instance isolation.
+
+### FW-2: AUTORUN tabstrip + Flat Wizard panel + Alpine wiring
+- Tabstrip + `.flatwiz-pane` 2-col layout + pre-flight, filter
+  pick, settings form, brightness slider, shutter, progress,
+  trained table.
+- CSS extends `.live-pane,.preview-pane,.autorun-pane` with
+  `.flatwiz-pane`.
+
+### FW-3: docs + README
+- `docs/user-guide/flat-wizard.md` walkthrough (indoor with
+  panel, outdoor sky, troubleshooting non-convergence).
+- README "Flat Wizard" bullet expanded.
+
+### FW polish (subsequent commit)
+- Dark + tap-friendly form inputs (`min-height: 38px`,
+  `padding: 9px 10px`, `font-size: 14px`) scoped to `.flatwiz-pane`
+  to override `.settings-section`'s 400-px fixed height and white
+  default form chrome. Later promoted to `.input-sm`/`.input-md`/
+  `.search-input`/`.location-search-row input`/`.prop-row input`
+  app-wide for consistent touch targets.
+- An "Auto" pill on FLAT sequence items (separate small follow-up
+  commit). When ON, the SequenceEngine asks
+  `FlatWizardService.AutoFindExposureAsync` to resolve the
+  exposure at runtime via the trained cache (fast path) or a
+  binary search (cold path). Lets users without a filter wheel
+  still benefit from auto-exposure flats.
+
+## Reused code
+
+- `FlatWizardService` (D6) — backend complete, zero change.
+- 4 existing routes consumed verbatim.
+- `LiveStackTriggers` pattern (LSTR-2) — mirror for the new
+  `EquipmentProfile.FlatWizard` field (clone path,
+  EquipmentEndpoints PUT, hydrate on tab-enter, debounced save).
+- `polaris-shutter` component (SHUT-1) — reused with new ctx
+  object. Zero new CSS, zero new gesture code.
+- `.live-pane / .preview-pane / .autorun-pane` comma-list —
+  `.flatwiz-pane` slots in and inherits 2-col layout + mobile
+  fallback.
+
+## Verification
+
+- `dotnet build` clean; `dotnet test --filter ~FlatWizard` — new
+  round-trip cases pass.
+- Manual with INDI simulator: pre-flight ✓ all three rows; pick
+  L+R+G+B; settings; tap shutter; ring fills as binary search
+  converges then frame counter ticks; trained table refreshes on
+  completion. Switch rigs and back; form retains its rig-scoped
+  values.
+
+## Out of scope (deferred)
+
+- Activity bar chip for active Flat Wizard.
+- Apply trained exposures automatically to the next sequence.
+- Dawn/dusk sky-flat scheduling tied to solar altitude.
+- Multi-binning sweep in one wizard run.
+- Post-capture flat statistics (histogram per frame).
+
+---
+
+# Previous plan: Polaris Shutter (SHUT-1..5) — ASIAIR-style circular capture button
+
+> Previous plan (REFSUG, refocus suggestion) preserved below.
+
+## Context
+
+Each tab (LIVE, PREVIEW, FOCUS Manual, VIDEO Capture, AUTORUN)
+had its own horizontal action-button row controlling capture.
+Visually inconsistent and the gestures (Capture vs Loop vs Stream
+vs Stop vs Abort) varied per tab. ASIAIR / StellaVita inspiration:
+**one large circular shutter** that unifies every capture surface
+with a single gesture vocabulary:
+
+- **Tap** when idle → snap (single capture)
+- **Long-press** (≥600 ms) when idle → enter loop mode
+- **Tap** when capturing → cancel / abort
+- **Ring around the button** shows live progress
+  `(now - startedAt) / exposureSec`
+- **Inner icon** swaps: solid circle when idle, square (STOP)
+  when capturing
+
+Centered vertically + horizontally inside the existing
+`.quick-controls` right sidebar (320 px). AUTORUN didn't have
+that sidebar before — gets one as part of SHUT-4.
+
+**Decisions** (AskUserQuestion):
+- **Tap + long-press, not multiple buttons.** One shutter, gesture
+  differentiates snap vs loop. Stream (PREVIEW) and Pause (AUTORUN)
+  stay as small toggles below the shutter.
+- **AUTORUN gets a right sidebar.** Sequence list on the left
+  (flex:1), shutter + Pause/Resume + Add/Edit on the right (320 px).
+- **Scope: LIVE + PREVIEW + FOCUS Manual + VIDEO Capture + AUTORUN.**
+  FLAT WIZARD has backend but no browser UI yet — out of scope here
+  (the UI panel comes next as FW-1..3).
+
+## Architecture
+
+### Reusable shutter component
+
+Inline Alpine template (no Web Component, no build step). Each
+tab passes a 4-property context:
+
+```html
+<div class="polaris-shutter"
+     :class="{ 'shutter-active': isActive, 'shutter-arming': armingLoop }"
+     @pointerdown="shutterPointerDown($event, ctx)"
+     @pointerup="shutterPointerUp($event, ctx)"
+     @pointercancel="shutterPointerCancel()"
+     @pointerleave="shutterPointerCancel()">
+    <svg class="shutter-svg" viewBox="0 0 100 100">
+        <circle class="shutter-track" cx="50" cy="50" r="46"/>
+        <circle class="shutter-progress" cx="50" cy="50" r="46"
+                :style="`stroke-dashoffset: ${289 * (1 - progress)}`"/>
+    </svg>
+    <span class="shutter-icon">
+        <svg viewBox="0 0 24 24" x-show="!isActive"><circle cx="12" cy="12" r="6"/></svg>
+        <svg viewBox="0 0 24 24" x-show="isActive"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+    </span>
+    <span class="shutter-countdown" x-text="countdownLabel"></span>
+</div>
+```
+
+`ctx` object per tab:
+```js
+{
+    isActive: () => /* bool */,
+    progress: () => /* 0..1 */,
+    countdownLabel: () => /* "3.2s" or "12/30" */,
+    onTap: () => /* snap */,
+    onLongPress: () => /* loop */,
+    onAbort: () => /* stop */
+}
+```
+
+### Ring via SVG `stroke-dasharray`
+
+Perimeter of `r=46` circle ≈ 289. Set `stroke-dasharray="289 289"`,
+`stroke-dashoffset="289"` when progress=0 (empty), `"0"` when
+progress=1 (full). CSS `transition: stroke-dashoffset 0.1s linear`
+for smooth motion. Rotate the `<svg>` `-90deg` so the ring starts
+at 12 o'clock instead of 3 o'clock.
+
+### Client-side countdown loop
+
+Single `setInterval` at 50 ms when ANY shutter is active.
+`_anyShutterActive()` aggregates `capturing | looping |
+preview.busy | preview.looping | manualFocus.running |
+videoRecording.recording | seqState==='running'` (+ later
+`flatWizard.state==='running'`). Each capture method records
+`*StartedAt = Date.now()` + `*Exposure = exposureSec`; the
+computed progress reads `(Date.now() - startedAt) / exposureSec`
+clamped to `[0,1]`.
+
+### Long-press detection
+
+Pointer-event pattern (touch + mouse):
+
+```js
+shutterPointerDown(ev, ctx) {
+    if (ctx.isActive()) return;
+    this._shutterLongPressed = false;
+    this.armingLoop = true;          // ring fills during the hold
+    this._shutterPressTimer = setTimeout(() => {
+        this._shutterLongPressed = true;
+        this.armingLoop = false;
+        if (ctx.onLongPress) ctx.onLongPress();
+    }, 600);
+}
+shutterPointerUp(ev, ctx) {
+    clearTimeout(this._shutterPressTimer);
+    this.armingLoop = false;
+    if (this._shutterLongPressed) { this._shutterLongPressed = false; return; }
+    if (ctx.isActive()) { ctx.onAbort(); } else { ctx.onTap(); }
+}
+shutterPointerCancel() {
+    clearTimeout(this._shutterPressTimer);
+    this.armingLoop = false;
+    this._shutterLongPressed = false;
+}
+```
+
+Visual feedback during `armingLoop`: ring fills proportionally to
+the 600 ms hold (`stroke-dashoffset = 289 * (1 - holdElapsed/600)`)
+confirming the user is arming a loop. Release before 600 ms = snap.
+
+### Per-tab mapping
+
+| Tab | isActive | progress | onTap | onLongPress | onAbort |
+|---|---|---|---|---|---|
+| LIVE | `capturing\|\|looping` | client timer | `capture()` | `loopCapture()` | `stopCapture()` |
+| PREVIEW | `preview.busy\|\|preview.looping` | client timer | `previewTakeSnap()` | `previewToggleLoop()` | `previewAbort()` |
+| FOCUS Manual | `manualFocus.running` | per `intervalSec` | `manualFocusSnap()` | `manualFocusToggle()` | `manualFocusToggle()` |
+| VIDEO Capture | `videoRecording.recording` | `frames*exp/maxDur` or indeterminate spinner | `videoToggleRecord()` | same | same |
+| AUTORUN | `seqState==='running'` | `seqProgress()` (whole sequence) | `startSequence()` | same | `stopSequence()` |
+
+### AUTORUN sidebar refactor
+
+Before SHUT-4: AUTORUN was full-width sequence list + footer-style
+buttons. After: `.autorun-pane` flex-row; sequence list left, new
+`.autorun-sidebar` (320 px) on the right with centered shutter +
+Pause/Resume toggle + progress numbers (frames, ETA, elapsed) that
+used to live in the horizontal `seq-progress-section` (removed —
+the ring now visually represents progress).
+
+CSS reuses `.live-pane,.preview-pane,.autorun-pane` comma-list
+selectors. Mobile (≤900 px) collapses to flex-column.
+
+## Phases (5 commits)
+
+### SHUT-1: shutter component + LIVE wiring
+- `.polaris-shutter*` CSS (~200 lines), Alpine state + handlers,
+  LIVE replaces 3-button action row with centered shutter. View
+  / Save / Compute toggles move to a `.shutter-secondary` block.
+
+### SHUT-2: PREVIEW
+- Same template, replace Take snap / Loop / Abort. Stream toggle
+  + View stay below as separate buttons.
+
+### SHUT-3: FOCUS Manual + VIDEO Capture
+- FOCUS: tap = single snap, long-press = loop, tap-during-loop =
+  stop. Ring progress is per-cycle (`intervalSec`).
+- VIDEO: tap = start record, tap = stop. Ring = duration progress
+  if maxDurationSec set; indeterminate spinner otherwise.
+
+### SHUT-4: AUTORUN sidebar + shutter
+- Wrap body in `.autorun-pane` (flex-row).
+- `.quick-controls.autorun-sidebar` on the right with centered
+  shutter + Pause/Resume below + progress text.
+- Remove `.seq-progress-section` horizontal bar.
+
+### SHUT-5: docs + README
+- README "Capture button" section + per-feature docs (live-stacking,
+  preview, sequence, etc.) updated with gesture model.
+
+## Reused code
+
+- `.live-pane / .preview-pane` CSS pattern — `.autorun-pane`
+  inherits via comma-selector.
+- Existing state (`capturing`, `looping`, `preview.busy`,
+  `preview.looping`, `manualFocus.running`,
+  `videoRecording.recording`, `seqState`).
+- Existing methods (`capture()`, `loopCapture()`, `stopCapture()`,
+  `previewTakeSnap()`, etc.) — called verbatim from shutter ctx.
+- `seqProgress()` for the AUTORUN ring.
+- `setInterval` pattern (used by `updateClock` 1 Hz and
+  `_skyTicker`).
+
+## Verification
+
+- LIVE: tap = snap, ring fills 0..1 during exposure, long-press =
+  loop, tap-during-loop = abort.
+- PREVIEW: same, plus Stream toggle works independently.
+- FOCUS Manual: tap = snap, long-press starts loop, tap-during-loop
+  stops.
+- VIDEO: tap = start record, ring fills if maxDuration set, spinner
+  otherwise. Tap = stop.
+- AUTORUN: 2-col layout. Tap shutter = startSequence. Ring shows
+  whole-sequence progress. Pause/Resume toggle independent. Mobile
+  ≤900 px collapses to single column.
+- Cross-tab: switching during active capture shows the correct
+  state on the new tab's shutter.
+
+## Out of scope (deferred)
+
+- Inner ring (sub-exposure progress overlaid on whole-sequence
+  ring) — polish, SHUT-6 follow-up.
+- Haptic feedback on mobile when long-press arms loop (vibrate
+  API).
+- FLAT WIZARD shutter — needs the panel UI first (covered in FW-1..3).
+- WS payload exposure-remaining field — server-pushed timer.
+  Client-side timer suffices for v1.
+- Configurable long-press duration. Hardcoded 600 ms in v1.
+
+---
+
+# Previous plan: Refocus suggestion in live stacking (REFSUG-1..3)
+
+> Previous plan (HELP, in-app stepper tutorials) preserved below.
+
+## Context
+
+Live stacking already has two paths to handle focus drift:
+
+1. **LSTR-3 `LiveStackTriggersService`** — auto-refocus when
+   enabled, fires `AutoFocusService` automatically on HFR /
+   temperature / frame-count / minutes thresholds the user
+   configures per-rig. Requires a motorised focuser and
+   `RefocusEnabled=true`.
+2. **Nothing** when the user has a manual focuser (Crayford on a
+   budget refractor, kids' scope rack & pinion) OR a motor but
+   prefers to refocus by hand.
+
+Case 2 is exactly who needs a heads-up the most: turning the knob
+manually with no feedback that focus is degrading. The FOCUS tab
+Manual Assist exists (MFOC-1..5) but requires the user to look at
+it actively. Live stacking never said "hey, focus is getting
+worse".
+
+**User proposal**: trend-based suggestion. Instead of fixed
+"HFR > baseline × 1.20" thresholds, watch the **slope** of the
+last N HFR samples + compare against the recent best. Detects
+systematic degradation without user-tuned thresholds.
+
+**Decisions**:
+- **When**: only when `RefocusEnabled=false` on the active rig
+  (auto handles the rest). Don't duplicate info when AF will fire
+  anyway.
+- **Detection**: automatic trend-based, no profile fields the user
+  has to tune. Polaris figures it out.
+- **Surfaces**: toast on first detection + persistent chip in the
+  activity bar.
+- **Cleanup**: auto-detect via HFR recovering + "I refocused"
+  button for instant dismiss + baseline reset.
+
+## Architecture
+
+All backend, new singleton `RefocusSuggestionService` that
+subscribes to the same `LiveStackingService.FrameIntegrated` event
+LSTR-3 already consumes. Zero changes to LSTR-3, zero new profile
+fields.
+
+### `Services/RefocusSuggestionService.cs` (new)
+
+Singleton + `IDisposable`. Subscribes to
+`LiveStackingService.SubscribeFrameIntegrated()` in the ctor
+(same pattern as `LiveStackTriggersService.cs`).
+
+```csharp
+public class RefocusSuggestionService : IDisposable {
+    public RefocusSuggestionStatus CurrentStatus { get; }
+    public event Action<RefocusSuggestionStatus>? StatusChanged;
+    public void Dismiss(bool resetBaseline);   // "I refocused" button
+}
+
+public record RefocusSuggestionStatus(
+    bool Suggesting, string? Reason,
+    double BaselineHfr, double CurrentHfr,
+    double SlopePerFrame, int FramesSinceBaseline,
+    DateTime? SuggestedAt);
+```
+
+Detection algorithm, evaluated each `FrameIntegrated`:
+
+1. **Skip** when `LiveStackTriggers.RefocusEnabled == true` on the
+   active rig OR the active rig has no focuser (no point
+   suggesting when there's nothing to fix).
+2. **Skip** when frame has `MedianHfr <= 0` or `StarCount < 5`
+   (drop unreliable samples).
+3. **Maintain** a `Queue<HfrSample>` of the last 30 valid samples.
+4. **Warm-up**: ≥15 samples before evaluating.
+5. **Baseline** = 5th-percentile HFR over the last 20 samples
+   ("best stable HFR" reference) + median star count. Reset on
+   `LiveStackingService.Reset()`.
+6. **Trend test** every frame after warm-up:
+   - `slope > 0` (HFR rising) AND
+   - `mean(last 5 HFR) > baseline * 1.15` AND
+   - `slope * 5 > 0.3 * baseline` (extrapolated 5-frame change
+     > 30% of baseline)
+   → fire suggestion.
+7. **Secondary signal**: a 30% drop in average star count vs
+   baseline median fires on its own. Covers very-out-of-focus
+   where HFR looks deceptively stable because dim stars dropped
+   out entirely.
+8. **Auto-dismiss** when **both** HFR rolling mean recovers to
+   within 5% of baseline AND star count recovers, for 3
+   consecutive frames. The "both" matters: a star-count-only
+   trigger with stable HFR would otherwise auto-clear immediately.
+9. **Manual dismiss** via `Dismiss(resetBaseline)`. `true`
+   replaces baseline with current rolling mean (user refocused;
+   this is the new "good"). `false` clears the chip without
+   resetting (acknowledge but trust the existing baseline).
+10. **Debounce**: don't fire the toast more than once every 60 s
+    for the same suggestion cycle. The chip stays until cleared.
+
+All numerical constants live as `private const` so a tuning pass
+touches one file.
+
+### Notifications + WS payload
+
+- On first fire: `NotificationService.Push("warn", "Refocus
+  suggested: {reason}. Open FOCUS → Manual Assist.", ttlMs:
+  8000)`.
+- On dismiss / auto-clear: no notification (don't spam).
+- `StatusStreamHandler` adds `refocusSuggestion` sub-object
+  mirroring `RefocusSuggestionStatus`. Cadence is existing 1 Hz.
+
+### Dismiss endpoint
+
+`POST /api/livestack/refocus-suggestion/dismiss` body
+`{resetBaseline?: bool}` → 204 No Content.
+
+### Frontend: WS state + activity-bar chip
+
+- State: `refocusSuggestion: { suggesting, reason, baselineHfr,
+  currentHfr, slopePerFrame, suggestedAt }`.
+- `activityChips()` gains an entry when `refocusSuggestion.suggesting`:
+  ```js
+  out.push({
+      id: 'refocus-suggest', icon: '🎯', kind: 'warn',
+      label: 'Refocus needed: ' + refocusSuggestion.reason,
+      onClick: () => { this.tab = 'focus'; this.focusTab = 'assist'; }
+  });
+  ```
+- Methods `refocusSuggestionDismiss()` (POST without reset) and
+  `refocusSuggestionResolved()` (POST with resetBaseline=true).
+
+### LIVE tab callout
+
+Small yellow box above the live-stack canvas with three buttons:
+- **I refocused** — dismisses + replaces baseline with rolling mean.
+- **Open FOCUS** — jumps to FOCUS Manual Assist without dismiss.
+- **Dismiss** — clears chip without resetting baseline.
+
+## Phases (3 commits)
+
+### REFSUG-1: service + WS payload + Dismiss endpoint
+- `Services/RefocusSuggestionService.cs` (~250 lines).
+- Hook `LiveStackingService.SubscribeFrameIntegrated`.
+- Reset on `LiveStackingService.Reset()` + on
+  `EquipmentProfileActivated` (rig switch).
+- `Program.cs` singleton + eager-resolve.
+- `StatusStreamHandler` adds `refocusSuggestion` to the 1 Hz
+  payload.
+- `LiveStackEndpoints` gets `POST /refocus-suggestion/dismiss`.
+- Unit tests: warmup gate, skip when RefocusEnabled, rising-HFR
+  fires, stable HFR doesn't, star-count crash fires, auto-clear
+  when both recover, manual dismiss with/without baseline reset.
+
+### REFSUG-2: frontend chip + toast
+- `app.js` state + `handleStatusMessage` hook.
+- `activityChips()` entry + chip onClick.
+- `refocusSuggestionDismiss()` + `refocusSuggestionResolved()`.
+- Toast through existing `NotificationService` pump.
+
+### REFSUG-3: LIVE callout + docs
+- Yellow box above live-stack canvas with 3 buttons.
+- `docs/user-guide/live-stacking.md` gains "Refocus suggestion"
+  section explaining the trend-based detection + how it
+  complements (doesn't replace) LSTR-3 auto-refocus.
+- README bullet under live-stacking.
+
+## Reused code
+
+- `LiveStackingService.SubscribeFrameIntegrated` (LSTR-1) — same
+  hook LSTR-3 uses; second subscriber is fine.
+- `LiveStackingService.Reset()` event (LSTR-3 already listens).
+- `NotificationService.Push(kind, text, ttlMs)` — direct call;
+  client-side pump already wired.
+- `ProfileService.EquipmentProfileActivated` event — hook for rig
+  switch reset.
+- `app.js` toast pump — handles the warn toast automatically.
+
+## Verification
+
+- Pin baseline HFR (~1.9) over 20 frames; turn focuser knob out
+  manually; after ~3-5 degrading frames, toast fires "Refocus
+  suggested: HFR rising 18% over 12 frames".
+- Chip appears in activity bar.
+- Click chip → app switches to FOCUS → Manual Assist subtab.
+- User refocuses by hand, clicks "I refocused" → chip clears,
+  baseline resets to current.
+- `RefocusEnabled = true` → never fires.
+- Heavy clouds (StarCount < 5 every frame) → never fires.
+- `LiveStackingService.Reset()` → clears baseline.
+- Rig switch mid-stack → resets via `EquipmentProfileActivated`.
+
+## Notes
+
+- Why 15-sample warmup: ≥10 needed for stable regression, +5
+  buffer for 1-2 bad samples.
+- Why 1.15× baseline + slope check: HFR fluctuates a few % from
+  seeing. 15% over best + clear positive slope filters
+  seeing-driven jitter (oscillates around mean) from systematic
+  drift (trends one direction).
+- Star-count secondary signal covers edge case where HFR appears
+  stable but the brightest stars dimmed out (focus way off,
+  detector lost them).
+- Temperature trend NOT used as primary signal v1: passive
+  predictor, not direct measurement. Documented as future v2.
+
+## Out of scope (deferred)
+
+- Suggestion history graph.
+- Configurable threshold multipliers via Settings.
+- Temperature as third signal.
+- Star FWHM trend (alternative to HFR).
+- Auto-fire LSTR-3 from suggestion confidence.
+
+---
+
+# Previous plan: HELP tab — in-app stepper tutorials (HELP-1..5)
+
+> Previous plan (AUTH, basic auth) preserved below.
 > below starting at `# Previous plan: Client-side live stacking via WASM (CLST)`.
 > The entire CLST-1..8 stack is in production; this plan builds the
 > distribution and operability layer on top so a regular

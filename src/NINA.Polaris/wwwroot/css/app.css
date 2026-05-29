@@ -64,6 +64,15 @@ html, body {
     -webkit-tap-highlight-color: transparent;
 }
 
+/* Body owns the vertical stack: header + app-layout + activity bar.
+   Flex column so the activity bar docks at the bottom as a regular
+   flow element instead of floating over content (which used to hide
+   Settings rows + Sky controls behind the bar). */
+body {
+    display: flex;
+    flex-direction: column;
+}
+
 /* Mobile/small-screen global UI scale-down. The codebase uses
    pixel units almost exclusively (no rem-based scale), so dialing
    the root font-size does nothing. The CSS `zoom` property scales
@@ -440,7 +449,8 @@ html, body {
 /* App Layout */
 .app-layout {
     display: flex;
-    height: calc(100% - var(--statusbar-height));
+    flex: 1;
+    min-height: 0;
 }
 
 /* Sidebar */
@@ -3098,7 +3108,6 @@ label select.input-sm {
 
     .app-layout {
         flex-direction: column;
-        height: calc(100% - var(--statusbar-height));
     }
 
     .content {
@@ -4250,14 +4259,6 @@ label select.input-sm {
 .tab-panel-sky {
     display: flex;
     flex-direction: column;
-    /* The activity bar (position:fixed, height 36px) floats over the
-       viewport bottom. The global .tab-panel padding-bottom is meant
-       to reserve space for it, but the sky tab packs its rows tight
-       to the bottom edge (sky-info-panel + control-row) and the last
-       action button row was sliding behind the activity bar. Need
-       enough headroom for: activity bar (36px) + button height (~32px)
-       + a few px of breathing room, bumped from 48 to 72. */
-    padding-bottom: 72px !important;
 }
 
 /* Image History */
@@ -6091,17 +6092,16 @@ label select.input-sm {
 }
 
 /* ===========================================================
-   Activity bar, fixed bottom strip showing active operations
-   on the left and host CPU/RAM on the right.
+   Activity bar, docked at the bottom of the body flex column
+   showing active operations on the left and host CPU/RAM on
+   the right. Used to be position:fixed and overlaid content
+   (Settings rows + Sky controls disappeared underneath it);
+   now it's a regular flow element so content stops above it.
    ----------------------------------------------------------- */
 
 .activity-bar {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
     height: 36px;
-    z-index: 50;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -6113,6 +6113,25 @@ label select.input-sm {
     font-size: 11px;
     color: var(--text-secondary);
     user-select: none;
+}
+
+/* On mobile the sidebar reverts to a position:fixed bottom strip
+   (56px tall). The activity bar would otherwise sit under it, so
+   on small screens we float the bar just above the sidebar. */
+@media (max-width: 768px) {
+    .activity-bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 56px;
+        z-index: 50;
+    }
+    /* The bar is taken out of the flex column on mobile, so the
+       content needs to leave room for both the sidebar (56px) and
+       the floating activity bar (36px). */
+    .content {
+        margin-bottom: 92px;
+    }
 }
 
 /* Operations row: horizontally scrollable when chips overflow,
@@ -6286,11 +6305,10 @@ label select.input-sm {
     text-overflow: ellipsis;
 }
 
-/* Push all tab content up so the fixed bar never tapes over the
-   last row of any panel. The home panel keeps its sticky footer
-   right above the activity bar thanks to the same offset. */
-.tab-panel  { padding-bottom: 40px !important; }
-.home-panel { padding-bottom: 40px !important; }
+/* The activity bar now docks in the body flex column, so panels
+   no longer need to reserve space for a floating overlay. Padding
+   stays zero (default) on desktop. Mobile keeps its own clearance
+   via .content margin-bottom inside the @media block above. */
 
 /* ===========================================================
    RIGS tab, connection strip + role-based grid + accessories

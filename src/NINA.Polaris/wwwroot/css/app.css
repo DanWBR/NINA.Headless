@@ -7352,10 +7352,27 @@ label select.input-sm {
     font-size: 14px;
 }
 .equip-meta-derived {
-    align-self: center;
-    font-size: 13px;
-    color: var(--text-secondary);
-    padding-bottom: 2px;
+    /* The 'f/X.Y' badge that sits next to Focal length + Aperture.
+       Previously aligned center with a 13px font: it visually sank
+       between the inputs (which sit at the bottom of their column-
+       direction label cells) and read smaller than every other
+       value in the row. Now aligns to the input baseline + matches
+       the 14px input font + bumps to the primary text color so the
+       computed value reads as a first-class field. nowrap keeps
+       'f/X.Y' from breaking onto a second line when the row gets
+       tight, and the small horizontal padding gives it breathing
+       room from the neighbouring Aperture input. */
+    align-self: flex-end;
+    margin-bottom: 9px;
+    padding: 0 6px;
+    font-size: 14px;
+    line-height: 1.2;
+    color: var(--text-primary);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.equip-meta-derived strong {
+    font-weight: 600;
 }
 
 /* Status dot variants used by the new metadata cards. */

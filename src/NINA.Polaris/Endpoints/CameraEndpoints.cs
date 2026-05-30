@@ -8,7 +8,22 @@ public static class CameraEndpoints {
 
         group.MapPost("/capture", async (EquipmentManager equip, ImageRelayService relay,
             LiveStackingService liveStack, ImageWriterService imageWriter,
+            ILoggerFactory loggerFactory,
             CaptureRequest request) => {
+            // Diag log -- helps trace 'preview frame landing on live
+            // canvas' bug reports. Shows what JSON arrived from the
+            // client side AS THE SERVER DESERIALIZED IT, including
+            // whether feedLiveStack made it across the wire as the
+            // expected false. If feedLiveStack is null here when the
+            // client thinks it sent false, it means the JS the browser
+            // is running predates the FeedLiveStack field -- typically
+            // a stale cached app.js. Force-refresh fixes it.
+            var capLogger = loggerFactory.CreateLogger("Polaris.Capture");
+            capLogger.LogInformation(
+                "POST /capture: exposure={Exp:F2}s gain={Gain} binning={Bin} kind={Kind} feedLiveStack={Feed} saveToDisk={Save} (liveStackRunning={Running})",
+                request.Exposure, request.Gain, request.Binning,
+                request.Kind ?? "(null=live)", request.FeedLiveStack,
+                request.SaveToDisk, liveStack.IsRunning);
             if (equip.Camera == null)
                 return Results.BadRequest(new { error = "No camera selected" });
 
@@ -57,6 +72,12 @@ public static class CameraEndpoints {
                 // don't trigger the auto-recenter reference solve".
                 // Null = legacy behaviour (feed if running).
                 var feedStack = request.FeedLiveStack ?? true;
+                capLogger.LogInformation(
+                    "Capture path decision: feedStack={Feed} && liveStackRunning={Running} -> {Path}",
+                    feedStack, liveStack.IsRunning,
+                    (feedStack && liveStack.IsRunning)
+                        ? "AddFrameAsync (LIVE stacker)"
+                        : $"Relay(kind={ParseFrameKind(request.Kind)})");
                 if (feedStack && liveStack.IsRunning) {
                     // SNR: keep the ETA's frame-to-time conversion
                     // honest by feeding the actual exposure (which

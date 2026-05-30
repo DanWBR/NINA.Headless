@@ -9790,7 +9790,14 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
          3-input signature (sigma + strenght separate). -->
     <script src="/js/onnx-pipelines.js?v=GX12o"></script>
     <script src="/js/lib/alpine.min.js" defer></script>
-    <script src="/js/app.js"></script>
+    <!-- Cache buster on app.js so JS fixes propagate without users
+         having to remember Ctrl+Shift+R. Bump the v= when shipping
+         app.js changes that need to land immediately (frame routing
+         fixes, security fixes, etc). app.js is hot enough during
+         development that this is a per-commit nuisance, but the cost
+         of users running stale JS for hours (with FrameKind routing
+         bugs ending up on the wrong canvas) is higher. -->
+    <script src="/js/app.js?v=20260530-prevdiag"></script>
     <!-- CLST-2: WASM live-stack module bootstrap. The .NET runtime
          loads, hangs the [JSExport] surface off globalThis.NINA.Polaris.Wasm,
          then dispatches the 'nina-wasm-ready' event app.js listens for.

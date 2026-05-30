@@ -4598,10 +4598,14 @@ function ninaApp() {
         _fanOutFrameToCanvases(src, srcW, srcH, frameKind = 0) {
             const targets = this._canvasIdsForFrameKind(frameKind);
             const skipLive = (src && src.id === 'liveCanvas');   // src IS liveCanvas → don't blit-to-self
-            // Diagnostic accumulator, one log entry per fan-out the
-            // first time, then once per 60 fan-outs (so a video stream
-            // doesn't spam but we still get periodic confirmation).
-            const debugThisCall = !this._loggedFanout
+            // Diagnostic accumulator. ALWAYS log for non-Live kinds
+            // (PREVIEW / FOCUS / VIDEO / SlewPreview) so the user can
+            // confirm in DevTools that the routing is happening, then
+            // throttle to once-per-60 for Live (which is the steady
+            // sequence stream that would otherwise spam the console).
+            const isNonLive = (frameKind | 0) !== 0;
+            const debugThisCall = isNonLive
+                || !this._loggedFanout
                 || (++this._fanoutCounter % 60 === 0);
             const report = debugThisCall ? [] : null;
             this._loggedFanout = true;
@@ -10663,7 +10667,7 @@ function ninaApp() {
                 // Use a per-request timeout proportional to exposure
                 // (default apiFetch timeout is 15s, which is too short
                 // for a 30s sub).
-                const resp = await this.apiPost('/api/camera/capture', {
+                const previewBody = {
                     exposure: this.preview.exposure,
                     gain: this.preview.gain,
                     binning: parseInt(this.preview.binning) || 1,
@@ -10681,7 +10685,14 @@ function ninaApp() {
                     // untouched. Without this every preview tap
                     // overwrites the live-stack accumulator's display.
                     kind: 'preview'
-                }, {
+                };
+                // Diag log -- if the user reports 'preview frame ends
+                // up on the LIVE canvas / live stack', open DevTools
+                // and confirm this log shows feedLiveStack:false +
+                // kind:'preview'. If it doesn't, the browser is
+                // serving stale JS -- hard-refresh (Ctrl+Shift+R).
+                console.log('[Polaris] previewTakeSnap body:', previewBody);
+                const resp = await this.apiPost('/api/camera/capture', previewBody, {
                     timeout: Math.max(15000, (this.preview.exposure + 30) * 1000)
                 });
                 const r = await resp.json();

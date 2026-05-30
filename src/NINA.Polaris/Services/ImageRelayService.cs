@@ -134,11 +134,32 @@ public class ImageRelayService : IDisposable {
         }
 
         if (needsJpeg) {
-            jpegFrame = buffer.ToJpeg(85);
+            // Wrap JPEG bytes in the SAME [length-prefix + 24-byte
+            // stream header] envelope used by the raw path so the
+            // FrameKind survives the trip to the browser. Before this
+            // wrap, JPEG was sent as bare bytes -- the client had no
+            // way to know which panel the frame belonged to, every
+            // JPEG defaulted to frameKind=0 (Live) inside
+            // _renderJpegFrame, and a PREVIEW snap landed on the LIVE
+            // canvas instead of previewCanvas. Symptom reported by the
+            // user: "o frame do preview esta aparecendo no live stack
+            // e nao no preview". Raw mode already carried the kind
+            // correctly (offset 20 of the header) -- this brings JPEG
+            // mode to parity. Client detects the envelope by checking
+            // for FF D8 (JPEG SOI) at the position right after the
+            // length+header prefix; bare-FF-D8 at offset 0 is treated
+            // as legacy unwrapped JPEG for back-compat with any older
+            // client cached in someone's browser.
+            var jpegBytes = buffer.ToJpeg(85);
+            var jpegHeader = buffer.GetStreamHeader(frameKind);
+            jpegFrame = new byte[4 + jpegHeader.Length + jpegBytes.Length];
+            BitConverter.GetBytes(jpegHeader.Length).CopyTo(jpegFrame, 0);
+            jpegHeader.CopyTo(jpegFrame, 4);
+            jpegBytes.CopyTo(jpegFrame, 4 + jpegHeader.Length);
             _logger.LogInformation(
-                "Relaying JPEG {W}x{H}: {SizeKB:F0}KB to JPEG clients",
+                "Relaying JPEG {W}x{H}: {SizeKB:F0}KB to JPEG clients (kind={Kind})",
                 buffer.Width, buffer.Height,
-                (double)jpegFrame.Length / 1024);
+                (double)jpegBytes.Length / 1024, kind);
         }
 
         var deadClients = new List<string>();

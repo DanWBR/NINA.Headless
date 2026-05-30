@@ -3388,9 +3388,44 @@ function ninaApp() {
         handleImageFrame(arrayBuffer) {
             this.liveActive = true;
 
-            // Detect format: JPEG files always start with 0xFF 0xD8 (SOI marker)
+            // Three on-wire formats now possible:
+            //  (a) Bare JPEG -- starts with FF D8 at offset 0. Legacy
+            //      shape from older servers that didn't envelope JPEG.
+            //      No FrameKind available -- defaults to Live (0).
+            //  (b) Headered JPEG -- 4-byte int32 headerLen + 24-byte
+            //      stream header (carrying FrameKind at offset 20 of
+            //      the header itself) + raw JPEG bytes starting with
+            //      FF D8 at offset 4+headerLen. Current server emits
+            //      this; carries the per-panel routing tag so PREVIEW
+            //      snaps no longer leak onto the LIVE canvas.
+            //  (c) Raw LZ4 -- 4-byte headerLen + 24-byte header +
+            //      LZ4-compressed pixel payload. Always carried
+            //      FrameKind correctly via _renderRawFrame.
             const view = new Uint8Array(arrayBuffer);
-            const isJpeg = view.length >= 2 && view[0] === 0xFF && view[1] === 0xD8;
+            const isBareJpeg = view.length >= 2
+                && view[0] === 0xFF && view[1] === 0xD8;
+            let headeredJpegKind = null;
+            let headeredJpegBytes = null;
+            if (!isBareJpeg && view.length >= 30) {
+                const dv0 = new DataView(arrayBuffer);
+                const headerLen0 = dv0.getInt32(0, true);
+                // Sanity-bound the headerLen so an LZ4 payload starting
+                // with an arbitrary 4-byte sequence doesn't get
+                // mis-parsed as a giant header.
+                if (headerLen0 >= 20 && headerLen0 <= 64) {
+                    const payloadOffset = 4 + headerLen0;
+                    if (payloadOffset + 2 <= view.length
+                        && view[payloadOffset] === 0xFF
+                        && view[payloadOffset + 1] === 0xD8) {
+                        // Headered JPEG match. Extract FrameKind from
+                        // header offset 20 (same layout raw uses).
+                        headeredJpegKind = headerLen0 >= 24
+                            ? dv0.getInt32(20, true) : 0;
+                        headeredJpegBytes = arrayBuffer.slice(payloadOffset);
+                    }
+                }
+            }
+            const isJpeg = isBareJpeg || headeredJpegBytes !== null;
 
             // One-shot diagnostic, leaves a single line per session so
             // we can confirm in DevTools whether snap captures actually
@@ -3426,7 +3461,13 @@ function ninaApp() {
             }
 
             if (isJpeg) {
-                this._renderJpegFrame(arrayBuffer);
+                // Pass the kind through when we got the headered shape
+                // (case b). Bare JPEG falls back to default 0 / Live.
+                if (headeredJpegBytes !== null) {
+                    this._renderJpegFrame(headeredJpegBytes, headeredJpegKind);
+                } else {
+                    this._renderJpegFrame(arrayBuffer);
+                }
             } else {
                 this._renderRawFrame(arrayBuffer);
             }

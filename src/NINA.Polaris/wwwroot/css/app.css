@@ -3171,6 +3171,49 @@ label select.input-sm {
     font-size: inherit;
 }
 
+/* Native <select> on dark themes defaults to the OS combobox
+   chrome (white background, black text, no border-radius), which
+   reads as a foreign UI inside the night-mode interface. Pin the
+   bare selects in Settings cards to the same input theme the
+   text/number fields already use, plus a custom SVG chevron so we
+   can drop the OS arrow without losing the affordance. .input-sm
+   already does this for narrow numeric dropdowns — this just
+   covers the wider full-row selects (e.g. the FONT-1 Font picker)
+   that don't fit .input-sm's 90px lockwidth. */
+.settings-section select:not(.input-sm):not(.input-md) {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 32px 9px 10px;
+    min-height: 38px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    /* Coach Chromium / Firefox to render the popup option list in
+       dark mode too (the closed combobox surface is fully styled
+       above, but the popup is OS-controlled and only honours
+       color-scheme). Scoped to the select so we don't toggle the
+       whole document into dark mode unintentionally. */
+    color-scheme: dark;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='%23a8b3bf' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    transition: border-color var(--transition);
+}
+.settings-section select:not(.input-sm):not(.input-md):focus {
+    border-color: var(--accent);
+}
+/* The popup menu (option list) still uses the OS chrome — that's
+   browser-controlled and not reliably stylable. Best we can do is
+   coach Chromium via color-scheme so the popup matches dark mode. */
+.settings-section select:not(.input-sm):not(.input-md) option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
 .settings-section > h3 {
     /* h3 acts as the card header band, like .equip-card-header on
        the RIGS cards: padded, darker background. position:sticky

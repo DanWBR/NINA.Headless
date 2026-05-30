@@ -11610,11 +11610,32 @@ function ninaApp() {
                     `/api/camera/select/${encodeURIComponent(this.equipCameraChoice)}${qs}`);
                 await this.apiPost('/api/camera/connect');
                 this.selectedCamera = this.equipCameraChoice;
+                // Persist the (device, driver) pair into the active rig
+                // so the next browser reload restores the same driver
+                // selection. Without this the dropdown reverts to INDI
+                // on every page load even though the device was last
+                // connected via ASCOM.
+                this._persistRigSelection({
+                    camera: this.equipCameraChoice,
+                    cameraDriver: this.cameraDriver || 'indi'
+                });
                 this.toast('Camera connected: ' + this.equipCameraChoice, 'ok');
                 this.pollCameraInfo();
             } catch (e) {
                 this.toast('Camera connection failed: ' + e.message, 'error');
             }
+        },
+
+        // Patch the active rig with whatever fields are passed and
+        // schedule a debounced PUT via saveRig. Used by the per-device
+        // connect handlers so the (deviceName, driver) pair sticks
+        // across browser reloads without forcing the user to remember
+        // hitting "💾 Save selections".
+        _persistRigSelection(patch) {
+            const rig = this.activeRig;
+            if (!rig) return;
+            Object.assign(rig, patch);
+            this.saveRig(rig);
         },
 
         // Load the list of camera-driver kinds offered by this host
@@ -11739,6 +11760,10 @@ function ninaApp() {
                 await this.apiPost('/api/telescope/connect');
                 this.selectedTelescope = this.equipMountChoice;
                 this.mount.connected = true;
+                this._persistRigSelection({
+                    telescope: this.equipMountChoice,
+                    telescopeDriver: this.mountDriver || 'indi'
+                });
                 this.toast('Mount connected: ' + this.equipMountChoice, 'ok');
             } catch (e) {
                 this.toast('Mount connection failed: ' + e.message, 'error');
@@ -13133,6 +13158,10 @@ function ninaApp() {
                 await this.apiPost('/api/focuser/connect');
                 this.selectedFocuser = this.equipFocuserChoice;
                 this.focusConnected = true;
+                this._persistRigSelection({
+                    focuser: this.equipFocuserChoice,
+                    focuserDriver: this.focuserDriver || 'indi'
+                });
                 this.toast('Focuser connected: ' + this.equipFocuserChoice, 'ok');
             } catch (e) {
                 this.toast('Focuser connection failed: ' + e.message, 'error');
@@ -13162,6 +13191,10 @@ function ninaApp() {
                 await this.apiPost('/api/filterwheel/connect');
                 this.selectedFilterWheel = this.equipFilterChoice;
                 this.filterWheel.connected = true;
+                this._persistRigSelection({
+                    filterWheel: this.equipFilterChoice,
+                    filterWheelDriver: this.filterWheelDriver || 'indi'
+                });
                 this.toast('Filter wheel connected: ' + this.equipFilterChoice, 'ok');
             } catch (e) {
                 this.toast('Filter wheel connection failed: ' + e.message, 'error');

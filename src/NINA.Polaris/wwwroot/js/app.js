@@ -11873,7 +11873,10 @@ function ninaApp() {
                     `/api/telescope/discover?driver=${encodeURIComponent(this.mountDriver)}`);
                 this.mountVendorDevices = list || [];
                 if (this.mountVendorDevices.length === 0) {
-                    this.toast('No ASCOM telescope drivers registered on this host', 'warn');
+                    const hint = this.mountDriver === 'alpaca'
+                        ? 'No Alpaca telescopes discovered. Run Discover in the ASCOM/Alpaca tab first.'
+                        : 'No ASCOM telescope drivers registered on this host';
+                    this.toast(hint, 'warn');
                 }
             } catch (e) {
                 this.toast('Mount detect failed: ' + (e.message || ''), 'error');

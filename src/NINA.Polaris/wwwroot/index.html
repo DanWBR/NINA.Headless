@@ -3004,7 +3004,9 @@
                                 <label class="equip-driver-label">Driver</label>
                                 <select class="equip-select equip-driver-select"
                                         x-model="cameraDriver"
-                                        @change="cameraVendorDevices = []; equipCameraChoice = ''">
+                                        @change="cameraVendorDevices = []; equipCameraChoice = '';
+                                                  if (cameraDriver !== 'indi' && cameraDriverInfo?.available)
+                                                      detectVendorCameras()">
                                     <template x-for="d in cameraDrivers" :key="d.id">
                                         <option :value="d.id" :disabled="!d.available"
                                                 x-text="d.name + (d.available ? '' : ' (not installed)')"></option>
@@ -3060,12 +3062,16 @@
                                      the "Detect" button below. Stays empty
                                      until the user clicks it. -->
                                 <select class="equip-select" x-model="equipCameraChoice"
-                                        x-show="cameraDriver !== 'indi'">
+                                        x-show="cameraDriver !== 'indi'"
+                                        :disabled="cameraDiscovering">
                                     <option value="">
-                                        <template x-if="cameraVendorDevices.length === 0">
-                                            <span>-- Click Detect to scan --</span>
+                                        <template x-if="cameraDiscovering">
+                                            <span>Detecting…</span>
                                         </template>
-                                        <template x-if="cameraVendorDevices.length > 0">
+                                        <template x-if="!cameraDiscovering && cameraVendorDevices.length === 0">
+                                            <span>No devices found</span>
+                                        </template>
+                                        <template x-if="!cameraDiscovering && cameraVendorDevices.length > 0">
                                             <span>Select camera</span>
                                         </template>
                                     </option>
@@ -3073,14 +3079,6 @@
                                         <option :value="c.id" x-text="c.model + ' (' + c.detail + ')'"></option>
                                     </template>
                                 </select>
-
-                                <button class="btn btn-sm" @click="detectVendorCameras()"
-                                        x-show="cameraDriver !== 'indi'"
-                                        :disabled="cameraDiscovering || !cameraDriverInfo?.available"
-                                        title="Re-scan for connected cameras">
-                                    <span x-show="!cameraDiscovering">🔍 Detect</span>
-                                    <span x-show="cameraDiscovering">…</span>
-                                </button>
 
                                 <!-- ASCOM Setup button. Opens the driver's
                                      modal SetupDialog() form so the user can
@@ -3195,7 +3193,10 @@
                                 <label class="equip-driver-label">Driver</label>
                                 <select class="equip-select equip-driver-select"
                                         x-model="mountDriver"
-                                        @change="equipMountChoice = ''">
+                                        @change="mountVendorDevices = []; equipMountChoice = '';
+                                                  if ((mountDriver === 'ascom-com' || mountDriver === 'alpaca')
+                                                      && mountDriverInfo?.available)
+                                                      detectVendorMounts()">
                                     <template x-for="d in mountDrivers" :key="d.id">
                                         <option :value="d.id" :disabled="!d.available"
                                                 x-text="d.name + (d.available ? '' : ' (not installed)')"></option>
@@ -3238,11 +3239,13 @@
                                      which walks the Windows registry under
                                      SOFTWARE\ASCOM\Telescope Drivers. -->
                                 <select class="equip-select"
-                                        x-show="mountDriver === 'ascom-com'"
-                                        x-model="equipMountChoice">
+                                        x-show="mountDriver === 'ascom-com' || mountDriver === 'alpaca'"
+                                        x-model="equipMountChoice"
+                                        :disabled="mountDiscovering">
                                     <option value="">
-                                        <span x-show="mountVendorDevices.length === 0">-- Click Detect --</span>
-                                        <span x-show="mountVendorDevices.length > 0">Select driver</span>
+                                        <span x-show="mountDiscovering">Detecting…</span>
+                                        <span x-show="!mountDiscovering && mountVendorDevices.length === 0">No devices found</span>
+                                        <span x-show="!mountDiscovering && mountVendorDevices.length > 0">Select driver</span>
                                     </option>
                                     <template x-for="d in mountVendorDevices" :key="d.id">
                                         <option :value="d.id" x-text="d.model + ' (' + d.id + ')'"></option>
@@ -3253,25 +3256,20 @@
                                      no discovery, the user types the mount's
                                      IP. Placeholder shows the factory AP
                                      default so AZ-GTi works out of the box.
-                                     ASCOM has its own dropdown above, so
-                                     this text input only renders for the
-                                     non-INDI / non-ASCOM drivers. -->
+                                     ASCOM + Alpaca have their own dropdowns
+                                     above, so this text input only renders
+                                     for the non-INDI / non-ASCOM / non-Alpaca
+                                     drivers. -->
                                 <input type="text" class="equip-select"
-                                       x-show="mountDriver !== 'indi' && mountDriver !== 'ascom-com'"
+                                       x-show="mountDriver !== 'indi'
+                                                && mountDriver !== 'ascom-com'
+                                                && mountDriver !== 'alpaca'"
                                        x-model="equipMountChoice"
                                        :placeholder="mountDriver === 'synscan-wifi'
                                                      ? '192.168.4.1:11880 (default)'
                                                      : 'host:port'"
                                        title="Mount IP and port. Empty falls back to the driver's default endpoint (e.g. 192.168.4.1:11880 for SynScan factory AP).">
 
-                                <button class="btn btn-sm"
-                                        x-show="mountDriver === 'ascom-com'"
-                                        @click="detectVendorMounts()"
-                                        :disabled="mountDiscovering"
-                                        title="Re-scan registered ASCOM telescope drivers">
-                                    <span x-show="!mountDiscovering">🔍 Detect</span>
-                                    <span x-show="mountDiscovering">…</span>
-                                </button>
                                 <button class="btn btn-sm"
                                         x-show="mountDriver === 'ascom-com' && equipMountChoice"
                                         @click="openAscomSetup(equipMountChoice)"
@@ -3337,7 +3335,9 @@
                                 <label class="equip-driver-label">Driver</label>
                                 <select class="equip-select equip-driver-select"
                                         x-model="focuserDriver"
-                                        @change="focuserVendorDevices = []; equipFocuserChoice = ''">
+                                        @change="focuserVendorDevices = []; equipFocuserChoice = '';
+                                                  if (focuserDriver !== 'indi' && focuserDriverInfo?.available)
+                                                      detectVendorFocusers()">
                                     <template x-for="d in focuserDrivers" :key="d.id">
                                         <option :value="d.id" :disabled="!d.available"
                                                 x-text="d.name + (d.available ? '' : ' (not installed)')"></option>
@@ -3364,14 +3364,19 @@
                                     </template>
                                 </select>
 
-                                <!-- ASCOM path: dropdown populated by Detect -->
+                                <!-- ASCOM / Alpaca path: dropdown auto-populated
+                                     when the user switches driver. -->
                                 <select class="equip-select" x-model="equipFocuserChoice"
-                                        x-show="focuserDriver !== 'indi'">
+                                        x-show="focuserDriver !== 'indi'"
+                                        :disabled="focuserDiscovering">
                                     <option value="">
-                                        <template x-if="focuserVendorDevices.length === 0">
-                                            <span>-- Click Detect to scan --</span>
+                                        <template x-if="focuserDiscovering">
+                                            <span>Detecting…</span>
                                         </template>
-                                        <template x-if="focuserVendorDevices.length > 0">
+                                        <template x-if="!focuserDiscovering && focuserVendorDevices.length === 0">
+                                            <span>No devices found</span>
+                                        </template>
+                                        <template x-if="!focuserDiscovering && focuserVendorDevices.length > 0">
                                             <span>Select focuser</span>
                                         </template>
                                     </option>
@@ -3379,14 +3384,6 @@
                                         <option :value="f.id" x-text="f.model + ' (' + f.detail + ')'"></option>
                                     </template>
                                 </select>
-
-                                <button class="btn btn-sm" @click="detectVendorFocusers()"
-                                        x-show="focuserDriver !== 'indi'"
-                                        :disabled="focuserDiscovering || !focuserDriverInfo?.available"
-                                        title="Re-scan for installed ASCOM focuser drivers">
-                                    <span x-show="!focuserDiscovering">🔍 Detect</span>
-                                    <span x-show="focuserDiscovering">…</span>
-                                </button>
 
                                 <button class="btn btn-sm"
                                         x-show="focuserDriver === 'ascom-com' && equipFocuserChoice"
@@ -3431,7 +3428,9 @@
                                 <label class="equip-driver-label">Driver</label>
                                 <select class="equip-select equip-driver-select"
                                         x-model="filterWheelDriver"
-                                        @change="filterWheelVendorDevices = []; equipFilterChoice = ''">
+                                        @change="filterWheelVendorDevices = []; equipFilterChoice = '';
+                                                  if (filterWheelDriver !== 'indi' && filterWheelDriverInfo?.available)
+                                                      detectVendorFilterWheels()">
                                     <template x-for="d in filterWheelDrivers" :key="d.id">
                                         <option :value="d.id" :disabled="!d.available"
                                                 x-text="d.name + (d.available ? '' : ' (not installed)')"></option>
@@ -3458,12 +3457,16 @@
                                 </select>
 
                                 <select class="equip-select" x-model="equipFilterChoice"
-                                        x-show="filterWheelDriver !== 'indi'">
+                                        x-show="filterWheelDriver !== 'indi'"
+                                        :disabled="filterWheelDiscovering">
                                     <option value="">
-                                        <template x-if="filterWheelVendorDevices.length === 0">
-                                            <span>-- Click Detect to scan --</span>
+                                        <template x-if="filterWheelDiscovering">
+                                            <span>Detecting…</span>
                                         </template>
-                                        <template x-if="filterWheelVendorDevices.length > 0">
+                                        <template x-if="!filterWheelDiscovering && filterWheelVendorDevices.length === 0">
+                                            <span>No devices found</span>
+                                        </template>
+                                        <template x-if="!filterWheelDiscovering && filterWheelVendorDevices.length > 0">
                                             <span>Select filter wheel</span>
                                         </template>
                                     </option>
@@ -3471,14 +3474,6 @@
                                         <option :value="f.id" x-text="f.model + ' (' + f.detail + ')'"></option>
                                     </template>
                                 </select>
-
-                                <button class="btn btn-sm" @click="detectVendorFilterWheels()"
-                                        x-show="filterWheelDriver !== 'indi'"
-                                        :disabled="filterWheelDiscovering || !filterWheelDriverInfo?.available"
-                                        title="Re-scan for installed ASCOM filter-wheel drivers">
-                                    <span x-show="!filterWheelDiscovering">🔍 Detect</span>
-                                    <span x-show="filterWheelDiscovering">…</span>
-                                </button>
 
                                 <button class="btn btn-sm"
                                         x-show="filterWheelDriver === 'ascom-com' && equipFilterChoice"

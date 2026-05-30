@@ -223,6 +223,18 @@ public static class SystemEndpoints {
                     out var parsed)) {
                 return Results.BadRequest(new { error = "clientUtc must be ISO-8601" });
             }
+            // Short-circuit on platforms that physically can't do it
+            // (Windows / macOS). 501 Not Implemented is the right code:
+            // the route exists but the host can't honour it. Previously
+            // returned 500 which surfaced as a generic crash in the
+            // browser console.
+            if (!clock.IsSupported) {
+                return Results.Json(new {
+                    ok = false,
+                    error = "Clock sync is Linux-only on this host. "
+                          + "Use the OS clock settings or enable NTP."
+                }, statusCode: 501);
+            }
             var result = await clock.SetUtcAsync(parsed, ct);
             if (!result.Ok) {
                 return Results.Json(new {

@@ -5021,12 +5021,21 @@ label select.input-sm {
 .equip-select {
     flex: 1;
     min-width: 0;
-    padding: 5px 8px;
+    /* Match the .input-sm geometry used by the Main Telescope card
+       (Brand / Model / Accessory dropdowns). Previously this was
+       5px / 12px-font / no min-height — produced visibly shorter
+       selects in Camera / Mount / Focuser / FilterWheel / Rotator /
+       Flat Panel / Dome / Weather cards than in Telescope, which
+       broke the uniform row rhythm. Now everything in RIGS uses
+       the same 38 px tap-friendly height + 14 px font. */
+    padding: 9px 10px;
+    min-height: 38px;
+    box-sizing: border-box;
     background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-primary);
-    font-size: 12px;
+    font-size: 14px;
     cursor: pointer;
     outline: none;
     appearance: auto;
@@ -7302,10 +7311,18 @@ label select.input-sm {
 /* Selects inside metadata-card rows need to fill the label width
    (otherwise inherit input-sm's 60-90px fixed width and clip
    ", Manual entry," / ", Pick a model," labels). Numeric inputs
-   inside the same row keep their explicit inline width attr. */
+   inside the same row keep their explicit inline width attr.
+   max-width: none clears the 220px cap from .input-sm — that cap
+   is right for free-floating compact inputs but inside metadata
+   rows it was the actual reason the Accessory dropdown stopped
+   way before the Model dropdown's right edge ('[reducer] SVBony
+   SV209 0.8x Re…'). Lifting it lets the accessory + brand +
+   model selects stretch to their label's flex-allocated width
+   instead of clamping at 220px. */
 .equip-meta-row label select.input-sm {
     width: 100%;
     min-width: 160px;
+    max-width: none;
 }
 /* Only stretch labels that *wrap a select*, labels around numeric
    inputs keep their intrinsic narrow width (set via inline style on

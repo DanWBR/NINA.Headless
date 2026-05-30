@@ -91,23 +91,31 @@ public static class AutoStretch {
 
         // First pass: find the actual maximum value present in the
         // image. The "saturation" threshold for histogram exclusion
-        // is the LOWER of the bit-depth theoretical max and the
-        // observed max. Why: drivers that pack an N-bit sensor into
-        // a 16-bit buffer often cap below 65535 (a 10-bit ZWO sensor
-        // shifted into the high 6 bits saturates at 65472, a 14-bit
-        // CMOS at 65520, etc). The old code only excluded pixels
-        // at EXACTLY 65535, so a saturated overexposed frame had
-        // its actual saturation point (e.g. 65472) included in the
-        // sample, made the median sit on the saturation wall,
-        // forced shadow ≈ saturation and MAD ≈ 0, and the entire
-        // image got mapped to BLACK — counterintuitive: the user
-        // sees darkness where they expect "blown out white".
+        // is normally topVal, but drivers that pack an N-bit sensor
+        // into a 16-bit buffer often cap below 65535 (a 10-bit ZWO
+        // sensor shifted into the high 6 bits saturates at 65472,
+        // a 14-bit CMOS at 65520, etc). Excluding only pixels at
+        // EXACTLY topVal in those cases lets the real saturation
+        // wall into the sample, forces shadow ≈ saturation, MAD ≈ 0,
+        // and the whole frame gets mapped to BLACK.
+        //
+        // Heuristic: only treat observedMax as the saturation point
+        // when it's high enough to look like a real wall (>= 90% of
+        // topVal). For normal scenes with an observedMax well below
+        // topVal (a dim DSO peaking at 20000, a bright object at
+        // 50000), the bright pixels are legitimate signal — NOT a
+        // saturation wall — and excluding them would narrow the
+        // sample distribution, raise the computed shadow, and crush
+        // mid-tones to black. The previous version of this fix
+        // applied the observedMax threshold unconditionally and hit
+        // exactly that regression on high-contrast preview frames.
         ushort observedMax = 0;
         int limit = Math.Min(data.Length, pixelCount);
         for (int i = 0; i < limit; i++) {
             if (data[i] > observedMax) observedMax = data[i];
         }
-        ushort satThreshold = (observedMax > 0 && observedMax < topVal)
+        ushort wallThreshold = (ushort)(topVal * 0.9);
+        ushort satThreshold = (observedMax >= wallThreshold && observedMax < topVal)
             ? observedMax : topVal;
 
         // Histogram + median, restricted to NON-saturated samples

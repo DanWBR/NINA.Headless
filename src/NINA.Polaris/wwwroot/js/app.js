@@ -3545,24 +3545,28 @@ function ninaApp() {
                     this.stretchMid || 0.25));
                 return { shadow, scaleFactor: 1.0 / (white - shadow), midtone };
             }
-            // Find the OBSERVED max in the subsample. The
-            // saturation threshold for histogram exclusion is the
-            // lower of maxVal and observedMax — drivers that pack
-            // an N-bit sensor into a 16-bit buffer often cap below
-            // 65535 (a ZWO 10-bit sensor shifted into the high 6
-            // bits saturates at 65472, not 65535). Excluding only
-            // pixels at the theoretical max would leave the actual
-            // saturated wall in the sample, collapse the median +
-            // MAD onto that wall, force shadow ≈ saturation, and
-            // render the whole overexposed frame as BLACK (the
-            // counterintuitive bug we just fixed).
+            // Find observedMax. Saturation threshold is normally
+            // maxVal, but drivers that pack N-bit sensor data into
+            // a 16-bit buffer often cap below the theoretical max
+            // (ZWO 10-bit shifted into the high 6 bits saturates
+            // at 65472, not 65535). When the observed peak looks
+            // like a real saturation wall (>= 90% of maxVal) we
+            // use it as the threshold — otherwise the bright
+            // pixels are legitimate signal (e.g. a bright object
+            // peaking at 50000 in a contrasty scene) and excluding
+            // them would narrow the sample distribution, raise the
+            // computed shadow, and crush mid-tones to black. The
+            // previous form of this fix applied the observedMax
+            // threshold unconditionally and visibly shrank the
+            // displayed scene on high-contrast preview frames.
             const step = Math.max(1, Math.floor(pixels.length / 200000));
             let observedMax = 0;
             for (let i = 0; i < pixels.length; i += step) {
                 const v = pixels[i];
                 if (v > observedMax) observedMax = v;
             }
-            const satThreshold = (observedMax > 0 && observedMax < maxVal)
+            const wallThreshold = Math.floor(maxVal * 0.9);
+            const satThreshold = (observedMax >= wallThreshold && observedMax < maxVal)
                 ? observedMax : maxVal;
             // Second pass: collect non-saturated samples.
             const sampleArr = [];

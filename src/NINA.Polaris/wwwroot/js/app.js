@@ -16610,14 +16610,51 @@ function ninaApp() {
 
         async alpacaQueryManual() {
             if (!this.alpaca.manualHost || !this.alpaca.manualPort) return;
+            // Validate host before firing the request. Catches the
+            // classic typo "1270.0.0.1" (extra zero, octet > 255)
+            // that DNS rejects + the server can only surface as a
+            // 500 with a SocketException message. Better to fail
+            // here with an obvious toast that points at the field.
+            const host = (this.alpaca.manualHost || '').trim();
+            if (!this._isValidHostOrIp(host)) {
+                this.toast('Invalid host: "' + host + '" is not a valid IP address or hostname.', 'error');
+                return;
+            }
+            const port = parseInt(this.alpaca.manualPort, 10);
+            if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                this.toast('Invalid port: must be 1–65535.', 'error');
+                return;
+            }
             // Add or update the manual server in the list, then enumerate
-            let srv = this.alpaca.servers.find(s => s.host === this.alpaca.manualHost && s.port === this.alpaca.manualPort);
+            let srv = this.alpaca.servers.find(s => s.host === host && s.port === port);
             if (!srv) {
-                srv = { host: this.alpaca.manualHost, port: this.alpaca.manualPort,
-                        serverName: 'Manual entry', devices: null };
+                srv = { host, port, serverName: 'Manual entry', devices: null };
                 this.alpaca.servers.push(srv);
             }
             await this.alpacaQueryServer(srv);
+        },
+
+        // Accepts dotted-quad IPv4 (each octet 0-255), bracketed or
+        // bare IPv6, or RFC-1123 hostname (letters / digits / hyphens
+        // / dots, no leading or trailing hyphen per label). Conservative
+        // on purpose: the goal is to block "1270.0.0.1" / "127.0.0.0.1"
+        // / "host name with spaces" before the request even leaves
+        // the browser, not to reproduce the full RFC.
+        _isValidHostOrIp(s) {
+            if (!s || s.length > 253) return false;
+            // IPv4
+            const v4 = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+            if (v4) {
+                for (let i = 1; i <= 4; i++) {
+                    const n = parseInt(v4[i], 10);
+                    if (n < 0 || n > 255) return false;
+                }
+                return true;
+            }
+            // IPv6 (very loose — just hex groups + colons + optional ::)
+            if (/^\[?[0-9a-fA-F:]+\]?$/.test(s) && s.includes(':')) return true;
+            // Hostname (RFC-1123ish)
+            return /^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/.test(s);
         },
 
         alpacaIsConnected(srv, d) {

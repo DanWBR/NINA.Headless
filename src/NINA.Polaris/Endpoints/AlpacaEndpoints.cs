@@ -15,16 +15,60 @@ public static class AlpacaEndpoints {
 
         // ---- Manual server query (skip discovery, useful behind NAT / for tests) ----
         group.MapGet("/devices", async (string host, int port) => {
+            // Reject obvious garbage upfront so the user sees a clean
+            // 400 with an actionable message instead of a generic 500
+            // wrapping a SocketException. Common typo: "1270.0.0.1"
+            // (extra zero) — DNS won't resolve, .NET surfaces a
+            // System.Net.Sockets.SocketException which isn't useful
+            // to a non-technical user. Same logic as the JS
+            // _isValidHostOrIp helper, kept here as defence-in-depth
+            // for callers that bypass the UI (curl / scripts / future
+            // mobile clients).
+            if (string.IsNullOrWhiteSpace(host)) {
+                return Results.BadRequest(new { error = "Missing host." });
+            }
+            if (port < 1 || port > 65535) {
+                return Results.BadRequest(new { error = $"Invalid port {port}; must be 1-65535." });
+            }
+            // System.Uri rejects malformed hostnames + Uri.CheckHostName
+            // returns Unknown for "1270.0.0.1" etc.
+            var hostKind = Uri.CheckHostName(host);
+            if (hostKind == UriHostNameType.Unknown) {
+                return Results.BadRequest(new {
+                    error = $"'{host}' is not a valid IP address or hostname.",
+                    hint = "Check for typos — '1270.0.0.1' is invalid (octet > 255); use '127.0.0.1'."
+                });
+            }
+
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            var url = $"http://{host}:{port}/management/v1/configureddevices";
             try {
-                var url = $"http://{host}:{port}/management/v1/configureddevices";
                 var resp = await http.GetFromJsonAsync<AlpacaResponse<List<AlpacaConfiguredDevice>>>(url);
                 return Results.Ok(new {
                     host, port,
                     devices = resp?.Value ?? new List<AlpacaConfiguredDevice>()
                 });
+            } catch (HttpRequestException ex) {
+                // Connection refused / DNS / timeout — server not reachable.
+                // 502 Bad Gateway is the right status: our endpoint is up
+                // but the upstream Alpaca server isn't.
+                return Results.Json(new {
+                    error = $"Could not reach Alpaca server at {host}:{port}.",
+                    detail = ex.Message,
+                    hint = "Confirm the host + port are correct and the Alpaca server is running."
+                }, statusCode: 502);
+            } catch (TaskCanceledException) {
+                return Results.Json(new {
+                    error = $"Timeout reading from {host}:{port}.",
+                    hint = "Alpaca server is reachable but took longer than 5s to respond."
+                }, statusCode: 504);
+            } catch (System.Text.Json.JsonException ex) {
+                return Results.Json(new {
+                    error = $"Alpaca server at {host}:{port} returned invalid JSON.",
+                    detail = ex.Message
+                }, statusCode: 502);
             } catch (Exception ex) {
-                return Results.Problem($"Failed to query {host}:{port}: {ex.Message}");
+                return Results.Problem($"Unexpected error querying {host}:{port}: {ex.Message}");
             }
         });
 

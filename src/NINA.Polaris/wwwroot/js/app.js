@@ -10150,7 +10150,13 @@ function ninaApp() {
                     binning: parseInt(this.preview.binning) || 1,
                     filter: this.preview.filter || null,
                     saveToDisk: !!this.preview.saveToDisk,
-                    targetName: this.preview.targetName || 'snap'
+                    targetName: this.preview.targetName || 'snap',
+                    // PREVIEW is "test shot to check framing/focus" —
+                    // never feed the live stack, otherwise the
+                    // always-on stacker counts these frames + fires
+                    // the LSTR auto-recenter plate solve on the
+                    // first preview snap of every session.
+                    feedLiveStack: false
                 }, {
                     timeout: Math.max(15000, (this.preview.exposure + 30) * 1000)
                 });
@@ -10962,7 +10968,9 @@ function ninaApp() {
                     exposure: this.manualFocus.exposureSec,
                     gain: this.manualFocus.gain,
                     binning: 1,
-                    saveToDisk: false
+                    saveToDisk: false,
+                    // Manual focus assist is test shots, not science.
+                    feedLiveStack: false
                 });
                 const r = await resp.json();
                 if (r.status !== 'complete') {

@@ -50,7 +50,14 @@ public static class CameraEndpoints {
                         gain: request.Gain);
                 }
 
-                if (liveStack.IsRunning)
+                // FeedLiveStack=false from the caller forces relay-only
+                // even if the live stack is currently running — that's
+                // how PREVIEW / FOCUS-Manual / Flat Wizard say "this
+                // is a one-off test shot, don't pollute the stack +
+                // don't trigger the auto-recenter reference solve".
+                // Null = legacy behaviour (feed if running).
+                var feedStack = request.FeedLiveStack ?? true;
+                if (feedStack && liveStack.IsRunning)
                     await liveStack.AddFrameAsync(imageData!);
                 else
                     await relay.RelayImageAsync(imageData!);
@@ -291,7 +298,16 @@ public static class CameraEndpoints {
         int Binning = 1,
         string? Filter = null,
         bool SaveToDisk = false,
-        string? TargetName = null);
+        string? TargetName = null,
+        // null = legacy "feed if running" (LIVE tab default).
+        // true  = always feed (sequence engine, explicit live capture).
+        // false = never feed (PREVIEW snap, FOCUS Manual test shot,
+        //         Bahtinov / flat-wizard / anything that's not a
+        //         science frame). Without this, with the always-on
+        //         stacking we now default to, a tap on PREVIEW would
+        //         silently push a junk frame into the live stack and
+        //         fire the auto-recenter plate solve.
+        bool? FeedLiveStack = null);
     public record CoolerRequest(bool Enabled, double? TargetTemperature = null);
 
     /// <summary>White-balance body. Range is driver-specific, ZWO/QHY

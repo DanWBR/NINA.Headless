@@ -5,6 +5,17 @@ using NINA.Polaris.WebSocket;
 using NINA.INDI.Client;
 using Yarp.ReverseProxy.Forwarder;
 
+// Sub-process entry: when the parent server spawns us with
+// `--ascom-setup <ProgID>` we run the ASCOM SetupDialog and exit,
+// skipping all of the HTTP/Kestrel boot. See AscomSetupRunner +
+// AscomEndpoints for the rationale (driver AVE isolation — keeps a
+// crashing ZWO ASCOM driver from killing the main API server).
+if (args.Length >= 2
+    && args[0] == "--ascom-setup"
+    && OperatingSystem.IsWindows()) {
+    return NINA.Polaris.AscomSetupRunner.Run(args[1]);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // GX-10: HTTPS self-signed cert. Constructed eagerly here (not via DI)
@@ -716,3 +727,11 @@ if (!httpsEnabled && !httpEnabled) {
 }
 
 app.Run();
+
+// Reached when the host shuts down cleanly (Ctrl-C, SIGTERM,
+// IHostApplicationLifetime.StopApplication). Returning 0 here is
+// what gives top-level Main its `int` return type — required
+// because the --ascom-setup helper path above returns 1/2 on
+// driver-side failures, and the C# compiler insists every code
+// path of an `int`-returning Main produces an int.
+return 0;

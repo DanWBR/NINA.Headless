@@ -7315,6 +7315,25 @@ label select.input-sm {
     flex: 1 1 180px;
     min-width: 0;
 }
+/* Accessory row has a single, often very long option label like
+   '[reducer] SVBony SV209 0.8x Reducer/Flattener (0.8×)' that gets
+   cropped at the card's narrow 280px width inherited from the role
+   grid. Bumping just THIS row's select min-width — without touching
+   the Brand+Model row above (which has two side-by-side selects
+   that must share the same row width) — gives the accessory text
+   room to breathe. Card is in an auto-fit grid so on viewports
+   wider than the minimum it'll happily expand and the wider
+   accessory select absorbs the extra space. */
+.equip-meta-row.accessory-row > label:has(select.input-sm) {
+    flex: 1 1 360px;
+}
+.equip-meta-row.accessory-row label select.input-sm {
+    min-width: 280px;
+    /* Bigger font specifically here so the long, dense accessory
+       string ('[reducer] SVBony SV209 0.8x...') is easier to read
+       at a glance on a sidebar-heavy layout. */
+    font-size: 14px;
+}
 .equip-meta-derived {
     align-self: center;
     font-size: 13px;

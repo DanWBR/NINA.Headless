@@ -259,7 +259,8 @@ public class ProfileService {
                 PanelBrightness = src.FlatWizard.PanelBrightness
             },
             LiveStackComputeMode = src.LiveStackComputeMode,
-            LiveStackSaveFramesToDisk = src.LiveStackSaveFramesToDisk
+            LiveStackSaveFramesToDisk = src.LiveStackSaveFramesToDisk,
+            LiveStackMaxDurationSeconds = src.LiveStackMaxDurationSeconds
         };
         _activeProfile.EquipmentProfiles.Add(copy);
         Save();
@@ -672,13 +673,19 @@ public class EquipmentProfile {
     /// <summary>When true, each raw frame fed to
     /// <c>LiveStackingService.AddFrameAsync</c> is also persisted to
     /// disk as a regular LIGHT (lands in the same per-target /
-    /// per-filter / per-session layout as a sequence capture). Off by
-    /// default, EAA sessions are usually about the integrated preview
-    /// and the user explicitly opts in when they want a science-grade
-    /// archive alongside the live view. Per-rig because the choice
-    /// often depends on the rig's purpose (visual EAA grab-and-go vs.
-    /// permanent observatory).</summary>
-    public bool LiveStackSaveFramesToDisk { get; set; }
+    /// per-filter / per-session layout as a sequence capture).
+    /// Default ON — most users want both the integrated preview
+    /// AND an archive they can re-stack offline in Siril /
+    /// PixInsight later. Per-rig so visual-only EAA rigs can opt
+    /// out (just untick the checkbox in the LIVE tab).</summary>
+    public bool LiveStackSaveFramesToDisk { get; set; } = true;
+
+    /// <summary>Auto-pause the live stack after this many seconds
+    /// of integration. 0 (default) = no cap, runs until the user
+    /// resets or stops. Per-rig so different setups (planetary
+    /// short-stacks vs. deep-sky long-stacks) keep their own
+    /// preferred duration.</summary>
+    public int LiveStackMaxDurationSeconds { get; set; }
 
     /// <summary>Last-used VIDEO tab ROI / FOV (subframe). Persisted so
     /// the next session restores the same crop without the user re-

@@ -757,10 +757,51 @@
 
                     <div class="shutter-secondary">
                     <div class="control-row">
-                        <button class="btn" :class="liveStackEnabled ? 'btn-active' : ''" @click="toggleLiveStack()">
-                            <span x-text="liveStackEnabled ? 'Stack ON (' + liveStackFrames + ')' : 'Stack'"></span>
+                        <!-- Stacking is continuous + automatic by default.
+                             Every frame the camera captures lands in the
+                             running mean as soon as it arrives — no
+                             explicit Start. The pill below is the live
+                             indicator (frame count + elapsed) + a
+                             pause toggle for the rare "raw passthrough"
+                             case. Reset starts a fresh stack (clears the
+                             accumulator) without disarming. -->
+                        <button class="btn" :class="liveStackEnabled ? 'btn-active' : ''"
+                                @click="toggleLiveStack()"
+                                :title="liveStackEnabled
+                                    ? 'Pause stacking (raw passthrough)'
+                                    : 'Resume continuous stacking'">
+                            <span x-show="liveStackEnabled">
+                                ⚫ Stacking
+                                (<span x-text="liveStackFrames"></span>f
+                                <template x-if="liveStackStatus?.elapsedSeconds > 0">
+                                    <span> · <span x-text="formatLiveStackElapsed()"></span></span>
+                                </template>)
+                            </span>
+                            <span x-show="!liveStackEnabled">⏸ Paused</span>
                         </button>
-                        <button class="btn" @click="resetLiveStack()" x-show="liveStackEnabled">Reset</button>
+                        <button class="btn" @click="resetLiveStack()"
+                                title="Clear the accumulator and start a fresh stack on the next frame">
+                            ↻ Reset
+                        </button>
+                        <!-- Auto-pause cap (minutes). 0 = unlimited.
+                             When the elapsed time crosses it the
+                             accumulator freezes (further frames still
+                             saved to disk if enabled); Reset rearms. -->
+                        <label class="livestack-duration-label"
+                               title="Auto-pause after N minutes of integration. 0 = unlimited.">
+                            Max
+                            <input type="number" class="input-sm"
+                                   min="0" step="1" style="width:60px"
+                                   x-model.number="liveStackMaxMinutes"
+                                   @change="saveLiveStackMaxDuration()">
+                            min
+                        </label>
+                        <span x-show="liveStackStatus?.durationCapReached"
+                              class="text-ok"
+                              style="font-size:11px"
+                              title="The stack reached the configured duration cap. Frames still arrive + save to disk; the integrated preview is the master at the cap moment. Reset to start over.">
+                            ✓ Complete
+                        </span>
                         <!-- CLST-6: save the client-accumulated stack as a FITS
                              on the server. Only shown when the server is in
                              metricsonly mode (the WASM module owns the

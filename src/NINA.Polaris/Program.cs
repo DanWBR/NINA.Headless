@@ -288,7 +288,12 @@ app.Services.GetRequiredService<RefocusSuggestionService>();
     // switch (so the new rig's policy applies immediately without
     // a Polaris restart).
     void ApplySaveFramesPolicy(string trigger) {
-        var enabled = profiles.ActiveEquipmentProfile?.LiveStackSaveFramesToDisk ?? false;
+        // Default to ON when the field is missing from a legacy
+        // profile (pre-default-true commit). Matches the new
+        // service default so behaviour stays consistent regardless
+        // of whether the profile was written before or after the
+        // change.
+        var enabled = profiles.ActiveEquipmentProfile?.LiveStackSaveFramesToDisk ?? true;
         if (liveStack.SaveFramesToDisk != enabled) {
             liveStack.SaveFramesToDisk = enabled;
             liveStackLogger.LogInformation(
@@ -298,6 +303,20 @@ app.Services.GetRequiredService<RefocusSuggestionService>();
     }
     ApplySaveFramesPolicy("startup");
     profiles.EquipmentProfileActivated += _ => ApplySaveFramesPolicy("rig-switch");
+
+    // Per-rig live-stack duration cap. 0 (default) = unlimited.
+    // Same persistence pattern as the save-frames toggle.
+    void ApplyDurationCap(string trigger) {
+        var secs = profiles.ActiveEquipmentProfile?.LiveStackMaxDurationSeconds ?? 0;
+        if (liveStack.MaxDurationSeconds != secs) {
+            liveStack.MaxDurationSeconds = secs;
+            liveStackLogger.LogInformation(
+                "Live stack MaxDurationSeconds -> {Seconds}s (trigger={Trigger})",
+                secs, trigger);
+        }
+    }
+    ApplyDurationCap("startup");
+    profiles.EquipmentProfileActivated += _ => ApplyDurationCap("rig-switch");
 }
 
 // SWE-3-bugfix: strip CSP for /sky/* responses. The ASP.NET dev-time

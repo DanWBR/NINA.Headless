@@ -58,18 +58,50 @@ public class LiveStackingService {
     private int _frameCount;
     private int _framesSavedToDisk;
     private List<DetectedStar>? _referenceStars;
-    private bool _isRunning;
+    // Default: stacking is ON. Live stacking is the user's expected
+    // behaviour the moment they point a camera at the sky — they
+    // shouldn't have to click "Start" first. The toggle still exists
+    // for the rare "I want raw passthrough, no stacking" case.
+    private bool _isRunning = true;
+    private DateTime? _startedAt;
 
     /// <summary>When true, every raw frame received via
     /// <see cref="AddFrameAsync"/> is also persisted to disk via
     /// <see cref="ImageWriterService.SaveImage"/> with imageType
     /// "LIGHT", landing in {rig}/lights/{target}/{filter}/{date}
-    /// like a regular sequence capture. Off by default — live
-    /// stacking is normally about the integrated preview, not
-    /// archived per-frame data. UI toggles via
-    /// PUT /api/livestack/save-frames; persisted to the user
-    /// profile so the choice survives Polaris restarts.</summary>
-    public bool SaveFramesToDisk { get; set; }
+    /// like a regular sequence capture. Default ON — most users
+    /// want both the integrated preview AND an archive of the raw
+    /// frames so they can re-stack offline in Siril / PixInsight
+    /// later. UI checkbox in LIVE tab persists the choice per-rig
+    /// via PUT /api/livestack/save-frames.</summary>
+    public bool SaveFramesToDisk { get; set; } = true;
+
+    /// <summary>When > 0, stacking auto-pauses after this many
+    /// seconds elapsed since the first frame of the current stack
+    /// (i.e. since the last Reset). 0 = run indefinitely. Frames
+    /// arriving past the cap are still relayed to clients + saved
+    /// to disk (when <see cref="SaveFramesToDisk"/> is on), but
+    /// don't update the running mean. Reset clears the timer too.
+    /// Set via PUT /api/livestack/max-duration.</summary>
+    public int MaxDurationSeconds { get; set; }
+
+    /// <summary>When the current stack started (first frame after
+    /// the most recent Reset). Null when no frame has been
+    /// integrated yet. Used to drive the elapsed counter shown in
+    /// the LIVE tab and the auto-pause check against
+    /// <see cref="MaxDurationSeconds"/>.</summary>
+    public DateTime? StartedAt => _startedAt;
+
+    /// <summary>Seconds elapsed since the first frame of the current
+    /// stack. 0 when no frame has been integrated yet.</summary>
+    public double ElapsedSeconds =>
+        _startedAt is { } t ? (DateTime.UtcNow - t).TotalSeconds : 0;
+
+    /// <summary>True when <see cref="MaxDurationSeconds"/> is set and
+    /// the elapsed time has crossed it. UI uses this to render a
+    /// "complete" badge instead of "running" once the cap fires.</summary>
+    public bool DurationCapReached =>
+        MaxDurationSeconds > 0 && ElapsedSeconds >= MaxDurationSeconds;
 
     /// <summary>Counter of frames actually written to disk during
     /// the current live-stack session. Resets along with
@@ -124,6 +156,11 @@ public class LiveStackingService {
         }
     }
 
+    /// <summary>Clear the accumulator + reference + counters and
+    /// start a fresh stack on the next incoming frame. Does NOT
+    /// flip IsRunning off — stacking stays armed and the new
+    /// stack begins immediately when the next frame arrives. Used
+    /// when the user switches targets and wants to start over.</summary>
     public void Reset() {
         lock (_lock) {
             _stackBuffer = null;
@@ -133,36 +170,40 @@ public class LiveStackingService {
             _framesSavedToDisk = 0;
             _width = 0;
             _height = 0;
-            _isRunning = false;
+            _startedAt = null;
             LastFrameMedianHfr = 0;
             LastFrameStarCount = 0;
             _logger.LogInformation("Live stacking reset");
         }
     }
 
+    /// <summary>Arm stacking (no-op if already armed) AND clear the
+    /// current accumulator. Kept for backwards compatibility — the
+    /// service is armed by default at startup, callers should
+    /// prefer <see cref="Reset"/> when all they want is to clear
+    /// the buffer.</summary>
     public void Start() {
         Reset();
         _isRunning = true;
         _logger.LogInformation("Live stacking started");
     }
 
+    /// <summary>Disarm stacking. Frames still flow through the relay
+    /// + per-frame save path but no longer update the running mean.
+    /// Rare — the typical workflow leaves stacking on permanently
+    /// and uses <see cref="Reset"/> to switch targets.</summary>
     public void Stop() {
         _isRunning = false;
         _logger.LogInformation("Live stacking stopped after {Count} frames", _frameCount);
     }
 
     public async Task AddFrameAsync(IImageData imageData, CancellationToken ct = default) {
-        if (!_isRunning) return;
-
-        // Optional per-frame disk persistence. Off by default so EAA
-        // sessions don't litter the lights folder. When the toggle is
-        // on we route the frame through ImageWriterService with
-        // imageType "LIGHT", landing it in the same per-rig /
-        // per-target / per-filter / per-session layout as a sequence
-        // capture. We do this BEFORE the stacking math runs so the
-        // bookkeeping cost is borne even if alignment / accumulation
-        // later short-circuits (e.g. star-matcher failure on this
-        // frame should not lose the raw data the user asked us to keep).
+        // Disk persistence runs INDEPENDENTLY of whether the stacker
+        // is currently armed and INDEPENDENTLY of whether the
+        // duration cap was reached — the user opted to keep raw
+        // frames, so we should keep ALL of them. Stacking math
+        // below short-circuits when disarmed / past cap, but the
+        // archive doesn't.
         if (SaveFramesToDisk && _writer != null) {
             try {
                 var savedPath = _writer.SaveImage(imageData, imageType: "LIGHT");
@@ -175,6 +216,20 @@ public class LiveStackingService {
                 // hiccup. Log and continue; the next frame will retry.
                 _logger.LogWarning(ex, "Live stack: failed to save frame to disk");
             }
+        }
+
+        if (!_isRunning) return;
+
+        // Duration cap. Once the elapsed time crosses
+        // MaxDurationSeconds, stop touching the accumulator —
+        // further frames are saved to disk (above) and relayed to
+        // clients, but the stacked preview holds steady at the
+        // master that completed at the cap. Reset clears _startedAt
+        // and the timer restarts on the next frame.
+        if (DurationCapReached) {
+            _logger.LogDebug("Live stack: duration cap reached ({Cap}s), skipping accumulation",
+                MaxDurationSeconds);
+            return;
         }
 
         var props = imageData.Properties;
@@ -196,7 +251,11 @@ public class LiveStackingService {
 
             lock (_lock) {
                 if (_frameCount == 0) {
-                    // First frame: initialize buffers and set as reference
+                    // First frame: initialize buffers and set as reference.
+                    // Stamp _startedAt so the elapsed counter + duration
+                    // cap have something to reference. Reset clears
+                    // both — the next first frame restarts the timer.
+                    _startedAt = DateTime.UtcNow;
                     _width = props.Width;
                     _height = props.Height;
                     int pixelCount = _width * _height;
@@ -255,6 +314,7 @@ public class LiveStackingService {
             // up from the existing /ws/image-stream raw mode.
             lock (_lock) {
                 if (_frameCount == 0) {
+                    _startedAt = DateTime.UtcNow;
                     _width = props.Width;
                     _height = props.Height;
                     _referenceStars = stars;
@@ -319,7 +379,11 @@ public class LiveStackingService {
             ReferenceStarCount = _referenceStars?.Count ?? 0,
             Mode = Mode.ToString().ToLowerInvariant(),
             SaveFramesToDisk = SaveFramesToDisk,
-            FramesSavedToDisk = _framesSavedToDisk
+            FramesSavedToDisk = _framesSavedToDisk,
+            MaxDurationSeconds = MaxDurationSeconds,
+            StartedAt = _startedAt,
+            ElapsedSeconds = ElapsedSeconds,
+            DurationCapReached = DurationCapReached
         };
     }
 
@@ -343,5 +407,19 @@ public class LiveStackingService {
         /// current session. Shown next to the toggle as live
         /// confirmation that the writes are actually working.</summary>
         public int FramesSavedToDisk { get; set; }
+        /// <summary>Per-stack auto-pause cap, seconds. 0 = unlimited
+        /// (default). Persisted per-rig.</summary>
+        public int MaxDurationSeconds { get; set; }
+        /// <summary>UTC timestamp of the first frame in the current
+        /// stack, or null when no frames have been integrated yet.</summary>
+        public DateTime? StartedAt { get; set; }
+        /// <summary>Seconds elapsed since StartedAt. 0 when null.
+        /// Snapshot at the moment GetStatus was called; the UI
+        /// re-renders it on every status broadcast (~1 Hz).</summary>
+        public double ElapsedSeconds { get; set; }
+        /// <summary>True when MaxDurationSeconds > 0 and elapsed
+        /// crossed it. UI surfaces a "Stack complete" badge and
+        /// stops the spinning indicator.</summary>
+        public bool DurationCapReached { get; set; }
     }
 }

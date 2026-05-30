@@ -59,8 +59,19 @@ function ninaApp() {
         imageHistory: [],
 
         // Live stacking
-        liveStackEnabled: false,
+        // Default true: stacking is continuous + automatic out of
+        // the box. The pause toggle in the LIVE tab lets the user
+        // flip to raw passthrough when they specifically don't
+        // want stacking (rare). Hydrated from the WS status payload
+        // on first connect so what the browser shows matches the
+        // server's actual state.
+        liveStackEnabled: true,
         liveStackFrames: 0,
+        // Auto-pause cap, MINUTES (the UI is friendlier in minutes
+        // even though the backend stores seconds). 0 = unlimited.
+        // Hydrated from the active rig on _applyRigToChoices and
+        // persisted via PUT /api/livestack/max-duration.
+        liveStackMaxMinutes: 0,
         // CLST-7: per-rig override for where the math runs.
         // "auto" = let the server pick based on WASM handshake (default).
         // "server" / "client" = force. Hydrated from active rig +
@@ -70,8 +81,10 @@ function ninaApp() {
         // checkbox. PUT /api/livestack/save-frames updates both the
         // running service flag and the active rig's
         // LiveStackSaveFramesToDisk profile field, so the choice
-        // survives a Polaris restart + rig switch.
-        liveStackSaveFrames: false,
+        // survives a Polaris restart + rig switch. Default ON —
+        // most users want both the integrated preview AND an
+        // archive they can re-stack offline.
+        liveStackSaveFrames: true,
 
         // LSTR-5: live-stack auto-refocus + auto-recenter triggers.
         // Mirror of EquipmentProfile.LiveStackTriggers, hydrated from
@@ -3699,6 +3712,45 @@ function ninaApp() {
                 this.liveStackSaveFrames = !this.liveStackSaveFrames;
                 this.toast('Save failed: ' + (e.message || e), 'error');
             }
+        },
+
+        // PUT the live-stack auto-pause cap. UI value is in minutes
+        // (friendlier), backend stores seconds. 0 minutes = unlimited.
+        // Server returns the clamped value so we can echo it back if
+        // someone sneaks a negative into the input.
+        async saveLiveStackMaxDuration() {
+            const mins = Math.max(0, this.liveStackMaxMinutes || 0);
+            const secs = Math.round(mins * 60);
+            try {
+                await this.apiPost('/api/livestack/max-duration', null, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ seconds: secs })
+                });
+                const rig = this.rigs.find(r => r.id === this.activeRigId);
+                if (rig) rig.liveStackMaxDurationSeconds = secs;
+                this.toast(secs === 0
+                    ? 'Live stacking will run until you reset it'
+                    : `Live stack will auto-pause after ${mins} min`, 'ok');
+            } catch (e) {
+                this.toast('Save failed: ' + (e.message || e), 'error');
+            }
+        },
+
+        // Render the current stack's elapsed time as "MM:SS" (when
+        // under an hour) or "HH:MM" (when longer). Reads off
+        // liveStackStatus.elapsedSeconds which the server updates
+        // on every status broadcast (~1 Hz).
+        formatLiveStackElapsed() {
+            const s = Math.max(0, Math.floor(this.liveStackStatus?.elapsedSeconds || 0));
+            if (s < 3600) {
+                const m = Math.floor(s / 60);
+                const r = s % 60;
+                return `${m}:${r.toString().padStart(2, '0')}`;
+            }
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            return `${h}h${m.toString().padStart(2, '0')}`;
         },
 
         // CLST-6: upload the WASM-accumulated stack to the server as a
@@ -8717,9 +8769,15 @@ function ninaApp() {
             // CLST-7: per-rig compute target override. Defaults to
             // "auto" for old rigs without the field.
             this.liveStackComputeMode = rig.liveStackComputeMode || 'auto';
-            // Per-rig save-each-frame toggle. Defaults off when the
-            // field is missing (older profile, EAA-style rig).
-            this.liveStackSaveFrames = !!rig.liveStackSaveFramesToDisk;
+            // Per-rig save-each-frame toggle. Defaults ON when the
+            // field is missing (matches the new server-side default
+            // post-redesign) so legacy rigs adopt the same friendly
+            // behaviour without a manual flip.
+            this.liveStackSaveFrames = rig.liveStackSaveFramesToDisk !== false;
+            // Auto-pause cap in MINUTES (UI unit). Backend stores
+            // seconds. 0 = unlimited (default).
+            this.liveStackMaxMinutes = Math.round(
+                (rig.liveStackMaxDurationSeconds || 0) / 60);
             // VIDEO tab FOV / ROI hydration. Restore the last-picked
             // crop so opening VIDEO after a reload lands on the same
             // box around the planet, instead of forcing the user to

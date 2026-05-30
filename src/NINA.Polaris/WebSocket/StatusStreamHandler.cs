@@ -239,6 +239,14 @@ public static class StatusStreamHandler {
                             // counter rendered next to it.
                             saveFramesToDisk = liveStack.SaveFramesToDisk,
                             framesSavedToDisk = liveStack.FramesSavedToDisk,
+                            // Continuous-stack + duration cap. UI uses
+                            // these to render the elapsed counter, the
+                            // "stack complete" badge once the cap fires,
+                            // and the max-duration input value.
+                            maxDurationSeconds = liveStack.MaxDurationSeconds,
+                            startedAt = liveStack.StartedAt,
+                            elapsedSeconds = liveStack.ElapsedSeconds,
+                            durationCapReached = liveStack.DurationCapReached,
                             triggers = liveStackTriggers.CurrentStatus,
                             // REFSUG-1: trend-based advisory. Always
                             // emitted so the UI can decide whether to

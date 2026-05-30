@@ -101,6 +101,22 @@ public static class LiveStackEndpoints {
             return Results.Ok(new { saved = true, enabled = req.Enabled });
         });
 
+        // Auto-pause duration cap, seconds. 0 = unlimited (default).
+        // Negative values are clamped to 0. Same persistence pattern
+        // as /save-frames — runtime + profile in one call.
+        group.MapPut("/max-duration", (MaxDurationRequest req,
+                                        LiveStackingService stack,
+                                        ProfileService profiles) => {
+            var secs = Math.Max(0, req.Seconds);
+            stack.MaxDurationSeconds = secs;
+            var rig = profiles.ActiveEquipmentProfile;
+            if (rig != null) {
+                profiles.UpdateEquipmentProfile(rig.Id,
+                    r => r.LiveStackMaxDurationSeconds = secs);
+            }
+            return Results.Ok(new { saved = true, seconds = secs });
+        });
+
         // ----- CLST-6: persist a client-stacked result as FITS -----
         //
         // When live-stacking happens in the browser (server is in
@@ -182,4 +198,9 @@ public static class LiveStackEndpoints {
     /// <summary>Body of PUT /api/livestack/save-frames. Mirrors the
     /// LIVE tab checkbox.</summary>
     public record SaveFramesRequest(bool Enabled);
+
+    /// <summary>Body of PUT /api/livestack/max-duration. 0 =
+    /// unlimited. The LIVE tab posts the user's "stack for N
+    /// minutes" input here, converted to seconds.</summary>
+    public record MaxDurationRequest(int Seconds);
 }

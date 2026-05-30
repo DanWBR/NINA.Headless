@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -34,12 +35,33 @@ public class AlpacaDiscovery {
         udp.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
 
         var bytes = Encoding.ASCII.GetBytes(DiscoveryMessage);
-        try {
-            await udp.SendAsync(bytes, new IPEndPoint(IPAddress.Broadcast, DiscoveryPort));
-        } catch (Exception ex) {
-            _logger.LogWarning(ex, "Alpaca discovery broadcast failed (firewall?)");
+
+        // Send the discovery probe on EVERY usable target, not just
+        // 255.255.255.255. The limited broadcast goes out the primary
+        // interface only, which on Windows means:
+        //   - it reaches LAN-bound Alpaca servers on the same subnet
+        //   - it does NOT reach loopback, so an ASCOM Remote Server
+        //     running on the SAME machine (very common dev setup) is
+        //     invisible to discovery.
+        // Fix: enumerate operational IPv4 interfaces + send the
+        // directed broadcast to each one's subnet, plus an explicit
+        // unicast to 127.0.0.1 so the local Alpaca server gets it
+        // even when no real NIC is up (laptop in airplane mode, etc).
+        var targets = BuildBroadcastTargets();
+        int sent = 0;
+        foreach (var ep in targets) {
+            try {
+                await udp.SendAsync(bytes, ep);
+                sent++;
+            } catch (Exception ex) {
+                _logger.LogDebug(ex, "Alpaca discovery probe to {Ep} failed", ep);
+            }
+        }
+        if (sent == 0) {
+            _logger.LogWarning("Alpaca discovery: every broadcast target failed (firewall?)");
             return found.Values.ToList();
         }
+        _logger.LogDebug("Alpaca discovery probe sent to {N} target(s)", sent);
 
         using var cts = new CancellationTokenSource(to);
         try {
@@ -86,6 +108,48 @@ public class AlpacaDiscovery {
 
         _logger.LogInformation("Alpaca discovery found {N} server(s)", found.Count);
         return found.Values.ToList();
+    }
+
+    /// <summary>Enumerate every IPv4 endpoint we should send the
+    /// discovery probe to. Always includes:
+    ///   - 255.255.255.255 (limited broadcast — main LAN sweep)
+    ///   - 127.0.0.1 unicast (local-machine Alpaca server, since
+    ///     limited broadcast on Windows doesn't deliver to loopback)
+    /// Plus one directed broadcast per up + IPv4 interface
+    ///   (e.g. 192.168.1.255 for a 192.168.1.0/24 NIC). This catches
+    ///   Alpaca servers on the same /24 even when the host has
+    ///   multiple NICs and the primary one isn't the right path.
+    /// Loopback as a sender doesn't help — we already cover it with
+    /// the explicit 127.0.0.1 entry.</summary>
+    private static List<IPEndPoint> BuildBroadcastTargets() {
+        var targets = new List<IPEndPoint> {
+            new(IPAddress.Broadcast, DiscoveryPort),
+            new(IPAddress.Loopback, DiscoveryPort)
+        };
+        try {
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces()) {
+                if (nic.OperationalStatus != OperationalStatus.Up) continue;
+                if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                var props = nic.GetIPProperties();
+                foreach (var ua in props.UnicastAddresses) {
+                    if (ua.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+                    if (ua.IPv4Mask == null) continue;
+                    // Compute directed broadcast: (addr | ~mask).
+                    var addrBytes = ua.Address.GetAddressBytes();
+                    var maskBytes = ua.IPv4Mask.GetAddressBytes();
+                    var bcast = new byte[4];
+                    for (int i = 0; i < 4; i++) bcast[i] = (byte)(addrBytes[i] | ~maskBytes[i]);
+                    var bcastIp = new IPAddress(bcast);
+                    // Skip duplicates of 255.255.255.255 (a /0 mask).
+                    if (bcastIp.Equals(IPAddress.Broadcast)) continue;
+                    targets.Add(new IPEndPoint(bcastIp, DiscoveryPort));
+                }
+            }
+        } catch {
+            // Iface enumeration can fail on locked-down systems; we
+            // still have the 2 baseline targets above.
+        }
+        return targets;
     }
 }
 

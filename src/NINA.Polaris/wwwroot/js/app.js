@@ -11930,7 +11930,21 @@ function ninaApp() {
                 await this.apiPost(`/api/ascom/setup/${encodeURIComponent(progId)}`);
                 this.toast('Setup dialog closed for ' + progId, 'ok');
             } catch (e) {
-                this.toast('ASCOM setup failed: ' + (e.message || ''), 'error');
+                // ApiError.message is "HTTP 400: {full json envelope}"
+                // — useless in a toast. The server-side handler stuffs
+                // the human-readable text into the .error field of the
+                // JSON body, so parse the body out and surface that
+                // instead. Hint (if present) follows as a second line.
+                let msg = '';
+                if (e && e.body) {
+                    try {
+                        const j = JSON.parse(e.body);
+                        msg = j.error || '';
+                        if (j.hint) msg += msg ? ('\n' + j.hint) : j.hint;
+                    } catch { /* not JSON, fall through */ }
+                }
+                if (!msg) msg = (e && e.message) || 'Unknown error';
+                this.toast('ASCOM setup failed: ' + msg, 'error');
             } finally {
                 this.ascomSetupBusy = false;
             }

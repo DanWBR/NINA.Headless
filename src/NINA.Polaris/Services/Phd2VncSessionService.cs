@@ -131,53 +131,43 @@ public class Phd2VncSessionService : BackgroundService {
 
     [SupportedOSPlatform("windows")]
     private void DetectInstallWin() {
-        // TightVNC's installer writes HKLM\SOFTWARE\TightVNC\Server
-        // (64-bit) and registers the install path. Same pattern works
-        // for 32-bit installer via the Wow6432Node redirect — Registry
-        // class handles the view automatically.
+        // Multi-path probe ordered by reliability. Each probe is
+        // wrapped so any single one failing (SecurityException from a
+        // locked-down domain box, missing key, partial wipe, etc.)
+        // falls through to the next instead of blowing up the whole
+        // detection.
         //
-        // SafeOpenHklm catches SecurityException / UnauthorizedAccessException
-        // when the polaris user can't read the key (locked-down domain
-        // box, AppLocker policy, running under a low-privilege service
-        // account). Without it the outer RefreshDetectionAsync catch
-        // still runs but the debugger flags it as a first-chance
-        // exception every time the user opens Settings, which is
-        // noisy in logs and confusing during debugging.
-        using var key = SafeOpenHklm(@"SOFTWARE\TightVNC\Server")
-                     ?? SafeOpenHklm(@"SOFTWARE\Wow6432Node\TightVNC\Server");
-        if (key == null) {
-            TightVncInstalled = false;
-            TightVncPath = null;
-            TightVncVersion = null;
-            return;
-        }
-        // The installer writes either "InstallPath" or "Path"
-        // depending on version. Fall back to the standard Program
-        // Files location if neither is set.
-        var installPath = key.GetValue("InstallPath") as string
-                       ?? key.GetValue("Path") as string;
-        string? exePath = null;
-        if (!string.IsNullOrWhiteSpace(installPath)) {
-            var candidate = Path.Combine(installPath, "tvnserver.exe");
-            if (File.Exists(candidate)) exePath = candidate;
-        }
-        // Fallback: try the canonical 64-bit and 32-bit install dirs.
-        // Useful when the registry was hand-edited / partially wiped.
-        if (exePath == null) {
-            foreach (var root in new[] {
-                Environment.GetEnvironmentVariable("ProgramFiles"),
-                Environment.GetEnvironmentVariable("ProgramFiles(x86)")
-            }) {
-                if (string.IsNullOrEmpty(root)) continue;
-                var candidate = Path.Combine(root, "TightVNC", "tvnserver.exe");
-                if (File.Exists(candidate)) { exePath = candidate; break; }
-            }
-        }
+        // Order of attack:
+        //   1. HKLM\SOFTWARE\TightVNC\Server — canonical 64-bit
+        //   2. HKLM\SOFTWARE\Wow6432Node\TightVNC\Server — 32-bit
+        //      installer on 64-bit Windows
+        //   3. HKLM 32-bit + 64-bit explicit RegistryView (catches
+        //      WOW redirection quirks when the process's bitness
+        //      doesn't match the installer's)
+        //   4. HKCU per-user install (rare but supported by some
+        //      TightVNC installer variants)
+        //   5. ProgramFiles / ProgramFiles(x86) on-disk probe
+        //   6. PATH scan for tvnserver.exe (last-resort)
+        //
+        // The Polaris user not having SOFTWARE\* read is what
+        // motivated splitting this out — we just keep walking the
+        // list until we find the exe.
+        string? exePath =
+            ReadInstallPathFromHkey(RegistryHive.LocalMachine, @"SOFTWARE\TightVNC\Server")
+            ?? ReadInstallPathFromHkey(RegistryHive.LocalMachine, @"SOFTWARE\Wow6432Node\TightVNC\Server")
+            ?? ReadInstallPathFromHkey(RegistryHive.LocalMachine, @"SOFTWARE\TightVNC\Server", RegistryView.Registry32)
+            ?? ReadInstallPathFromHkey(RegistryHive.LocalMachine, @"SOFTWARE\TightVNC\Server", RegistryView.Registry64)
+            ?? ReadInstallPathFromHkey(RegistryHive.CurrentUser,  @"SOFTWARE\TightVNC\Server")
+            ?? ProbeProgramFiles()
+            ?? ProbePath();
 
         if (exePath == null) {
             TightVncInstalled = false;
             TightVncPath = null;
             TightVncVersion = null;
+            _logger.LogDebug("Phd2VncSessionService: TightVNC not found "
+                + "(registry probes returned no path, Program Files + PATH "
+                + "also turned up empty). Marking as not installed.");
             return;
         }
 
@@ -193,20 +183,76 @@ public class Phd2VncSessionService : BackgroundService {
             TightVncVersion, TightVncPath);
     }
 
-    /// <summary>Open an HKLM subkey returning null on missing OR on
-    /// access-denied. Standard user accounts can read most of HKLM
-    /// but locked-down corporate / domain machines may deny read on
-    /// SOFTWARE entries; treating that as "not installed" lets the
-    /// detection fall through cleanly to the Program Files probe.
-    /// <para>[DebuggerNonUserCode] tells Visual Studio / Rider to
-    /// treat this helper as library code so the SecurityException
-    /// raised inside <c>OpenSubKey</c> does NOT trigger a first-
-    /// chance debugger break under "Just My Code". Without the
-    /// attribute the catch still runs in release and the user just
-    /// sees clean fallback behaviour — but during development VS
-    /// pops the "Exception thrown" balloon every single time the
-    /// Settings panel reads PHD2 VNC state, which is noise.</para>
-    /// </summary>
+    /// <summary>Read an InstallPath / Path value from a registry hive
+    /// and return the resolved <c>tvnserver.exe</c> on disk, or null
+    /// if any step fails. ALL exceptions are swallowed because this
+    /// is a probe — a locked-down machine just falls through to the
+    /// next probe in the chain instead of failing the whole detect.</summary>
+    [SupportedOSPlatform("windows")]
+    [System.Diagnostics.DebuggerNonUserCode]
+    private static string? ReadInstallPathFromHkey(
+            RegistryHive hive, string subkey, RegistryView view = RegistryView.Default) {
+        try {
+            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+            using var key = baseKey.OpenSubKey(subkey);
+            if (key == null) return null;
+            var installPath = key.GetValue("InstallPath") as string
+                           ?? key.GetValue("Path") as string;
+            if (string.IsNullOrWhiteSpace(installPath)) return null;
+            var candidate = Path.Combine(installPath, "tvnserver.exe");
+            return File.Exists(candidate) ? candidate : null;
+        } catch {
+            // Security, IO, UnauthorizedAccess, the lot. Probe failed,
+            // caller tries the next one.
+            return null;
+        }
+    }
+
+    /// <summary>Walk the canonical ProgramFiles / ProgramFiles(x86)
+    /// install locations looking for tvnserver.exe. Reached when
+    /// every registry probe came back empty — covers the case where
+    /// TightVNC was installed normally but the polaris user can't
+    /// read SOFTWARE\*.</summary>
+    [SupportedOSPlatform("windows")]
+    private static string? ProbeProgramFiles() {
+        try {
+            foreach (var root in new[] {
+                Environment.GetEnvironmentVariable("ProgramFiles"),
+                Environment.GetEnvironmentVariable("ProgramFiles(x86)"),
+                Environment.GetEnvironmentVariable("ProgramW6432"),
+            }) {
+                if (string.IsNullOrEmpty(root)) continue;
+                var candidate = Path.Combine(root, "TightVNC", "tvnserver.exe");
+                if (File.Exists(candidate)) return candidate;
+            }
+        } catch { }
+        return null;
+    }
+
+    /// <summary>Last-resort: walk every directory in PATH looking
+    /// for tvnserver.exe. Covers oddball portable installs where
+    /// the user just dropped the binary somewhere and added it to
+    /// PATH without running the proper installer.</summary>
+    [SupportedOSPlatform("windows")]
+    private static string? ProbePath() {
+        try {
+            var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (var dir in path.Split(Path.PathSeparator,
+                    StringSplitOptions.RemoveEmptyEntries)) {
+                try {
+                    var candidate = Path.Combine(dir.Trim(), "tvnserver.exe");
+                    if (File.Exists(candidate)) return candidate;
+                } catch { /* malformed PATH entry */ }
+            }
+        } catch { }
+        return null;
+    }
+
+    /// <summary>Legacy thin wrapper retained for the few external
+    /// call sites (tests) that still reach for it. Internally
+    /// equivalent to <see cref="ReadInstallPathFromHkey"/> minus the
+    /// post-open value extraction — returns the raw key handle so
+    /// callers can probe arbitrary values themselves.</summary>
     [SupportedOSPlatform("windows")]
     [System.Diagnostics.DebuggerNonUserCode]
     private static RegistryKey? SafeOpenHklm(string subkey) {
@@ -214,6 +260,7 @@ public class Phd2VncSessionService : BackgroundService {
         catch (System.Security.SecurityException) { return null; }
         catch (UnauthorizedAccessException) { return null; }
         catch (IOException) { return null; }
+        catch { return null; }
     }
 
     [SupportedOSPlatform("windows")]

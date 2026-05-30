@@ -2016,7 +2016,15 @@ function ninaApp() {
                 if (opts.signal) {
                     opts.signal.addEventListener('abort', () => xhr.abort());
                 }
-                xhr.responseType = 'blob';
+                // Leave responseType at the default ('') so the onload
+                // handler can read xhr.responseText on both success and
+                // error paths. The previous responseType='blob' tripped
+                // an InvalidStateError on every non-2xx response —
+                // reject(new ApiError(xhr.status, xhr.responseText))
+                // throws because responseText is forbidden in blob
+                // mode, masking the real server error. The success
+                // path wraps xhr.responseText in a fresh Blob anyway,
+                // so dropping the blob responseType costs nothing.
                 xhr.send(body);
             });
         },

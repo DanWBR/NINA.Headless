@@ -1022,6 +1022,57 @@ body {
     display: flex;
     justify-content: space-between;
 }
+/* SNR-7: top-of-overlay "stack quality" widget. Three big numbers
+   side by side (SNR / Frames / ETA) plus a tiny target input. */
+.live-stack-quality {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 4px 2px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.live-stack-quality .lsq-cell {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+}
+.live-stack-quality .lsq-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-secondary);
+}
+.live-stack-quality .lsq-value {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+.live-stack-quality .lsq-target {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.live-stack-quality .lsq-target label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.live-stack-quality .lsq-target input {
+    /* override .input-sm bigger defaults so this fits neatly in
+       the overlay header row. min-height kills the 38 px floor. */
+    min-height: 0;
+    padding: 3px 6px;
+    font-size: 13px;
+    width: 64px;
+    min-width: 48px;
+}
+
 .live-history-overlay-chart {
     display: flex;
     flex-direction: column;

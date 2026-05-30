@@ -52,7 +52,7 @@ function ninaApp() {
         _shutterLongPressed: false,
         _shutterArmTimer: null,    // animates the arming ring at 60ms cadence
         _shutterArmStartedAt: 0,
-        stats: { starCount: '--', hfr: null, mean: null },
+        stats: { starCount: '--', hfr: null, mean: null, snr: null },
         currentTime: '--:--:--',
         cameraTemp: null,
         sessionCaptures: 0,
@@ -67,6 +67,10 @@ function ninaApp() {
         // server's actual state.
         liveStackEnabled: true,
         liveStackFrames: 0,
+        // SNR-7: session-level target SNR override + ETA debounce
+        // timer (PUT is fired ~400 ms after the user stops typing).
+        // null in the input = "use the active rig's TargetSnr".
+        liveStack: { targetSnrInput: null, _saveTargetTimer: null },
         // Auto-pause cap, MINUTES (the UI is friendlier in minutes
         // even though the backend stores seconds). 0 = unlimited.
         // Hydrated from the active rig on _applyRigToChoices and
@@ -8860,7 +8864,12 @@ function ninaApp() {
             c.update('none');
         },
 
-        // HFR History: HFR + StarCount on two y-axes, indexed by image #
+        // Live-stack overlay chart: SNR cumulative (primary) +
+        // per-frame HFR (secondary), indexed by image #. SNR is the
+        // headline number — "is my stack getting better?" — HFR
+        // stays as the secondary line for focus drift diagnostics.
+        // Star count moved into the chart tooltip to keep the
+        // overlay visually quiet (3-line charts get noisy fast).
         updateHfrChart() {
             const t = this._chartTheme();
             const c = this._ensureChart('hfrChart', 'hfr', 'line', () => ({
@@ -8868,23 +8877,39 @@ function ninaApp() {
                 data: {
                     labels: [],
                     datasets: [
+                        { label: 'SNR', data: [], borderColor: '#4fc3f7', backgroundColor: 'transparent',
+                          yAxisID: 'y', tension: 0.2, pointRadius: 2, borderWidth: 1.8 },
                         { label: 'HFR', data: [], borderColor: '#ffb74d', backgroundColor: 'transparent',
-                          yAxisID: 'y', tension: 0.2, pointRadius: 2, borderWidth: 1.5 },
-                        { label: 'Stars', data: [], borderColor: '#81c784', backgroundColor: 'transparent',
-                          yAxisID: 'y1', tension: 0.2, pointRadius: 2, borderWidth: 1.5 }
+                          yAxisID: 'y1', tension: 0.2, pointRadius: 2, borderWidth: 1.2 }
                     ]
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false, animation: false,
-                    plugins: { legend: { labels: { color: t.color, font: { size: 10 } } } },
+                    plugins: {
+                        legend: { labels: { color: t.color, font: { size: 10 } } },
+                        tooltip: {
+                            callbacks: {
+                                // Star count surfaced in the tooltip
+                                // (not its own line) so the chart
+                                // doesn't get a third Y axis.
+                                afterBody: (items) => {
+                                    if (!items?.length) return '';
+                                    const i = items[0].dataIndex;
+                                    const hist = (this.imageHistory || []).slice().reverse();
+                                    const stars = parseInt(hist[i]?.stars) || 0;
+                                    return stars > 0 ? `Stars: ${stars}` : '';
+                                }
+                            }
+                        }
+                    },
                     scales: {
                         x: { ticks: { color: t.tick, font: { size: 10 } }, grid: { color: t.grid } },
                         y: { position: 'left', beginAtZero: true,
-                             ticks: { color: '#ffb74d', font: { size: 10 } }, grid: { color: t.grid },
-                             title: { display: true, text: 'HFR', color: '#ffb74d', font: { size: 10 } } },
+                             ticks: { color: '#4fc3f7', font: { size: 10 } }, grid: { color: t.grid },
+                             title: { display: true, text: 'SNR', color: '#4fc3f7', font: { size: 10 } } },
                         y1: { position: 'right', beginAtZero: true,
-                              ticks: { color: '#81c784', font: { size: 10 } }, grid: { display: false },
-                              title: { display: true, text: 'Stars', color: '#81c784', font: { size: 10 } } }
+                              ticks: { color: '#ffb74d', font: { size: 10 } }, grid: { display: false },
+                              title: { display: true, text: 'HFR', color: '#ffb74d', font: { size: 10 } } }
                     }
                 }
             }));
@@ -8892,9 +8917,47 @@ function ninaApp() {
             // imageHistory is newest-first → reverse for chronological order
             const hist = (this.imageHistory || []).slice().reverse();
             c.data.labels = hist.map((_, i) => i + 1);
-            c.data.datasets[0].data = hist.map(h => parseFloat(h.hfr) || 0);
-            c.data.datasets[1].data = hist.map(h => parseInt(h.stars) || 0);
+            c.data.datasets[0].data = hist.map(h => parseFloat(h.snr) || 0);
+            c.data.datasets[1].data = hist.map(h => parseFloat(h.hfr) || 0);
             c.update('none');
+        },
+
+        // SNR-7: format ETA seconds → human-friendly "~12 min" /
+        // "~45 s" / "—". Pass the liveStackStatus payload so we can
+        // decorate "✓ done" when the target's already reached.
+        formatSnrEta(ls) {
+            if (!ls) return '—';
+            if (ls.cumulativeSnr > 0 && ls.targetSnr > 0
+                && ls.cumulativeSnr >= ls.targetSnr) {
+                return '✓ done';
+            }
+            const sec = ls.etaSeconds;
+            if (sec == null || !isFinite(sec) || sec <= 0) return '—';
+            if (sec < 60) return `~${Math.round(sec)} s`;
+            if (sec < 3600) return `~${Math.round(sec / 60)} min`;
+            const h = Math.floor(sec / 3600);
+            const m = Math.round((sec % 3600) / 60);
+            return `~${h} h ${m} m`;
+        },
+
+        // SNR-7: debounced PUT for the LIVE tab's target-SNR input.
+        // Null / 0 in the input means "drop the override, use the
+        // active rig's TargetSnr". Same debounce pattern as the
+        // dither / max-duration inputs.
+        saveTargetSnr() {
+            if (this.liveStack._saveTargetTimer) {
+                clearTimeout(this.liveStack._saveTargetTimer);
+            }
+            this.liveStack._saveTargetTimer = setTimeout(async () => {
+                try {
+                    const v = this.liveStack.targetSnrInput;
+                    await this.apiPost('/api/livestack/target-snr', {
+                        targetSnr: (v == null || v === '' || v <= 0) ? null : v
+                    }, { method: 'PUT' });
+                } catch (e) {
+                    this.toast('Could not save target SNR: ' + e.message, 'error');
+                }
+            }, 400);
         },
 
         // Temperature chart: sensor temp + cooler power vs time
@@ -9670,6 +9733,7 @@ function ninaApp() {
                     this.stats.starCount = data.stats.starCount;
                     this.stats.hfr = data.stats.hfr?.toFixed(2);
                     this.stats.mean = data.stats.mean?.toFixed(0);
+                    this.stats.snr = data.stats.snr?.toFixed(1);
                 }
                 this.imageHistory.unshift({
                     id: 'h-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
@@ -9679,6 +9743,7 @@ function ninaApp() {
                     filter: this.filterWheel.connected ? this.filterWheel.currentFilter : null,
                     stars: data.stats?.starCount || '--',
                     hfr: data.stats?.hfr?.toFixed(2) || '--',
+                    snr: data.stats?.snr?.toFixed(1) || '--',
                     thumb: this._captureThumbnail()
                 });
                 if (this.imageHistory.length > 50) this.imageHistory.pop();

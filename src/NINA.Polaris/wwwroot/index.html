@@ -696,6 +696,41 @@
                             <button class="btn btn-sm" @click="liveOverlayVisible = false"
                                     title="Hide overlay">✕</button>
                         </div>
+
+                        <!-- SNR-7: stack quality + ETA-to-target widget.
+                             Three big numbers at the top of the overlay
+                             so the user sees stack health at a glance;
+                             input lets them override the target SNR
+                             for this session (persistent default lives
+                             on the active rig). -->
+                        <div class="live-stack-quality" x-show="liveStackStatus">
+                            <div class="lsq-cell">
+                                <span class="lsq-label">SNR</span>
+                                <span class="lsq-value"
+                                      x-text="liveStackStatus?.cumulativeSnr > 0
+                                              ? liveStackStatus.cumulativeSnr.toFixed(1)
+                                              : '—'"></span>
+                            </div>
+                            <div class="lsq-cell">
+                                <span class="lsq-label">Frames</span>
+                                <span class="lsq-value"
+                                      x-text="liveStackStatus?.frameCount ?? 0"></span>
+                            </div>
+                            <div class="lsq-cell">
+                                <span class="lsq-label">ETA</span>
+                                <span class="lsq-value"
+                                      x-text="formatSnrEta(liveStackStatus)"></span>
+                            </div>
+                            <div class="lsq-target">
+                                <label>Target
+                                    <input type="number" class="input-sm" min="0" max="500" step="1"
+                                           :placeholder="liveStackStatus?.targetSnr ?? '—'"
+                                           x-model.number="liveStack.targetSnrInput"
+                                           @change="saveTargetSnr()">
+                                </label>
+                            </div>
+                        </div>
+
                         <div class="live-history-overlay-thumbs">
                             <template x-for="(img, i) in imageHistory.slice(0, 20)" :key="img.id || i">
                                 <div class="history-thumb" @click="openHistoryItem(img)"
@@ -704,14 +739,14 @@
                                          loading="lazy">
                                     <div class="history-thumb-meta">
                                         <span x-text="img.time"></span>
-                                        <span x-show="img.hfr !== '--'">HFR <span x-text="img.hfr"></span></span>
+                                        <span x-show="img.snr && img.snr !== '--'">SNR <span x-text="img.snr"></span></span>
                                     </div>
                                 </div>
                             </template>
                         </div>
                         <div class="live-history-overlay-chart"
                              x-show="imageHistory.length >= 2">
-                            <div class="live-history-overlay-chart-label">HFR &amp; star count</div>
+                            <div class="live-history-overlay-chart-label">SNR &amp; HFR</div>
                             <div class="chart-container chart-container-sm">
                                 <canvas x-ref="hfrChart" id="hfrChart"></canvas>
                             </div>
@@ -1088,6 +1123,11 @@
                     <span>Stars: <strong x-text="stats.starCount">--</strong></span>
                     <span>HFR: <strong x-text="stats.hfr || '--'">--</strong></span>
                     <span>Mean: <strong x-text="stats.mean || '--'">--</strong></span>
+                    <!-- SNR-8: background SNR. Prefer the live-stack
+                         cumulative number (the stack quality, growing
+                         √N) when stacking is active; fall back to the
+                         single-frame SNR from the most recent capture. -->
+                    <span>SNR: <strong x-text="(liveStackStatus?.cumulativeSnr > 0 ? liveStackStatus.cumulativeSnr.toFixed(1) : (stats.snr || '--'))">--</strong></span>
                     <span x-show="filterWheel.connected" class="text-ok" x-text="filterWheel.currentFilter"></span>
                     <span>Frames: <strong x-text="sessionCaptures"></strong></span>
                     <span x-text="currentTime"></span>
@@ -1850,6 +1890,7 @@
                     <span>HFR: <strong x-text="preview.lastStats?.hfr?.toFixed?.(2) ?? '--'"></strong></span>
                     <span>Mean: <strong x-text="preview.lastStats?.mean?.toFixed?.(0) ?? '--'"></strong></span>
                     <span>Median: <strong x-text="preview.lastStats?.median?.toFixed?.(0) ?? '--'"></strong></span>
+                    <span>SNR: <strong x-text="preview.lastStats?.snr?.toFixed?.(1) ?? '--'"></strong></span>
                     <span class="text-ok" x-show="preview.saveToDisk">💾 saving</span>
                     <span x-show="preview.lastSnapAt" class="text-muted"
                           x-text="'last: ' + (preview.lastSnapAt

@@ -9555,3 +9555,109 @@ label select.input-sm {
     gap: 10px;
     justify-content: flex-end;
 }
+
+/* ---- Auth brand mark (loading / setup / login) ----------------------
+   Polaris icon shown above the modal heading. On the boot/loading
+   variant a thin accent-colored ring spins around it; on
+   setup/login the ring is static (decorative gradient halo only).
+   Same DOM in all three so the icon "stays put" between auth states
+   instead of flashing. */
+.auth-modal {
+    text-align: center;
+}
+.auth-modal h2 {
+    text-align: center;
+}
+.auth-modal .auth-hint,
+.auth-modal .auth-field,
+.auth-modal .auth-remember,
+.auth-modal .auth-error,
+.auth-modal .auth-recover {
+    text-align: left;
+}
+.auth-brand {
+    position: relative;
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.auth-brand-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 16px rgba(96, 165, 250, 0.35));
+    position: relative;
+    z-index: 1;
+}
+.auth-brand-static .auth-brand-icon {
+    animation: auth-brand-pulse 4s ease-in-out infinite;
+}
+.auth-modal-boot .auth-brand-icon {
+    animation: auth-brand-pulse 1.6s ease-in-out infinite;
+}
+/* Loading state spinner ring */
+.auth-brand-spinner {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 3px solid rgba(96, 165, 250, 0.12);
+    border-top-color: var(--accent, #60a5fa);
+    animation: auth-brand-spin 1.1s linear infinite;
+}
+@keyframes auth-brand-spin {
+    to { transform: rotate(360deg); }
+}
+@keyframes auth-brand-pulse {
+    0%, 100% { transform: scale(1);    filter: drop-shadow(0 4px 16px rgba(96, 165, 250, 0.35)); }
+    50%      { transform: scale(1.04); filter: drop-shadow(0 6px 22px rgba(96, 165, 250, 0.55)); }
+}
+
+/* ---- Modal polish pass: location-setup + editor-export ---------------
+   Unify the visual rhythm across the app's modals. Existing rules win
+   the base layout; these append visual upgrades on top:
+   - Rounder corners (10px → 14px) to match the confirm-modal-card
+   - Stronger shadow + subtle accent-color top border for the "sheet"
+     feel, instead of looking like a flat 90s dialog
+   - Fade-in animation so popping the modal isn't a hard cut
+   No layout changes -- safe to ship without retesting the form flows. */
+.location-setup-frame,
+.editor-export-modal,
+.confirm-modal-card {
+    border-radius: 14px !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.65),
+                0 0 0 1px rgba(255, 255, 255, 0.04) inset !important;
+    border-top: 2px solid var(--accent, #60a5fa);
+    animation: modal-fade-in 180ms ease-out;
+}
+.location-setup-modal,
+.confirm-modal-overlay {
+    animation: modal-backdrop-fade 180ms ease-out;
+}
+@keyframes modal-fade-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+@keyframes modal-backdrop-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+/* Location-setup heading bumped + accent-tinted so the operator's
+   eye lands on the title before scanning the search box. */
+.location-setup-frame h2 {
+    font-size: 20px !important;
+    font-weight: 600 !important;
+    color: var(--text-primary);
+}
+/* Editor export heading mirror. */
+.editor-export-modal h3 {
+    font-size: 17px !important;
+    font-weight: 600 !important;
+    color: var(--text-primary);
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px !important;
+}

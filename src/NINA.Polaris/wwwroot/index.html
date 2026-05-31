@@ -80,8 +80,14 @@
 
         <!-- Boot spinner: shown for the brief window between page
              load and /api/auth/status reply. Keeps the rest of the
-             app hidden so we don't flash unauthenticated UI. -->
-        <div class="auth-modal" x-show="auth.booting">
+             app hidden so we don't flash unauthenticated UI. Icon
+             pulses + spinner ring so the user sees Polaris is alive
+             even on slow Pi boots where /api/auth/status takes ~1s. -->
+        <div class="auth-modal auth-modal-boot" x-show="auth.booting">
+            <div class="auth-brand">
+                <div class="auth-brand-spinner"></div>
+                <img src="/favicon-192.png" alt="" class="auth-brand-icon">
+            </div>
             <h2>N.I.N.A. Polaris</h2>
             <p class="auth-hint">Loading…</p>
         </div>
@@ -91,6 +97,9 @@
              any other tab is reachable; no default credentials means
              no skipped-the-step-forgot-to-change-it problem. -->
         <div class="auth-modal" x-show="auth.needSetup && !auth.booting">
+            <div class="auth-brand auth-brand-static">
+                <img src="/favicon-192.png" alt="" class="auth-brand-icon">
+            </div>
             <h2>Set a password</h2>
             <p class="auth-hint">
                 Polaris is reachable from any device on this network.
@@ -129,6 +138,9 @@
 
         <!-- Returning-user login: configured=true, !authenticated. -->
         <div class="auth-modal" x-show="auth.needLogin && !auth.booting">
+            <div class="auth-brand auth-brand-static">
+                <img src="/favicon-192.png" alt="" class="auth-brand-icon">
+            </div>
             <h2>Sign in</h2>
             <form @submit.prevent="authLogin()">
                 <label class="auth-field">

@@ -729,6 +729,17 @@ function ninaApp() {
         // local mirror of the IndiWeb:AutoStart config flag persisted
         // via /api/system/settings (same plumbing as PHD2 auto-start).
         indiWeb: { status: null, autoStart: false, busy: false },
+        // INDI Control Panel sub-tab in RIGS. The launch button posts
+        // /api/indi/cp/launch which uses `xpra control :100 start-child
+        // indi_control_panel` to spawn the binary inside the same xpra
+        // session that already hosts the PHD2 GUI. The iframe points
+        // at /phd2-gui/ since both windows live in that one display;
+        // a cache-busted timestamp on the src forces the HTML5 client
+        // to reconnect (otherwise it might still be focused on the
+        // PHD2 window). `launched` gates the iframe so we don't load
+        // /phd2-gui/ on first tab entry when nothing was launched yet.
+        indiCp: { status: null, busy: false, launched: false,
+                  iframeSrc: '/phd2-gui/' },
 
         // Rotator
         rotator: { connected: false, name: '', position: null, moving: false, reversed: false },
@@ -16375,6 +16386,65 @@ function ninaApp() {
             if (s.running) return '● Running';
             return 'Stopped';
         },
+        // INDI Control Panel sub-tab handlers. Mirror the indi-web
+        // shape (status refresh + lifecycle action + label helpers)
+        // so the two sub-tabs feel consistent to the user.
+        async indiCpStatusRefresh() {
+            try {
+                this.indiCp.status = await this.apiGet('/api/indi/cp/status');
+            } catch (e) {
+                this.indiCp.status = {
+                    supportedOs: false, xpraInstalled: false,
+                    indiControlPanelInstalled: false, sessionRunning: false,
+                    unsupportedReason: 'Status endpoint unreachable',
+                };
+            }
+        },
+
+        async indiCpLaunch() {
+            if (this.indiCp.busy) return;
+            this.indiCp.busy = true;
+            try {
+                const r = await this.apiPost('/api/indi/cp/launch');
+                if (r?.launched) {
+                    this.toast('INDI Control Panel launched', 'ok');
+                    // Cache-bust the iframe src so the HTML5 xpra client
+                    // re-attaches and picks up the newly-created window.
+                    // Without this the iframe (already loaded with the
+                    // PHD2 window in focus) might not surface the new
+                    // window without a manual refresh.
+                    this.indiCp.iframeSrc = '/phd2-gui/?t=' + Date.now();
+                    this.indiCp.launched = true;
+                } else {
+                    this.toast('Launch failed: ' + (r?.error || 'unknown'), 'error');
+                }
+            } catch (e) {
+                this.toast('Launch failed: ' + (e.message || e), 'error');
+            } finally {
+                this.indiCp.busy = false;
+                await this.indiCpStatusRefresh();
+            }
+        },
+
+        indiCpStatusClass() {
+            const s = this.indiCp.status;
+            if (!s) return 'status-muted';
+            if (!s.supportedOs) return 'status-muted';
+            if (!s.xpraInstalled) return 'status-warn';
+            if (!s.indiControlPanelInstalled) return 'status-warn';
+            if (s.sessionRunning) return 'status-ok';
+            return 'status-muted';
+        },
+        indiCpStatusLabel() {
+            const s = this.indiCp.status;
+            if (!s) return 'Status: ...';
+            if (!s.supportedOs) return 'OS not supported';
+            if (!s.xpraInstalled) return 'xpra missing';
+            if (!s.indiControlPanelInstalled) return 'indi-bin missing';
+            if (s.sessionRunning) return '● xpra session up';
+            return 'Session not started';
+        },
+
         indiWebSummaryLabel() {
             const s = this.indiWeb.status;
             if (!s) return '(click to load)';

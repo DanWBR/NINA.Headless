@@ -2798,6 +2798,8 @@
                             @click="equipTab = 'equipment'">Equipment</button>
                     <button class="video-tab" :class="{ active: equipTab === 'indi-web' }"
                             @click="equipTab = 'indi-web'; indiWebStatusRefresh()">INDI Drivers</button>
+                    <button class="video-tab" :class="{ active: equipTab === 'indi-cp' }"
+                            @click="equipTab = 'indi-cp'; indiCpStatusRefresh()">INDI Control Panel</button>
                 </div>
 
                 <!-- ===== Equipment subtab ===== -->
@@ -4043,6 +4045,135 @@
                              x-text="'⚠ ' + indiWeb.status?.lastError"></div>
                     </div>
                 </div><!-- /.indi-web subtab -->
+
+                <!-- ===== INDI Control Panel subtab ===== -->
+                <!-- Rich per-device INDI properties editor (the standalone
+                     indi_control_panel Qt binary from indi-bin). Reuses
+                     the xpra display already owned by Phd2GuiSessionService,
+                     so the same /phd2-gui/ iframe shows both PHD2's
+                     window and the INDI Control Panel window after
+                     launch. Linux + xpra + indi-bin are required; banners
+                     surface whichever piece is missing. -->
+                <div x-show="equipTab === 'indi-cp'" class="indi-web-subtab">
+                    <div class="indi-web-wrap" style="padding:10px 0;">
+
+                        <!-- Status strip + launch button -->
+                        <div class="control-row" style="margin-bottom:8px;align-items:center;gap:10px;">
+                            <span class="status-pill"
+                                  :class="indiCpStatusClass()"
+                                  x-text="indiCpStatusLabel()"></span>
+                            <span class="text-muted" style="font-size:11px;"
+                                  x-show="indiCp.status?.xpraVersion"
+                                  x-text="'xpra v' + indiCp.status.xpraVersion"></span>
+                            <span style="flex:1;"></span>
+                            <span class="text-muted" style="font-size:11px;"
+                                  x-show="indiCp.status?.sessionRunning
+                                       && indiCp.status?.indiControlPanelInstalled">
+                                Click Launch to open the INDI Control Panel inside the embedded GUI
+                            </span>
+                            <button class="btn btn-sm btn-primary" @click="indiCpLaunch()"
+                                    :disabled="indiCp.busy
+                                            || !indiCp.status?.sessionRunning
+                                            || !indiCp.status?.indiControlPanelInstalled">
+                                ▶ Launch
+                            </button>
+                            <button class="btn btn-sm" @click="indiCpStatusRefresh()"
+                                    :disabled="indiCp.busy">
+                                ⟳
+                            </button>
+                        </div>
+
+                        <!-- Unsupported OS banner (Windows / macOS) -->
+                        <div class="text-warn"
+                             style="padding:12px;background:rgba(245,158,11,0.08);
+                                    border:1px solid rgba(245,158,11,0.3);
+                                    border-radius:6px;font-size:13px;"
+                             x-show="indiCp.status &amp;&amp; !indiCp.status.supportedOs">
+                            <strong>Not available on this OS.</strong>
+                            <div style="margin-top:4px;color:var(--text-muted);"
+                                 x-text="indiCp.status?.unsupportedReason"></div>
+                        </div>
+
+                        <!-- xpra missing -->
+                        <div style="padding:12px;background:rgba(91,141,255,0.08);
+                                    border:1px solid rgba(91,141,255,0.3);
+                                    border-radius:6px;font-size:13px;"
+                             x-show="indiCp.status?.supportedOs &amp;&amp; !indiCp.status?.xpraInstalled">
+                            <strong>xpra not detected.</strong>
+                            <div style="margin-top:6px;color:var(--text-muted);">
+                                The INDI Control Panel runs inside an xpra session
+                                hosted by Polaris (same one that powers the PHD2 GUI
+                                embed). Install xpra on the Polaris host:
+                            </div>
+                            <pre style="background:rgba(0,0,0,0.4);padding:8px;border-radius:4px;
+                                        margin-top:6px;font-size:12px;overflow-x:auto;"
+>sudo apt install xpra xserver-xorg-video-dummy</pre>
+                        </div>
+
+                        <!-- indi_control_panel binary missing -->
+                        <div style="padding:12px;background:rgba(91,141,255,0.08);
+                                    border:1px solid rgba(91,141,255,0.3);
+                                    border-radius:6px;font-size:13px;"
+                             x-show="indiCp.status?.supportedOs
+                                  &amp;&amp; indiCp.status?.xpraInstalled
+                                  &amp;&amp; !indiCp.status?.indiControlPanelInstalled">
+                            <strong>indi_control_panel not detected.</strong>
+                            <div style="margin-top:6px;color:var(--text-muted);">
+                                The standalone Qt binary ships in the
+                                <code>indi-bin</code> package:
+                            </div>
+                            <pre style="background:rgba(0,0,0,0.4);padding:8px;border-radius:4px;
+                                        margin-top:6px;font-size:12px;overflow-x:auto;"
+>sudo apt install indi-bin</pre>
+                            <div style="color:var(--text-muted);">
+                                Click ⟳ after install.
+                            </div>
+                        </div>
+
+                        <!-- xpra session not started: redirect to GUIDE
+                             tab where the user already manages the
+                             embedded GUI lifecycle. Avoids duplicating
+                             the start button (and its lifecycle quirks)
+                             here. -->
+                        <div style="padding:12px;background:rgba(91,141,255,0.08);
+                                    border:1px solid rgba(91,141,255,0.3);
+                                    border-radius:6px;font-size:13px;"
+                             x-show="indiCp.status?.supportedOs
+                                  &amp;&amp; indiCp.status?.xpraInstalled
+                                  &amp;&amp; indiCp.status?.indiControlPanelInstalled
+                                  &amp;&amp; !indiCp.status?.sessionRunning">
+                            <strong>Embedded GUI session not running.</strong>
+                            <div style="margin-top:6px;color:var(--text-muted);">
+                                Open the
+                                <a href="#" @click.prevent="tab='guide'"
+                                   style="color:var(--accent);text-decoration:underline">GUIDE tab</a>,
+                                switch to the "PHD2 GUI" sub-tab, and click Start
+                                session. Once the xpra display is up, come back
+                                here and hit Launch.
+                            </div>
+                        </div>
+
+                        <!-- Iframe (only mounted once the session is up
+                             AND launch has been issued at least once;
+                             before that the iframe would just show the
+                             PHD2 window with no INDI CP). Tall (75vh)
+                             so the device tree fits without internal
+                             scrollbars fighting the outer modal-ish
+                             layout. -->
+                        <iframe x-show="indiCp.status?.sessionRunning &amp;&amp; indiCp.launched"
+                                :src="indiCp.iframeSrc"
+                                style="width:100%;height:75vh;min-height:500px;
+                                       border:1px solid var(--border);
+                                       border-radius:6px;background:#0a0e16;"
+                                sandbox="allow-scripts allow-same-origin allow-forms"
+                                title="INDI Control Panel (xpra)"></iframe>
+
+                        <!-- Error surface for the LAST launch op -->
+                        <div class="text-error" style="font-size:12px;margin-top:6px;"
+                             x-show="indiCp.status?.lastError"
+                             x-text="'⚠ ' + indiCp.status?.lastError"></div>
+                    </div>
+                </div><!-- /.indi-cp subtab -->
 
                 <!-- Refresh/Disconnect moved to the compact connection
                      strip at the top of the panel, no separate footer
@@ -9100,7 +9231,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
          development that this is a per-commit nuisance, but the cost
          of users running stale JS for hours (with FrameKind routing
          bugs ending up on the wrong canvas) is higher. -->
-    <script src="/js/app.js?v=20260530-opticsrace"></script>
+    <script src="/js/app.js?v=20260530-indicp"></script>
     <!-- CLST-2: WASM live-stack module bootstrap. The .NET runtime
          loads, hangs the [JSExport] surface off globalThis.NINA.Polaris.Wasm,
          then dispatches the 'nina-wasm-ready' event app.js listens for.

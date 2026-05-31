@@ -35,6 +35,16 @@ public class Phd2GuiSessionService : BackgroundService {
     public bool XpraInstalled { get; private set; }
     public string? XpraVersion { get; private set; }
     public string? XpraPath { get; private set; }
+    /// <summary>Path of the standalone INDI Control Panel binary
+    /// (<c>indi_control_panel</c>, ships with <c>indi-bin</c>) when
+    /// present on PATH, else null. The Polaris UI exposes a "Launch
+    /// INDI Control Panel" button in the RIGS tab that runs this
+    /// inside the existing xpra session so the user can edit per-
+    /// property device settings (cooler ramps, focuser presets, etc.)
+    /// that PHD2's Connect dialog doesn't surface. Set once at
+    /// service init.</summary>
+    public string? IndiControlPanelPath { get; private set; }
+    public bool IndiControlPanelInstalled => !string.IsNullOrEmpty(IndiControlPanelPath);
     public bool SessionRunning { get; private set; }
     public int DisplayNumber { get; }
     public int BindPort { get; }
@@ -158,6 +168,51 @@ public class Phd2GuiSessionService : BackgroundService {
             _logger.LogDebug(ex, "xpra detection failed");
             XpraInstalled = false;
         }
+        // Also probe for the standalone INDI Control Panel binary.
+        // Ships with the `indi-bin` apt package; absence is normal on
+        // hosts that only run indi-web or a non-INDI stack, so the
+        // failure is silent and the UI just hides the launch button.
+        try {
+            var which = await RunCommandAsync("which", "indi_control_panel", ct);
+            if (!string.IsNullOrWhiteSpace(which.stdout)) {
+                IndiControlPanelPath = which.stdout.Trim();
+                _logger.LogInformation("Phd2GuiSessionService: detected indi_control_panel at {Path}",
+                    IndiControlPanelPath);
+            }
+        } catch (Exception ex) {
+            _logger.LogDebug(ex, "indi_control_panel detection failed");
+        }
+    }
+
+    /// <summary>
+    /// Launches a fresh instance of <c>indi_control_panel</c> as a child
+    /// window inside the existing xpra display, so it shows up in the
+    /// same HTML5 client iframe the user already uses for the PHD2 GUI.
+    /// No-op (returns false + sets LastError) when xpra isn't running,
+    /// when the binary isn't installed, or when the OS isn't Linux.
+    /// </summary>
+    public async Task<bool> LaunchIndiControlPanelAsync(CancellationToken ct = default) {
+        if (!IsSupportedOs)        { LastError = "OS not supported"; return false; }
+        if (!XpraInstalled)        { LastError = "xpra not installed"; return false; }
+        if (!IndiControlPanelInstalled) {
+            LastError = "indi_control_panel not installed (apt install indi-bin)";
+            return false;
+        }
+        if (!await ProbeHealthAsync(ct)) {
+            LastError = "xpra session not running, start the embedded GUI first";
+            return false;
+        }
+        var args = $"control :{DisplayNumber} start-child indi_control_panel";
+        _logger.LogInformation("Launching indi_control_panel inside xpra session :{Display}",
+            DisplayNumber);
+        var res = await RunCommandAsync("xpra", args, ct, timeoutMs: 10000);
+        if (res.exitCode != 0) {
+            LastError = $"xpra start-child indi_control_panel exited {res.exitCode}: {res.stderr}";
+            _logger.LogWarning("{Error}", LastError);
+            return false;
+        }
+        LastError = null;
+        return true;
     }
 
     public async Task<bool> StartSessionAsync(CancellationToken ct = default) {

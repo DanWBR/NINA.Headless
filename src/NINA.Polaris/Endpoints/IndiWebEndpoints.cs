@@ -68,5 +68,48 @@ public static class IndiWebEndpoints {
             var ok = await svc.RestartAsync();
             return Results.Ok(new { running = ok, error = ok ? null : svc.LastError });
         });
+
+        // ----- INDI Control Panel (indi_control_panel) inside the
+        // shared xpra display ---------------------------------------------
+        // Reuses the Phd2GuiSessionService (the xpra display owner) to
+        // spawn a second window in the same session. The RIGS tab's
+        // "INDI Control Panel" sub-tab iframes the same /phd2-gui/
+        // proxy and the user gets the rich INDI properties tree.
+        // Status surfaces the three gating bits the UI needs: OS
+        // support, xpra running, indi_control_panel installed.
+        var cpGroup = app.MapGroup("/api/indi/cp");
+
+        cpGroup.MapGet("/status", (Phd2GuiSessionService gui) => Results.Ok(new {
+            supportedOs = gui.IsSupportedOs,
+            supportedArch = gui.IsSupportedArch,
+            xpraInstalled = gui.XpraInstalled,
+            xpraVersion = gui.XpraVersion,
+            sessionRunning = gui.SessionRunning,
+            indiControlPanelInstalled = gui.IndiControlPanelInstalled,
+            indiControlPanelPath = gui.IndiControlPanelPath,
+            embedUrl = "/phd2-gui/",
+            unsupportedReason = gui.UnsupportedReason,
+            lastError = gui.LastError,
+        }));
+
+        cpGroup.MapPost("/launch", async (Phd2GuiSessionService gui) => {
+            if (!gui.IsSupportedOs) {
+                return Results.Json(
+                    new { error = gui.UnsupportedReason ?? "Not supported on this OS" },
+                    statusCode: 501);
+            }
+            if (!gui.XpraInstalled) {
+                return Results.Json(
+                    new { error = "xpra not installed (apt install xpra)" },
+                    statusCode: 501);
+            }
+            if (!gui.IndiControlPanelInstalled) {
+                return Results.Json(
+                    new { error = "indi_control_panel not installed (apt install indi-bin)" },
+                    statusCode: 501);
+            }
+            var ok = await gui.LaunchIndiControlPanelAsync();
+            return Results.Ok(new { launched = ok, error = ok ? null : gui.LastError });
+        });
     }
 }

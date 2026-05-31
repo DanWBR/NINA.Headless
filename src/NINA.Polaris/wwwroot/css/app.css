@@ -2115,6 +2115,43 @@ label select.input-sm {
     border-bottom: 1px solid var(--border);
 }
 
+/* Icon-only variant. Buttons collapse to a square footprint showing
+   only the glyph; the action label lives in the native tooltip
+   (`title=`) which desktop browsers show on hover and mobile
+   browsers show on long-press. Saves a ton of horizontal real estate
+   so the whole toolbar fits on one line at typical widths. */
+.files-actions-icons {
+    gap: 4px;
+}
+.files-actions-icons .btn.btn-icon {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+    /* Hint the OS to surface the title quickly on long-press. */
+    -webkit-touch-callout: none;
+}
+.files-actions-icons .btn.btn-icon .files-icon {
+    /* Glyphs include emoji + a few unicode symbols; line-height tight
+       keeps them visually centered regardless of font metrics. */
+    display: inline-block;
+    line-height: 1;
+}
+/* Thin vertical divider between logical groups (file ops / edit ops
+   / AI ops / studio root). Purely decorative, hidden from
+   accessibility tree via `aria-hidden`. */
+.files-actions-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    margin: 0 4px;
+    opacity: 0.6;
+}
+
 /* The list itself fills the rest of the panel and scrolls. */
 .files-list-wrap {
     flex: 1 1 auto;

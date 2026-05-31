@@ -5825,49 +5825,96 @@
                     <button class="btn btn-sm" @click="files.clipboard = null">Clear</button>
                 </div>
 
-                <!-- Action toolbar -->
-                <div class="files-actions">
-                    <button class="btn btn-sm" @click="filesMkdir()">+ Folder</button>
-                    <label class="btn btn-sm" style="cursor:pointer">
-                        ⬆ Upload
+                <!-- Action toolbar — icon-only. Every button has a
+                     `title` for the tooltip; native browser behaviour
+                     covers both desktop hover and mobile long-press
+                     (iOS Safari and modern Android Chrome both pop
+                     the title text on long-touch). `aria-label` mirrors
+                     `title` for screen readers. Logical groups
+                     (file ops / edit ops / AI ops / studio root) are
+                     separated by thin `files-actions-sep` dividers
+                     so the toolbar stays scannable at a glance. -->
+                <div class="files-actions files-actions-icons">
+                    <!-- File ops -->
+                    <button class="btn btn-sm btn-icon"
+                            @click="filesMkdir()"
+                            title="New folder" aria-label="New folder">
+                        <span class="files-icon">+</span>
+                    </button>
+                    <label class="btn btn-sm btn-icon" style="cursor:pointer"
+                           title="Upload files from your device" aria-label="Upload">
+                        <span class="files-icon">⬆</span>
                         <input type="file" multiple style="display:none"
                                @change="filesUpload($event.target.files); $event.target.value = ''">
                     </label>
-                    <button class="btn btn-sm" @click="filesDownload()"
-                            :disabled="files.selectedPaths.length === 0">⬇ Download</button>
-                    <button class="btn btn-sm" @click="filesCopy()"
-                            :disabled="files.selectedPaths.length === 0">📋 Copy</button>
-                    <button class="btn btn-sm" @click="filesCut()"
-                            :disabled="files.selectedPaths.length === 0">✂ Cut</button>
-                    <button class="btn btn-sm" @click="filesPaste()"
-                            :disabled="!files.clipboard">📥 Paste</button>
-                    <button class="btn btn-sm" @click="filesRename()"
-                            :disabled="files.selectedPaths.length !== 1">✏ Rename</button>
-                    <button class="btn btn-sm btn-danger" @click="filesDelete()"
-                            :disabled="files.selectedPaths.length === 0">🗑 Delete</button>
-                    <!-- GX-12d: arbitrary two-file before/after comparator.
-                         Reuses the GraXpert run modal, select any two
-                         files (FITS or raster), get the slider-divider
-                         viewer. The earlier-sorted file is BEFORE so
-                         a master next to its _denoise sibling lands
-                         the right way around by default. -->
-                    <button class="btn btn-sm"
+                    <button class="btn btn-sm btn-icon"
+                            @click="filesDownload()"
+                            :disabled="files.selectedPaths.length === 0"
+                            title="Download selected (single file or ZIP for multiple)"
+                            aria-label="Download">
+                        <span class="files-icon">⬇</span>
+                    </button>
+                    <span class="files-actions-sep" aria-hidden="true"></span>
+                    <button class="btn btn-sm btn-icon"
+                            @click="filesCopy()"
+                            :disabled="files.selectedPaths.length === 0"
+                            title="Copy selected to clipboard" aria-label="Copy">
+                        <span class="files-icon">📋</span>
+                    </button>
+                    <button class="btn btn-sm btn-icon"
+                            @click="filesCut()"
+                            :disabled="files.selectedPaths.length === 0"
+                            title="Cut selected to clipboard" aria-label="Cut">
+                        <span class="files-icon">✂</span>
+                    </button>
+                    <button class="btn btn-sm btn-icon"
+                            @click="filesPaste()"
+                            :disabled="!files.clipboard"
+                            title="Paste clipboard contents into the current folder"
+                            aria-label="Paste">
+                        <span class="files-icon">📥</span>
+                    </button>
+                    <button class="btn btn-sm btn-icon"
+                            @click="filesRename()"
+                            :disabled="files.selectedPaths.length !== 1"
+                            title="Rename selected file or folder" aria-label="Rename">
+                        <span class="files-icon">✏</span>
+                    </button>
+                    <button class="btn btn-sm btn-icon btn-danger"
+                            @click="filesDelete()"
+                            :disabled="files.selectedPaths.length === 0"
+                            title="Delete selected (asks for confirmation)"
+                            aria-label="Delete">
+                        <span class="files-icon">🗑</span>
+                    </button>
+                    <span class="files-actions-sep" aria-hidden="true"></span>
+                    <!-- Edit ops. GX-12d: arbitrary two-file before/after
+                         comparator. Reuses the GraXpert run modal, select any
+                         two files (FITS or raster) for the slider-divider
+                         viewer. The earlier-sorted file is BEFORE so a master
+                         next to its _denoise sibling lands the right way
+                         around by default. -->
+                    <button class="btn btn-sm btn-icon"
                             :disabled="files.selectedPaths.length !== 2
                                        || filesSelectionHasDir()"
                             @click="filesCompareSelected()"
-                            title="Compare the two selected files in a before/after viewer">↔ Compare</button>
+                            title="Compare the two selected files in a before/after viewer"
+                            aria-label="Compare">
+                        <span class="files-icon">↔</span>
+                    </button>
                     <!-- Open the selected file in the Lightroom-style editor.
                          Disabled unless exactly one file is selected, the
                          editor opens one frame at a time. Supported types
                          (FITS/XISF/PNG/JPG/TIFF) aren't gated here; the
                          server's /api/editor/load rejects unsupported
                          extensions with a clear error toast. -->
-                    <button class="btn btn-sm"
+                    <button class="btn btn-sm btn-icon"
                             :disabled="files.selectedPaths.length !== 1
                                        || filesSelectedDir() != null"
                             @click="filesOpenInEditor()"
-                            title="Open this file in the Lightroom-style editor">
-                        🎨 Edit
+                            title="Open this file in the Lightroom-style editor"
+                            aria-label="Edit">
+                        <span class="files-icon">🎨</span>
                     </button>
                     <!-- CROP — quick crop before BGE/Decon/Denoise.
                          Pre-processing step the user normally does in
@@ -5875,47 +5922,59 @@
                          in Polaris for the trim → BGE → decon → denoise
                          chain. One file at a time (the picker is a
                          single-image overlay). -->
-                    <button class="btn btn-sm"
+                    <button class="btn btn-sm btn-icon"
                             :disabled="files.selectedPaths.length !== 1
                                        || filesSelectedDir() != null"
                             @click="cropOpenForFile(files.selectedPaths[0])"
-                            title="Crop a rectangle from this image (saves as _crop.fits)">
-                        ✂ Crop
+                            title="Crop a rectangle from this image (saves as _crop.fits)"
+                            aria-label="Crop">
+                        <span class="files-icon">⌗</span>
                     </button>
                     <!-- GraXpert dropdown, visible when EITHER the CLI
                          is installed on the host OR the matching ONNX
                          model is detected by the server. The modal's
                          Run-in-browser toggle picks the path; GX-7 lets
                          the user override the default in Settings. -->
-                    <span x-show="graxpert.status?.available
-                                  || onnxAvailableForOp('background-extraction')
-                                  || onnxAvailableForOp('denoising')
-                                  || onnxAvailableForOp('deconvolution')"
-                          style="display:inline-flex;gap:4px">
-                        <button class="btn btn-sm"
-                                x-show="graxpert.status?.available
-                                       || onnxAvailableForOp('background-extraction')"
-                                :disabled="files.selectedPaths.length === 0"
-                                @click="graxpertOpenModal('background-extraction')"
-                                title="Remove gradient with GraXpert (browser ONNX or CLI)">🌅 BGE</button>
-                        <button class="btn btn-sm"
-                                x-show="graxpert.status?.supportsDeconvolution
-                                       || onnxAvailableForOp('deconvolution')"
-                                :disabled="files.selectedPaths.length === 0"
-                                @click="graxpertOpenModal('deconvolution')"
-                                title="Sharpen with GraXpert deconvolution">✨ Decon</button>
-                        <button class="btn btn-sm"
-                                x-show="graxpert.status?.supportsDenoising
-                                       || onnxAvailableForOp('denoising')"
-                                :disabled="files.selectedPaths.length === 0"
-                                @click="graxpertOpenModal('denoising')"
-                                title="Reduce noise with GraXpert">🔇 Denoise</button>
-                    </span>
+                    <template x-if="graxpert.status?.available
+                                    || onnxAvailableForOp('background-extraction')
+                                    || onnxAvailableForOp('denoising')
+                                    || onnxAvailableForOp('deconvolution')">
+                        <span class="files-actions-sep" aria-hidden="true"></span>
+                    </template>
+                    <button class="btn btn-sm btn-icon"
+                            x-show="graxpert.status?.available
+                                   || onnxAvailableForOp('background-extraction')"
+                            :disabled="files.selectedPaths.length === 0"
+                            @click="graxpertOpenModal('background-extraction')"
+                            title="Background extraction (BGE): remove gradient with GraXpert (browser ONNX or CLI)"
+                            aria-label="Background extraction">
+                        <span class="files-icon">🌅</span>
+                    </button>
+                    <button class="btn btn-sm btn-icon"
+                            x-show="graxpert.status?.supportsDeconvolution
+                                   || onnxAvailableForOp('deconvolution')"
+                            :disabled="files.selectedPaths.length === 0"
+                            @click="graxpertOpenModal('deconvolution')"
+                            title="Deconvolution: sharpen with GraXpert"
+                            aria-label="Deconvolution">
+                        <span class="files-icon">✨</span>
+                    </button>
+                    <button class="btn btn-sm btn-icon"
+                            x-show="graxpert.status?.supportsDenoising
+                                   || onnxAvailableForOp('denoising')"
+                            :disabled="files.selectedPaths.length === 0"
+                            @click="graxpertOpenModal('denoising')"
+                            title="Denoise: reduce noise with GraXpert"
+                            aria-label="Denoise">
+                        <span class="files-icon">🔇</span>
+                    </button>
                     <span style="flex:1"></span>
-                    <button class="btn btn-sm btn-primary" @click="filesSetStudioRoot()"
+                    <button class="btn btn-sm btn-icon btn-primary"
+                            @click="filesSetStudioRoot()"
                             :disabled="!filesSelectedDir()"
-                            :title="filesSelectedDir() ? 'Make this folder the Studio scan root' : 'Select a single folder first'">
-                        ⭐ Set as Studio root
+                            :title="filesSelectedDir() ? 'Set this folder as the Studio scan root' : 'Set as Studio root (select a single folder first)'"
+                            aria-label="Set as Studio root">
+                        <span class="files-icon">⭐</span>
                     </button>
                 </div>
 
@@ -8951,7 +9010,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
          development that this is a per-commit nuisance, but the cost
          of users running stale JS for hours (with FrameKind routing
          bugs ending up on the wrong canvas) is higher. -->
-    <script src="/js/app.js?v=20260530-uniffinal"></script>
+    <script src="/js/app.js?v=20260530-filesicons"></script>
     <!-- CLST-2: WASM live-stack module bootstrap. The .NET runtime
          loads, hangs the [JSExport] surface off globalThis.NINA.Polaris.Wasm,
          then dispatches the 'nina-wasm-ready' event app.js listens for.

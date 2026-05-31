@@ -181,6 +181,29 @@ public static class FocuserEndpoints {
             await equip.Focuser.DisconnectAsync();
             return Results.Ok(new { status = "disconnected" });
         });
+
+        // Software-only EAF recovery: cycle the per-device CONNECTION
+        // switch via DISCONNECT -> 2s wait -> CONNECT. Use this when
+        // the EAF firmware is wedged after multiple move-crashes and
+        // even tiny moves disconnect the device. If reconnect itself
+        // fails, the toast tells the user to physically power-cycle
+        // (USB unplug + replug) which is the only fix for hard
+        // firmware wedges.
+        group.MapPost("/reconnect", async (EquipmentManager equip) => {
+            if (equip.Focuser == null)
+                return Results.BadRequest(new { error = "No focuser selected" });
+            try {
+                await equip.Focuser.ReconnectAsync();
+                return Results.Ok(new {
+                    status = "reconnected",
+                    device = equip.Focuser.DeviceName
+                });
+            } catch (Exception ex) {
+                return Results.Json(new {
+                    error = "Reconnect failed: " + ex.Message
+                }, statusCode: 500);
+            }
+        });
     }
 
     public record MoveAbsoluteRequest(int Position);

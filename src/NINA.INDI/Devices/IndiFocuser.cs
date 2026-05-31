@@ -49,16 +49,59 @@ public class IndiFocuser : NINA.Image.Interfaces.IFocuser {
             new Dictionary<string, bool> { ["CONNECT"] = false, ["DISCONNECT"] = true }, ct);
     }
 
+    /// <summary>Force a DISCONNECT then CONNECT cycle on the device,
+    /// with a brief settle wait. This is the software-only recovery
+    /// for an EAF that's stuck after a driver crash (subsequent
+    /// moves silently fail, even tiny ones). The INDI driver itself
+    /// stays running; only the per-device CONNECTION switch is
+    /// cycled, which forces the driver to re-handshake with the
+    /// USB device and reset its internal state machine. Doesn't
+    /// help when the EAF firmware itself is wedged -- in that case
+    /// the operator needs to physically power-cycle the EAF (USB
+    /// unplug + replug, or the device's power switch if present).</summary>
+    public async Task ReconnectAsync(CancellationToken ct = default) {
+        _logger.LogInformation(
+            "IndiFocuser '{Device}' reconnect: sending DISCONNECT", DeviceName);
+        await DisconnectAsync(ct);
+        // Long enough for the driver to fully tear down the USB
+        // session + release ASIO resources before we ask it to
+        // re-open. Empirical: 500ms wasn't enough on a stressed
+        // EAF, 2s reliably reconnects.
+        await Task.Delay(2000, ct);
+        _logger.LogInformation(
+            "IndiFocuser '{Device}' reconnect: sending CONNECT", DeviceName);
+        await ConnectAsync(ct);
+        // Give the driver a moment to populate properties before
+        // any caller probes IsConnected / Position.
+        await Task.Delay(1000, ct);
+        var nowConnected = IsConnected;
+        _logger.LogInformation(
+            "IndiFocuser '{Device}' reconnect complete: IsConnected={Connected}",
+            DeviceName, nowConnected);
+        if (!nowConnected) {
+            throw new InvalidOperationException(
+                $"Focuser '{DeviceName}' did not reconnect within 3s. " +
+                "EAF firmware may be wedged -- try physically power-cycling the device " +
+                "(unplug USB, wait 5s, plug back in) and then click Connect in the RIGS tab.");
+        }
+    }
+
     /// <summary>Maximum delta (in absolute steps) we'll send in a
     /// single ABS_FOCUS_POSITION write. Empirically derived from
     /// field reports: ZWO EAF firmware crashes (CCD driver disconnects
     /// the device + INDI removes it from the device list) when asked
     /// to move ~hundreds of steps in one shot. Splitting into chunks
     /// of this size with brief settle waits between each chunk keeps
-    /// the driver alive even on multi-thousand-step jumps. Smaller
-    /// drivers handle larger moves fine, but 100 is a safe ceiling
-    /// for every device we've tested.</summary>
-    private const int SafeChunkSize = 100;
+    /// the driver alive even on multi-thousand-step jumps.
+    ///
+    /// Settable at runtime so operators can dial it down if even 50
+    /// crashes their specific EAF firmware revision -- the relevant
+    /// safe value is firmware-and-firmware-version-dependent, no
+    /// single hardcoded value works across the fleet. Default 50 is
+    /// conservative; the original 100 was too aggressive on at least
+    /// one operator's hardware. Settings &lt; 1 are clamped to 1
+    /// (effectively single-step) on use.</summary>
+    public int SafeChunkSize { get; set; } = 50;
 
     public async Task MoveAbsoluteAsync(int position, CancellationToken ct = default) {
         // Snapshot state once so the diagnostic log + the guards

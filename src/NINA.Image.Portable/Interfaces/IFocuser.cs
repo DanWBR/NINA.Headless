@@ -41,6 +41,18 @@ public interface IFocuser {
     Task MoveRelativeAsync(int steps, CancellationToken ct = default);
     Task AbortAsync(CancellationToken ct = default);
 
+    /// <summary>Force a DISCONNECT then CONNECT cycle on the device
+    /// to recover from a wedged driver state. Default impl is just
+    /// Disconnect + small wait + Connect, which is enough for most
+    /// backends; INDI overrides with extra settle waits because the
+    /// EAF in particular needs ~2s for the USB session to fully
+    /// tear down before re-open will succeed.</summary>
+    async Task ReconnectAsync(CancellationToken ct = default) {
+        await DisconnectAsync(ct);
+        await Task.Delay(1000, ct);
+        await ConnectAsync(ct);
+    }
+
     /// <summary>Tell the driver to redefine the focuser's current
     /// physical position AS the given absolute step value -- INDI
     /// <c>FOCUS_SYNC</c>. Used after manually reseating the focuser,

@@ -1530,6 +1530,22 @@
                                    x-model.number="focusStepFast"
                                    @change="focusStep = focusStepFast; saveFocusSteps()">
                         </label>
+                        <!-- Software recovery for a wedged EAF: cycles
+                             the device's CONNECTION switch (disconnect
+                             then reconnect) without restarting INDI.
+                             Used when the operator sees repeated
+                             "DISCONNECTED within 500ms of move" entries
+                             in the LOG and even small moves crash --
+                             the EAF firmware is gunked up from prior
+                             crashes and a CONNECT cycle often clears
+                             it without unplugging the USB cable. -->
+                        <button class="btn btn-sm"
+                                style="align-self: flex-end; margin-left: auto;"
+                                @click="focuserReconnect()"
+                                :disabled="!focusConnected"
+                                title="Cycle the focuser driver connection (DISCONNECT then CONNECT). Use when moves stop working after a driver crash. If this doesn't fix it, physically unplug the EAF USB cable for 5s and plug it back in.">
+                            ↻ Reconnect
+                        </button>
                     </div>
                     <div class="focus-info">
                         <div class="info-row" x-show="focusTemp !== null">

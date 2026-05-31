@@ -12342,6 +12342,29 @@ function ninaApp() {
             try { await this.apiPost('/api/focuser/abort'); } catch (e) { }
         },
 
+        // Software-only recovery from a wedged EAF driver. Cycles
+        // the device's INDI CONNECTION switch (disconnect -> 2s wait
+        // -> reconnect). When even small moves crash with "DISCONNECTED
+        // within 500ms", the driver's USB session is gunked up after
+        // prior crashes and a CONNECT cycle frequently clears it
+        // without needing to physically unplug the cable. If the
+        // reconnect itself fails, the toast tells the user to power
+        // -cycle physically (USB unplug + replug).
+        async focuserReconnect() {
+            this.toast('Reconnecting focuser driver (~3s)...', 'info');
+            try {
+                // 15s timeout is plenty -- backend does 2s + 1s of
+                // waits, the rest is INDI handshake.
+                await this.apiPost('/api/focuser/reconnect', null, { timeout: 15000 });
+                this.toast('Focuser reconnected', 'ok');
+            } catch (e) {
+                const body = e?.message || '';
+                let msg = body;
+                try { const j = JSON.parse(body); if (j?.error) msg = j.error; } catch {}
+                this.toast('Focuser reconnect failed: ' + msg, 'error');
+            }
+        },
+
         // ─── SLOW / FAST step persistence ────────────────────────
         // localStorage stores both step values keyed by selected
         // focuser device name when available (so different scopes

@@ -42,38 +42,43 @@ public class MasterFrameService {
     }
 
     /// <summary>Kick off integration in the background. Returns the
-    /// job id the UI polls on /api/studio/masters/{id}/status.</summary>
-    public string StartJob(IReadOnlyList<int> frameIds, MasterType type, IntegrationMethod method) {
+    /// job id the UI polls on /api/studio/masters/{id}/status.
+    /// <para>UNIF-3a: caller now passes absolute FITS paths (no
+    /// dependency on the FrameLibrary SQLite index). Files don't
+    /// need to be indexed before stacking, a fresh capture can be
+    /// combined immediately. Metadata (filter, gain, exposure) is
+    /// read from each frame's FITS header on load.</para></summary>
+    public string StartJob(IReadOnlyList<string> framePaths, MasterType type, IntegrationMethod method) {
         var jobId = Guid.NewGuid().ToString("N")[..8];
         var progress = new MasterProgress {
             JobId = jobId,
             InProgress = true,
-            Total = frameIds.Count,
+            Total = framePaths.Count,
             Stage = "queued"
         };
         _jobs[jobId] = progress;
-        _ = Task.Run(() => RunJob(jobId, frameIds, type, method));
+        _ = Task.Run(() => RunJob(jobId, framePaths, type, method));
         return jobId;
     }
 
     public MasterProgress? GetStatus(string jobId)
         => _jobs.TryGetValue(jobId, out var p) ? p : null;
 
-    private void RunJob(string jobId, IReadOnlyList<int> frameIds, MasterType type, IntegrationMethod method) {
+    private void RunJob(string jobId, IReadOnlyList<string> framePaths, MasterType type, IntegrationMethod method) {
         try {
             // ---- Phase 1: load all inputs ---------------------------
             _jobs[jobId] = _jobs[jobId] with { Stage = "loading", Done = 0 };
-            var loaded = new List<BaseImageData>(frameIds.Count);
+            var loaded = new List<BaseImageData>(framePaths.Count);
             int? width = null, height = null, bitDepth = null;
             double sumExposure = 0;
             int gain = 0;
             string filter = "";
 
-            for (int i = 0; i < frameIds.Count; i++) {
-                var row = _library.GetById(frameIds[i]);
-                if (row == null || !File.Exists(row.Path))
-                    throw new InvalidOperationException($"Frame {frameIds[i]} is missing on disk.");
-                using var fs = File.OpenRead(row.Path);
+            for (int i = 0; i < framePaths.Count; i++) {
+                var path = framePaths[i];
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                    throw new InvalidOperationException($"Frame missing on disk: {path}");
+                using var fs = File.OpenRead(path);
                 var img = FITSReader.Read(fs);
                 if (width == null) {
                     width = img.Properties.Width;
@@ -84,7 +89,7 @@ public class MasterFrameService {
                 } else {
                     if (img.Properties.Width != width || img.Properties.Height != height) {
                         throw new InvalidOperationException(
-                            $"Frame {row.FileName} is {img.Properties.Width}×{img.Properties.Height}, " +
+                            $"Frame {Path.GetFileName(path)} is {img.Properties.Width}×{img.Properties.Height}, " +
                             $"expected {width}×{height}. Frames must agree.");
                     }
                 }

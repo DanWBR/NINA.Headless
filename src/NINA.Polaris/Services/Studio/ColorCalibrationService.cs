@@ -59,8 +59,11 @@ public class ColorCalibrationService {
     /// </summary>
     public record PatchRoi(int X, int Y, int W, int H);
 
+    // UNIF-3a: switched FrameId -> FramePath. Stack sub-tab passes
+    // the master integrated FITS path directly; no library lookup
+    // needed.
     public record ColorCalibrationRequest(
-        int FrameId,
+        string FramePath,
         string Mode,                       // see Modes.*
         // Sample mode for BG step:
         //   "auto"  -> lowest-luminance 5% of pixels
@@ -100,13 +103,12 @@ public class ColorCalibrationService {
         try {
             // ── Phase 1: load + validate ─────────────────────────────
             _jobs[jobId] = _jobs[jobId] with { Stage = "loading" };
-            var row = _library.GetById(req.FrameId);
-            if (row == null || !File.Exists(row.Path)) {
+            if (string.IsNullOrWhiteSpace(req.FramePath) || !File.Exists(req.FramePath)) {
                 throw new InvalidOperationException(
-                    $"Frame id {req.FrameId} not found in the library or missing on disk.");
+                    $"Frame missing on disk: {req.FramePath}");
             }
             BaseImageData img;
-            using (var fs = File.OpenRead(row.Path)) {
+            using (var fs = File.OpenRead(req.FramePath)) {
                 img = FITSReader.Read(fs);
             }
             if (img.Properties.Channels != 3) {
@@ -172,8 +174,10 @@ public class ColorCalibrationService {
 
             // ── Phase 4: write FITS ──────────────────────────────────
             _jobs[jobId] = _jobs[jobId] with { Stage = "writing" };
+            var srcTarget = img.MetaData.Target.Name;
+            if (string.IsNullOrEmpty(srcTarget)) srcTarget = "Unknown";
             var outPath = WriteOutput(output, W, H, img.Properties.BitDepth,
-                row.Path, row.Target, prefix, req, offsets, gains,
+                req.FramePath, srcTarget, prefix, req, offsets, gains,
                 img.Properties.Wcs);
 
             // ── Phase 5: reindex ─────────────────────────────────────

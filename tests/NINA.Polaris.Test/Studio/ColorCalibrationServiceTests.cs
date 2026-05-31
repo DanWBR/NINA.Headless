@@ -76,13 +76,13 @@ public class ColorCalibrationServiceTests {
         // Background = R:200, G:500, B:300 (forced green/yellow cast).
         // After BG neutralisation, all three medians should land
         // within 1 ADU of each other (the dimmest of the three, R=200).
-        var id = SeedRgbFits(64, 64,
+        var path = SeedRgbFits(64, 64,
             bgR: 200, bgG: 500, bgB: 300,
             starPeakR: 40000, starPeakG: 40000, starPeakB: 40000);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ColorCalibrationService.ColorCalibrationRequest(
-            FrameId: id, Mode: ColorCalibrationService.Modes.BgNeutral,
+            FramePath: path, Mode: ColorCalibrationService.Modes.BgNeutral,
             BgSample: "auto"));
         var status = await WaitForJob(jobId, TimeSpan.FromSeconds(10));
 
@@ -111,12 +111,12 @@ public class ColorCalibrationServiceTests {
 
     [Test]
     public async Task BgNeutral_OutputCarriesRecipeInFitsHeaders() {
-        var id = SeedRgbFits(32, 32, bgR: 100, bgG: 300, bgB: 200,
+        var path = SeedRgbFits(32, 32, bgR: 100, bgG: 300, bgB: 200,
             starPeakR: 0, starPeakG: 0, starPeakB: 0);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ColorCalibrationService.ColorCalibrationRequest(
-            FrameId: id, Mode: ColorCalibrationService.Modes.BgNeutral));
+            FramePath: path, Mode: ColorCalibrationService.Modes.BgNeutral));
         var status = await WaitForJob(jobId, TimeSpan.FromSeconds(5));
         Assert.That(status.Stage, Is.EqualTo("done"));
 
@@ -139,12 +139,12 @@ public class ColorCalibrationServiceTests {
         // ROI rather than the whole-frame lowest-luminance heuristic.
         // The patch I pick has R=500 G=800 B=600; after neut all three
         // channels equal R's median (500) at that patch.
-        var id = SeedRgbFits(64, 64, bgR: 500, bgG: 800, bgB: 600,
+        var path = SeedRgbFits(64, 64, bgR: 500, bgG: 800, bgB: 600,
             starPeakR: 0, starPeakG: 0, starPeakB: 0);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ColorCalibrationService.ColorCalibrationRequest(
-            FrameId: id,
+            FramePath: path,
             Mode: ColorCalibrationService.Modes.BgNeutral,
             BgSample: "patch",
             BgPatch: new ColorCalibrationService.PatchRoi(X: 10, Y: 10, W: 10, H: 10)));
@@ -162,7 +162,7 @@ public class ColorCalibrationServiceTests {
     public void BgNeutral_PatchMode_WithoutPatch_Throws() {
         Assert.Throws<ArgumentException>(() => {
             _svc.StartJob(new ColorCalibrationService.ColorCalibrationRequest(
-                FrameId: 1,
+                FramePath: "missing.fits",
                 Mode: ColorCalibrationService.Modes.BgNeutral,
                 BgSample: "patch",
                 BgPatch: null));
@@ -178,14 +178,14 @@ public class ColorCalibrationServiceTests {
         // colour-cast). Manual should neutralise both: after the run,
         // background pixels are equal across channels AND the white
         // patch is also equal across channels.
-        var id = SeedTwoPatchRgbFits(64, 64,
+        var path = SeedTwoPatchRgbFits(64, 64,
             bgR: 200, bgG: 500, bgB: 300,
             whiteX: 32, whiteY: 32, whiteW: 16, whiteH: 16,
             whiteR: 5000, whiteG: 8000, whiteB: 4000);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ColorCalibrationService.ColorCalibrationRequest(
-            FrameId: id,
+            FramePath: path,
             Mode: ColorCalibrationService.Modes.Manual,
             BgSample: "auto",
             WhitePatch: new ColorCalibrationService.PatchRoi(X: 32, Y: 32, W: 16, H: 16)));
@@ -221,7 +221,7 @@ public class ColorCalibrationServiceTests {
     public void Manual_WithoutWhitePatch_Throws() {
         Assert.Throws<ArgumentException>(() => {
             _svc.StartJob(new ColorCalibrationService.ColorCalibrationRequest(
-                FrameId: 1,
+                FramePath: "missing.fits",
                 Mode: ColorCalibrationService.Modes.Manual,
                 WhitePatch: null));
         });
@@ -317,12 +317,12 @@ public class ColorCalibrationServiceTests {
         // Source has no WCS in the FITS headers. PCC should fail
         // loudly with a hint pointing the user at the Solve step
         // rather than silently producing garbage gains.
-        var id = SeedRgbFits(32, 32, bgR: 100, bgG: 100, bgB: 100,
+        var path = SeedRgbFits(32, 32, bgR: 100, bgG: 100, bgB: 100,
             starPeakR: 0, starPeakG: 0, starPeakB: 0);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ColorCalibrationService.ColorCalibrationRequest(
-            FrameId: id, Mode: ColorCalibrationService.Modes.Photometric));
+            FramePath: path, Mode: ColorCalibrationService.Modes.Photometric));
         var status = await WaitForJob(jobId, TimeSpan.FromSeconds(5));
 
         Assert.That(status.Stage, Is.EqualTo("error"));
@@ -353,7 +353,7 @@ public class ColorCalibrationServiceTests {
         int id = FindIdByPath(path);
 
         var jobId = _svc.StartJob(new ColorCalibrationService.ColorCalibrationRequest(
-            FrameId: id, Mode: ColorCalibrationService.Modes.BgNeutral));
+            FramePath: path, Mode: ColorCalibrationService.Modes.BgNeutral));
         var status = await WaitForJob(jobId, TimeSpan.FromSeconds(5));
 
         Assert.That(status.Stage, Is.EqualTo("error"));
@@ -363,7 +363,7 @@ public class ColorCalibrationServiceTests {
 
     // ─── helpers ─────────────────────────────────────────────────────
 
-    private int SeedRgbFits(int w, int h,
+    private string SeedRgbFits(int w, int h,
             ushort bgR, ushort bgG, ushort bgB,
             ushort starPeakR, ushort starPeakG, ushort starPeakB) {
         var path = Path.Combine(_tmpRoot, "TestRig", "integrated", "TGT", "composed",
@@ -397,10 +397,10 @@ public class ColorCalibrationServiceTests {
                 Exposure = new ImageMetaData.ExposureInfo {
                     Filter = "RGB", ImageType = "MASTERCOMP" } }),
             path);
-        return FindIdAfterRescan(path);
+        return path;
     }
 
-    private int SeedTwoPatchRgbFits(int w, int h,
+    private string SeedTwoPatchRgbFits(int w, int h,
             ushort bgR, ushort bgG, ushort bgB,
             int whiteX, int whiteY, int whiteW, int whiteH,
             ushort whiteR, ushort whiteG, ushort whiteB) {
@@ -430,7 +430,7 @@ public class ColorCalibrationServiceTests {
                 Exposure = new ImageMetaData.ExposureInfo {
                     Filter = "RGB", ImageType = "MASTERCOMP" } }),
             path);
-        return FindIdAfterRescan(path);
+        return path;
     }
 
     private int FindIdAfterRescan(string path) {

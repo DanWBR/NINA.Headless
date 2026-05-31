@@ -105,18 +105,21 @@ public static class StudioEndpoints {
 
         // --- ST-3: master calibration frames -------------------------
 
-        // Start a master-frame integration. Body:
-        //   { frameIds: [1,2,3...], type: "Dark"|"Bias"|"Flat"|"DarkFlat",
+        // Start a master-frame integration. UNIF-3a: payload is now
+        // path-based (no FrameLibrary id required, fresh captures
+        // can be stacked without waiting for a rescan). Body:
+        //   { framePaths: ["...", ...],
+        //     type: "Dark"|"Bias"|"Flat"|"DarkFlat",
         //     method: "Mean"|"Median"|"SigmaClippedMean" }
         // Returns { jobId } the UI polls.
         g.MapPost("/masters", (MasterFrameService svc, MasterRequest req) => {
-            if (req.FrameIds == null || req.FrameIds.Count < 2)
+            if (req.FramePaths == null || req.FramePaths.Count < 2)
                 return Results.BadRequest(new { error = "Need at least 2 frames to integrate." });
             if (!Enum.TryParse<MasterType>(req.Type, true, out var type))
                 return Results.BadRequest(new { error = $"Unknown master type '{req.Type}'." });
             if (!Enum.TryParse<IntegrationMethod>(req.Method, true, out var method))
                 return Results.BadRequest(new { error = $"Unknown method '{req.Method}'." });
-            var jobId = svc.StartJob(req.FrameIds, type, method);
+            var jobId = svc.StartJob(req.FramePaths, type, method);
             return Results.Accepted(value: new { jobId });
         });
 
@@ -132,8 +135,8 @@ public static class StudioEndpoints {
         // (light − dark) / normalised_flat and writes a CALSTAT
         // header listing which corrections were applied.
         g.MapPost("/calibrate", (CalibrationService svc, CalibrationService.CalibrationRequest req) => {
-            if (req?.LightIds == null || req.LightIds.Count == 0)
-                return Results.BadRequest(new { error = "Provide at least one light frame id." });
+            if (req?.LightPaths == null || req.LightPaths.Count == 0)
+                return Results.BadRequest(new { error = "Provide at least one light frame path." });
             var jobId = svc.StartJob(req);
             return Results.Accepted(value: new { jobId });
         });
@@ -150,7 +153,7 @@ public static class StudioEndpoints {
         //   { frameIds: [1,2,...], method: "Mean"|"Median"|"SigmaClippedMean" }
         g.MapPost("/integrate", (BatchStackingService svc,
                                  BatchStackingService.IntegrationRequest req) => {
-            if (req?.FrameIds == null || req.FrameIds.Count < 2)
+            if (req?.FramePaths == null || req.FramePaths.Count < 2)
                 return Results.BadRequest(new { error = "Need at least 2 frames to integrate." });
             var jobId = svc.StartJob(req);
             return Results.Accepted(value: new { jobId });
@@ -211,8 +214,8 @@ public static class StudioEndpoints {
         //     whitePatch: { x, y, w, h } | null }
         g.MapPost("/colorcal", (ColorCalibrationService svc,
                                 ColorCalibrationService.ColorCalibrationRequest req) => {
-            if (req == null || req.FrameId <= 0) {
-                return Results.BadRequest(new { error = "frameId required." });
+            if (req == null || string.IsNullOrWhiteSpace(req.FramePath)) {
+                return Results.BadRequest(new { error = "framePath required." });
             }
             try {
                 var jobId = svc.StartJob(req);
@@ -289,5 +292,7 @@ public static class StudioEndpoints {
     // POST body for /masters. Kept in the endpoints file (not the
     // service) because it's purely an API contract, and Enum names go
     // over the wire as strings to keep the JS side legible.
-    public record MasterRequest(List<int> FrameIds, string Type, string Method);
+    // UNIF-3a: path-based contract. The Stack sub-tab posts absolute
+    // paths straight from the user's slot assignments.
+    public record MasterRequest(List<string> FramePaths, string Type, string Method);
 }

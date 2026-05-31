@@ -231,9 +231,9 @@ public class RealDataPipelineTests {
         var req = new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.PixelMath,
             ChannelMap: new() {
-                new("Ha",   haMaster.Id),
-                new("OIII", oiiiMaster.Id),
-                new("SII",  siiMaster.Id),
+                new("Ha", haMaster.Path),
+                new("OIII", oiiiMaster.Path),
+                new("SII", siiMaster.Path),
             },
             Register: true,
             Normalize: true,
@@ -279,11 +279,11 @@ public class RealDataPipelineTests {
         Log($"NGC 5746: lights={lights.Count} darks={darks.Count} " +
             $"flats={flats.Count} biases={biases.Count}");
 
-        var darkId = await CreateMaster(MasterType.Dark, darks);
-        var flatId = await CreateMaster(MasterType.Flat, flats);
-        var biasId = await CreateMaster(MasterType.Bias, biases);
+        var darkPath = await CreateMaster(MasterType.Dark, darks);
+        var flatPath = await CreateMaster(MasterType.Flat, flats);
+        var biasPath = await CreateMaster(MasterType.Bias, biases);
 
-        await Calibrate(lights.Select(l => l.Id).ToList(), darkId, flatId, biasId);
+        await Calibrate(lights.Select(l => l.Path).ToList(), darkPath, flatPath, biasPath);
 
         var calibrated = await WaitForCalibratedAsync(
             filter: null, target: "NGC 5746",
@@ -291,7 +291,7 @@ public class RealDataPipelineTests {
         Log($"Calibrated frames indexed: {calibrated.Count}");
         Assume.That(calibrated.Count, Is.GreaterThan(2));
 
-        await Integrate(calibrated.Select(f => f.Id).ToList(), "NGC 5746");
+        await Integrate(calibrated.Select(f => f.Path).ToList(), "NGC 5746");
     }
 
     [Test, Order(7)]
@@ -311,7 +311,7 @@ public class RealDataPipelineTests {
 
         Log($"Color cal BG on {rgb!.Path}");
         var req = new ColorCalibrationService.ColorCalibrationRequest(
-            FrameId: rgb.Id,
+            FramePath: rgb.Path,
             Mode: ColorCalibrationService.Modes.BgNeutral,
             BgSample: "auto");
         var jobId = _colorcal.StartJob(req);
@@ -484,7 +484,7 @@ public class RealDataPipelineTests {
         var swPcc = Stopwatch.StartNew();
         var pccJobId = _colorcal.StartJob(
             new ColorCalibrationService.ColorCalibrationRequest(
-                FrameId: rgbSolved.Id,
+                FramePath: rgbSolved.Path,
                 Mode: ColorCalibrationService.Modes.Photometric,
                 BgSample: "auto"));
         var pcc = await WaitFor(() => _colorcal.GetStatus(pccJobId),
@@ -551,12 +551,12 @@ public class RealDataPipelineTests {
         Assume.That(lights.Count, Is.GreaterThanOrEqualTo(2),
             $"Need at least 2 lights for filter {filter}");
 
-        var darkId = await CreateMaster(MasterType.Dark, darks);
-        var flatId = await CreateMaster(MasterType.Flat, flats);
-        var biasId = await CreateMaster(MasterType.Bias, biases);
+        var darkPath = await CreateMaster(MasterType.Dark, darks);
+        var flatPath = await CreateMaster(MasterType.Flat, flats);
+        var biasPath = await CreateMaster(MasterType.Bias, biases);
 
-        await Calibrate(lights.Select(l => l.Id).ToList(),
-            darkId, flatId, biasId);
+        await Calibrate(lights.Select(l => l.Path).ToList(),
+            darkPath, flatPath, biasPath);
 
         var calibrated = await WaitForCalibratedAsync(
             filter: filter, target: "M 16",
@@ -564,7 +564,7 @@ public class RealDataPipelineTests {
         Log($"Calibrated {filter} frames indexed: {calibrated.Count}");
         Assume.That(calibrated.Count, Is.GreaterThan(2));
 
-        await Integrate(calibrated.Select(f => f.Id).ToList(),
+        await Integrate(calibrated.Select(f => f.Path).ToList(),
             $"M 16 {filter}");
     }
 
@@ -621,7 +621,7 @@ public class RealDataPipelineTests {
         return slug.Replace(' ', '_');
     }
 
-    private async Task<int> CreateMaster(MasterType type,
+    private async Task<string> CreateMaster(MasterType type,
                                           IReadOnlyList<FrameRow> frames) {
         Assume.That(frames.Count, Is.GreaterThan(2),
             $"Master {type} needs at least 3 input frames");
@@ -629,7 +629,7 @@ public class RealDataPipelineTests {
             $"({(frames[0].FileSize * frames.Count) / 1024 / 1024} MB raw)");
         var sw = Stopwatch.StartNew();
         var jobId = _masters.StartJob(
-            frames.Select(f => f.Id).ToList(),
+            frames.Select(f => f.Path).ToList(),
             type, IntegrationMethod.SigmaClippedMean);
         var status = await WaitFor(() => _masters.GetStatus(jobId),
             TimeSpan.FromMinutes(15), $"Master {type}");
@@ -665,17 +665,17 @@ public class RealDataPipelineTests {
         }
         Assert.That(row, Is.Not.Null,
             $"Master {type} not indexed after rescan");
-        return row!.Id;
+        return row!.Path;
     }
 
-    private async Task Calibrate(IReadOnlyList<int> lightIds,
-                                 int? masterDarkId, int? masterFlatId,
-                                 int? masterBiasId) {
-        Log($"Calibrate: {lightIds.Count} lights " +
-            $"(dark={masterDarkId} flat={masterFlatId} bias={masterBiasId})");
+    private async Task Calibrate(IReadOnlyList<string> lightPaths,
+                                 string? masterDarkPath, string? masterFlatPath,
+                                 string? masterBiasPath) {
+        Log($"Calibrate: {lightPaths.Count} lights " +
+            $"(dark={masterDarkPath} flat={masterFlatPath} bias={masterBiasPath})");
         var sw = Stopwatch.StartNew();
         var req = new CalibrationService.CalibrationRequest(
-            lightIds.ToList(), masterDarkId, masterFlatId, masterBiasId);
+            lightPaths.ToList(), masterDarkPath, masterFlatPath, masterBiasPath);
         var jobId = _calibrate.StartJob(req);
         var status = await WaitFor(() => _calibrate.GetStatus(jobId),
             TimeSpan.FromMinutes(30), "Calibrate");
@@ -686,12 +686,12 @@ public class RealDataPipelineTests {
         Assert.That(status.Succeeded, Is.GreaterThan(0));
     }
 
-    private async Task<int> Integrate(IReadOnlyList<int> calibratedIds,
+    private async Task<string> Integrate(IReadOnlyList<string> calibratedPaths,
                                        string label) {
-        Log($"Integrate {label}: {calibratedIds.Count} frames");
+        Log($"Integrate {label}: {calibratedPaths.Count} frames");
         var sw = Stopwatch.StartNew();
         var req = new BatchStackingService.IntegrationRequest(
-            calibratedIds.ToList(), "SigmaClippedMean");
+            calibratedPaths.ToList(), "SigmaClippedMean");
         var jobId = _integrate.StartJob(req);
         var status = await WaitFor(() => _integrate.GetStatus(jobId),
             TimeSpan.FromMinutes(45), $"Integrate {label}");
@@ -700,7 +700,7 @@ public class RealDataPipelineTests {
         Assert.That(File.Exists(status.OutputPath!), Is.True);
         var sizeMb = new FileInfo(status.OutputPath!).Length / 1024 / 1024;
         Log($"  -> {status.OutputPath} ({sizeMb} MB) " +
-            $"combined={status.Combined}/{calibratedIds.Count} frames " +
+            $"combined={status.Combined}/{calibratedPaths.Count} frames " +
             $"dropped={status.Dropped} " +
             $"in {sw.Elapsed.TotalSeconds:0.0}s");
         // Same race as masters, see CreateMaster, retry until the
@@ -716,7 +716,7 @@ public class RealDataPipelineTests {
             if (row != null) break;
             await Task.Delay(250);
         }
-        return row?.Id
+        return row?.Path
             ?? throw new InvalidOperationException(
                 "Integrated master not indexed after rescan");
     }

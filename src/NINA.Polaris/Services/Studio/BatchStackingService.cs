@@ -47,8 +47,11 @@ public class BatchStackingService {
         _logger = logger;
     }
 
+    // UNIF-3a: switched FrameIds -> FramePaths; service opens FITS by
+    // path and reads target/filter from headers directly. Decouples
+    // from FrameLibrary SQLite cache.
     public record IntegrationRequest(
-        List<int> FrameIds,
+        List<string> FramePaths,
         string Method);
 
     public string StartJob(IntegrationRequest req) {
@@ -59,52 +62,49 @@ public class BatchStackingService {
         _jobs[jobId] = new IntegrationProgress {
             JobId = jobId,
             InProgress = true,
-            // Total stays at the input frame count for the whole job
-            // so the UI's "done / total" reads consistently across
-            // loading + aligning + integrating + writing. Per-phase
-            // sub-progress (e.g. row counter during integration)
-            // lives on Stage / IntegrationPercent so the headline
-            // "frames done" stays accurate.
-            Total = req.FrameIds.Count,
+            Total = req.FramePaths.Count,
             Stage = "queued"
         };
-        _ = Task.Run(() => RunJob(jobId, req.FrameIds, method));
+        _ = Task.Run(() => RunJob(jobId, req.FramePaths, method));
         return jobId;
     }
 
     public IntegrationProgress? GetStatus(string jobId)
         => _jobs.TryGetValue(jobId, out var p) ? p : null;
 
-    private void RunJob(string jobId, IReadOnlyList<int> frameIds, IntegrationMethod method) {
+    private void RunJob(string jobId, IReadOnlyList<string> framePaths, IntegrationMethod method) {
         try {
             // ---- Phase 1: load + detect stars ----------------------
             _jobs[jobId] = _jobs[jobId] with { Stage = "loading", Done = 0 };
             var detector = new StarDetector();
-            var loaded = new List<(BaseImageData Img, List<DetectedStar> Stars, string Name)>(frameIds.Count);
+            var loaded = new List<(BaseImageData Img, List<DetectedStar> Stars, string Name)>(framePaths.Count);
             int? width = null, height = null;
             int bitDepth = 16;
             string target = "", filter = "";
 
-            for (int i = 0; i < frameIds.Count; i++) {
-                var row = _library.GetById(frameIds[i]);
-                if (row == null || !File.Exists(row.Path)) {
-                    _logger.LogWarning("Frame {Id} missing on disk, skipping", frameIds[i]);
+            for (int i = 0; i < framePaths.Count; i++) {
+                var path = framePaths[i];
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) {
+                    _logger.LogWarning("Frame missing on disk, skipping: {Path}", path);
                     continue;
                 }
-                using var fs = File.OpenRead(row.Path);
+                var frameName = Path.GetFileName(path);
+                using var fs = File.OpenRead(path);
                 var img = FITSReader.Read(fs);
                 if (width == null) {
                     width = img.Properties.Width;
                     height = img.Properties.Height;
                     bitDepth = img.Properties.BitDepth;
-                    target = string.IsNullOrEmpty(row.Target) ? "Unknown" : row.Target;
-                    filter = string.IsNullOrEmpty(row.Filter) ? "L" : row.Filter;
+                    var t = img.MetaData.Target.Name;
+                    target = string.IsNullOrEmpty(t) ? "Unknown" : t;
+                    var f = img.MetaData.Exposure.Filter;
+                    filter = string.IsNullOrEmpty(f) ? "L" : f;
                 } else if (img.Properties.Width != width || img.Properties.Height != height) {
-                    _logger.LogWarning("Frame {Name} size mismatch, skipping", row.FileName);
+                    _logger.LogWarning("Frame {Name} size mismatch, skipping", frameName);
                     continue;
                 }
                 var stars = detector.Detect(img.Data, img.Properties.Width, img.Properties.Height);
-                loaded.Add((img, stars, row.FileName));
+                loaded.Add((img, stars, frameName));
                 _jobs[jobId] = _jobs[jobId] with { Done = i + 1 };
             }
 
@@ -313,7 +313,7 @@ public class BatchStackingService {
 
             _logger.LogInformation(
                 "Integration job {Job}: {N}/{Total} frames stacked → {Path}",
-                jobId, N, frameIds.Count, outPath);
+                jobId, N, framePaths.Count, outPath);
 
             _ = Task.Run(() => _library.RescanAsync());
 

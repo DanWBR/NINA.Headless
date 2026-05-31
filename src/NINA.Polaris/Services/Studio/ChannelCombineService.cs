@@ -75,7 +75,10 @@ public class ChannelCombineService {
         public const string PixelMath   = "pixelmath";
     }
 
-    public record ChannelInput(string Variable, int FrameId);
+    // UNIF-3a: caller now passes a frame path instead of a SQLite id
+    // so the Stack sub-tab can post slot contents straight from the
+    // file browser without needing a FrameLibrary lookup.
+    public record ChannelInput(string Variable, string FramePath);
 
     public record ChannelCombineRequest(
         string Mode,
@@ -121,17 +124,16 @@ public class ChannelCombineService {
 
             for (int i = 0; i < req.ChannelMap.Count; i++) {
                 var slot = req.ChannelMap[i];
-                var row = _library.GetById(slot.FrameId);
-                if (row == null || !File.Exists(row.Path)) {
+                if (string.IsNullOrWhiteSpace(slot.FramePath) || !File.Exists(slot.FramePath)) {
                     throw new InvalidOperationException(
-                        $"Frame id {slot.FrameId} (variable '{slot.Variable}') " +
-                        $"not found in the library or missing on disk.");
+                        $"Frame (variable '{slot.Variable}') missing on disk: {slot.FramePath}");
                 }
-                using var fs = File.OpenRead(row.Path);
+                var fileName = Path.GetFileName(slot.FramePath);
+                using var fs = File.OpenRead(slot.FramePath);
                 var img = FITSReader.Read(fs);
                 if (img.Properties.Channels != 1) {
                     throw new InvalidOperationException(
-                        $"Input '{slot.Variable}' ({row.FileName}) is " +
+                        $"Input '{slot.Variable}' ({fileName}) is " +
                         $"{img.Properties.Channels}-channel; channel combine inputs " +
                         $"must be mono masters.");
                 }
@@ -139,7 +141,8 @@ public class ChannelCombineService {
                     width = img.Properties.Width;
                     height = img.Properties.Height;
                     bitDepth = img.Properties.BitDepth;
-                    target = string.IsNullOrEmpty(row.Target) ? "Unknown" : row.Target;
+                    var t = img.MetaData.Target.Name;
+                    target = string.IsNullOrEmpty(t) ? "Unknown" : t;
                 } else if (img.Properties.Width != width || img.Properties.Height != height) {
                     throw new InvalidOperationException(
                         $"Input '{slot.Variable}' is {img.Properties.Width}×{img.Properties.Height}, " +
@@ -148,7 +151,7 @@ public class ChannelCombineService {
                 inputs.Add(new LoadedChannel(
                     Variable: slot.Variable,
                     Data: img.Data,
-                    FileName: row.FileName,
+                    FileName: fileName,
                     Wcs: img.Properties.Wcs));
                 _jobs[jobId] = _jobs[jobId] with { Done = i + 1 };
             }

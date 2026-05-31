@@ -63,15 +63,15 @@ public class ChannelCombineServiceTests {
         // Register is OFF here to isolate the compose code path; the
         // alignment-OFF path also matters in production (observatory
         // permanent-pier users will use it).
-        var rId = SeedFrame("R", 64, 64, baseLevel: 100, starPeak: 40000);
-        var gId = SeedFrame("G", 64, 64, baseLevel: 200, starPeak: 30000);
-        var bId = SeedFrame("B", 64, 64, baseLevel: 300, starPeak: 20000);
+        var rPath = SeedFrame("R", 64, 64, baseLevel: 100, starPeak: 40000);
+        var gPath = SeedFrame("G", 64, 64, baseLevel: 200, starPeak: 30000);
+        var bPath = SeedFrame("B", 64, 64, baseLevel: 300, starPeak: 20000);
         await _library.RescanAsync();
 
         var req = new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.RgbCompose,
             ChannelMap: new() {
-                new("R", rId), new("G", gId), new("B", bId)
+                new("R", rPath), new("G", gPath), new("B", bPath)
             },
             Register: false,
             Normalize: false);
@@ -104,14 +104,14 @@ public class ChannelCombineServiceTests {
 
     [Test]
     public async Task RgbCompose_PathLandsUnderComposedSubdir() {
-        var rId = SeedFrame("R", 32, 32);
-        var gId = SeedFrame("G", 32, 32);
-        var bId = SeedFrame("B", 32, 32);
+        var rPath = SeedFrame("R", 32, 32);
+        var gPath = SeedFrame("G", 32, 32);
+        var bPath = SeedFrame("B", 32, 32);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.RgbCompose,
-            ChannelMap: new() { new("R", rId), new("G", gId), new("B", bId) },
+            ChannelMap: new() { new("R", rPath), new("G", gPath), new("B", bPath) },
             Register: false,
             Normalize: false));
         var status = await WaitForJob(jobId, TimeSpan.FromSeconds(10));
@@ -144,14 +144,14 @@ public class ChannelCombineServiceTests {
         // message instead of silently producing a misaligned output or
         // crashing. This pins the error-path contract that the UI will
         // surface to the user.
-        var rId = SeedStarryFrame("R", 256, 256, dx: 0, dy: 0);
-        var gId = SeedFrame("G", 256, 256);  // uniform background
-        var bId = SeedFrame("B", 256, 256);
+        var rPath = SeedStarryFrame("R", 256, 256, dx: 0, dy: 0);
+        var gPath = SeedFrame("G", 256, 256);  // uniform background
+        var bPath = SeedFrame("B", 256, 256);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.RgbCompose,
-            ChannelMap: new() { new("R", rId), new("G", gId), new("B", bId) },
+            ChannelMap: new() { new("R", rPath), new("G", gPath), new("B", bPath) },
             Register: true,
             Normalize: false));
         var status = await WaitForJob(jobId, TimeSpan.FromSeconds(10));
@@ -167,14 +167,14 @@ public class ChannelCombineServiceTests {
 
     [Test]
     public async Task RgbCompose_DimensionMismatch_JobFails() {
-        var rId = SeedFrame("R", 64, 64);
-        var gId = SeedFrame("G", 32, 32);   // ← mismatch
-        var bId = SeedFrame("B", 64, 64);
+        var rPath = SeedFrame("R", 64, 64);
+        var gPath = SeedFrame("G", 32, 32);   // ← mismatch
+        var bPath = SeedFrame("B", 64, 64);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.RgbCompose,
-            ChannelMap: new() { new("R", rId), new("G", gId), new("B", bId) },
+            ChannelMap: new() { new("R", rPath), new("G", gPath), new("B", bPath) },
             Register: false,
             Normalize: false));
         var status = await WaitForJob(jobId, TimeSpan.FromSeconds(5));
@@ -186,13 +186,13 @@ public class ChannelCombineServiceTests {
 
     [Test]
     public void StartJob_TooFewInputs_ThrowsArgument() {
-        var rId = SeedFrame("R", 32, 32);
+        var rPath = SeedFrame("R", 32, 32);
         // Only one input → must fail validation client-side, mirrors
         // the endpoint guard so the service is safe to call directly.
         Assert.Throws<ArgumentException>(() => {
             _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
                 Mode: ChannelCombineService.Modes.RgbCompose,
-                ChannelMap: new() { new("R", rId) },
+                ChannelMap: new() { new("R", rPath) },
                 Register: false,
                 Normalize: false));
         });
@@ -204,16 +204,16 @@ public class ChannelCombineServiceTests {
         // under composed/ with the "lrgb_" prefix instead of "rgb_",
         // and FITS Channels == 3 (luminance is folded into RGB, not
         // stored as a 4th plane).
-        var rId = SeedFrame("R", 32, 32, baseLevel: 4000);
-        var gId = SeedFrame("G", 32, 32, baseLevel: 5000);
-        var bId = SeedFrame("B", 32, 32, baseLevel: 6000);
+        var rPath = SeedFrame("R", 32, 32, baseLevel: 4000);
+        var gPath = SeedFrame("G", 32, 32, baseLevel: 5000);
+        var bPath = SeedFrame("B", 32, 32, baseLevel: 6000);
         var lId = SeedFrame("L", 32, 32, baseLevel: 15000);   // brighter luminance
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.LrgbCompose,
             ChannelMap: new() {
-                new("R", rId), new("G", gId), new("B", bId), new("L", lId)
+                new("R", rPath), new("G", gPath), new("B", bPath), new("L", lId)
             },
             Register: false,
             Normalize: false,
@@ -232,14 +232,14 @@ public class ChannelCombineServiceTests {
         // Without a channel named "L" the LRGB combine cannot apply
         // the luminance overlay; the service should fail loudly so
         // the UI surfaces a fixable error to the user.
-        var rId = SeedFrame("R", 32, 32);
-        var gId = SeedFrame("G", 32, 32);
-        var bId = SeedFrame("B", 32, 32);
+        var rPath = SeedFrame("R", 32, 32);
+        var gPath = SeedFrame("G", 32, 32);
+        var bPath = SeedFrame("B", 32, 32);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.LrgbCompose,
-            ChannelMap: new() { new("R", rId), new("G", gId), new("B", bId) },
+            ChannelMap: new() { new("R", rPath), new("G", gPath), new("B", bPath) },
             Register: false,
             Normalize: false));
         var status = await WaitForJob(jobId, TimeSpan.FromSeconds(5));
@@ -254,16 +254,16 @@ public class ChannelCombineServiceTests {
         // Both lab and ratio code paths must be reachable through the
         // service. Verify by running the same input twice with the
         // two algos and confirming both produce an output FITS.
-        var rId = SeedFrame("R", 32, 32, baseLevel: 4000);
-        var gId = SeedFrame("G", 32, 32, baseLevel: 5000);
-        var bId = SeedFrame("B", 32, 32, baseLevel: 6000);
+        var rPath = SeedFrame("R", 32, 32, baseLevel: 4000);
+        var gPath = SeedFrame("G", 32, 32, baseLevel: 5000);
+        var bPath = SeedFrame("B", 32, 32, baseLevel: 6000);
         var lId = SeedFrame("L", 32, 32, baseLevel: 15000);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.LrgbCompose,
             ChannelMap: new() {
-                new("R", rId), new("G", gId), new("B", bId), new("L", lId)
+                new("R", rPath), new("G", gPath), new("B", bPath), new("L", lId)
             },
             Register: false,
             Normalize: false,
@@ -309,14 +309,14 @@ public class ChannelCombineServiceTests {
         // MonoOutput=true with 1 expression yields a 1-channel FITS.
         // Useful for synthetic-L from RGB ((R+G+B)/3) for an LRGB
         // workflow that doesn't have a real L master.
-        var rId = SeedFrame("R", 32, 32, baseLevel: 3000);
-        var gId = SeedFrame("G", 32, 32, baseLevel: 6000);
-        var bId = SeedFrame("B", 32, 32, baseLevel: 9000);
+        var rPath = SeedFrame("R", 32, 32, baseLevel: 3000);
+        var gPath = SeedFrame("G", 32, 32, baseLevel: 6000);
+        var bPath = SeedFrame("B", 32, 32, baseLevel: 9000);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.PixelMath,
-            ChannelMap: new() { new("R", rId), new("G", gId), new("B", bId) },
+            ChannelMap: new() { new("R", rPath), new("G", gPath), new("B", bPath) },
             Register: false,
             Normalize: false,
             MonoOutput: true,
@@ -333,14 +333,14 @@ public class ChannelCombineServiceTests {
         // Typo in the variable name surfaces at compile-time as a
         // job error; user fixes the expression in the modal and
         // retries without losing minutes to a doomed job.
-        var rId = SeedFrame("R", 32, 32);
-        var gId = SeedFrame("G", 32, 32);
-        var bId = SeedFrame("B", 32, 32);
+        var rPath = SeedFrame("R", 32, 32);
+        var gPath = SeedFrame("G", 32, 32);
+        var bPath = SeedFrame("B", 32, 32);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.PixelMath,
-            ChannelMap: new() { new("R", rId), new("G", gId), new("B", bId) },
+            ChannelMap: new() { new("R", rPath), new("G", gPath), new("B", bPath) },
             Register: false,
             Normalize: false,
             Expressions: new() { "R", "G", "blueTypo" }));   // wrong name
@@ -359,14 +359,14 @@ public class ChannelCombineServiceTests {
         // Normalize=true the R channel should be scaled ~10× so its
         // median lands close to the brightest. Without normalize the
         // R plane in the output stays at ~500.
-        var rId = SeedFrame("R", 32, 32, baseLevel: 500);
-        var gId = SeedFrame("G", 32, 32, baseLevel: 5000);
-        var bId = SeedFrame("B", 32, 32, baseLevel: 5000);
+        var rPath = SeedFrame("R", 32, 32, baseLevel: 500);
+        var gPath = SeedFrame("G", 32, 32, baseLevel: 5000);
+        var bPath = SeedFrame("B", 32, 32, baseLevel: 5000);
         await _library.RescanAsync();
 
         var jobId = _svc.StartJob(new ChannelCombineService.ChannelCombineRequest(
             Mode: ChannelCombineService.Modes.RgbCompose,
-            ChannelMap: new() { new("R", rId), new("G", gId), new("B", bId) },
+            ChannelMap: new() { new("R", rPath), new("G", gPath), new("B", bPath) },
             Register: false,
             Normalize: true));
         var status = await WaitForJob(jobId, TimeSpan.FromSeconds(10));
@@ -382,7 +382,7 @@ public class ChannelCombineServiceTests {
 
     // ─── helpers ─────────────────────────────────────────────────────
 
-    private int SeedFrame(string filter, int w, int h,
+    private string SeedFrame(string filter, int w, int h,
             ushort baseLevel = 1000, ushort starPeak = 0) {
         var path = Path.Combine(_tmpRoot, "TestRig", "lights", "M31", filter,
             "2026-05-26", $"{filter}_{Guid.NewGuid().ToString("N")[..6]}.fits");
@@ -416,7 +416,7 @@ public class ChannelCombineServiceTests {
         // can't pre-compute the id. Tests call _library.RescanAsync()
         // before they look up; the lookup is by-target+filter via
         // a small helper.
-        return RowIdAfterRescan(path);
+        return path;
     }
 
     /// <summary>
@@ -427,7 +427,7 @@ public class ChannelCombineServiceTests {
     /// thresholding quirks (a previous Gaussian-profile seed kept R
     /// detecting but G picking up zero stars on certain seeds).
     /// </summary>
-    private int SeedStarryFrame(string filter, int w, int h, int dx, int dy) {
+    private string SeedStarryFrame(string filter, int w, int h, int dx, int dy) {
         var path = Path.Combine(_tmpRoot, "TestRig", "lights", "M31", filter,
             "2026-05-26", $"{filter}_{Guid.NewGuid().ToString("N")[..6]}.fits");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -462,7 +462,7 @@ public class ChannelCombineServiceTests {
                 },
             });
         FITSWriter.Write(img, path);
-        return RowIdAfterRescan(path);
+        return path;
     }
 
     private int _lastSeededId = 0;

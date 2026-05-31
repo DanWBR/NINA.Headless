@@ -40,21 +40,24 @@ public class CalibrationService {
     }
 
     public record CalibrationRequest(
-        List<int> LightIds,
+        List<string> LightPaths,
         // Override hooks, null = auto-match each light to nearest
-        // master. Setting these pins a specific master for the whole
-        // batch (useful when auto-match's nearest-neighbour pick is
-        // not what the user wants).
-        int? MasterDarkId,
-        int? MasterFlatId,
-        int? MasterBiasId);
+        // master via the FrameLibrary index. Setting any of these
+        // pins a specific master path for the whole batch (Stack
+        // sub-tab populates these from its masterDarks/Flats/Biases
+        // slots).
+        // UNIF-3a: switched from int? id to string? path so the
+        // caller doesn't need a library lookup before posting.
+        string? MasterDarkPath,
+        string? MasterFlatPath,
+        string? MasterBiasPath);
 
     public string StartJob(CalibrationRequest req) {
         var jobId = Guid.NewGuid().ToString("N")[..8];
         _jobs[jobId] = new CalibrationProgress {
             JobId = jobId,
             InProgress = true,
-            Total = req.LightIds.Count,
+            Total = req.LightPaths.Count,
             Stage = "queued"
         };
         _ = Task.Run(() => RunJob(jobId, req));
@@ -66,35 +69,34 @@ public class CalibrationService {
 
     private void RunJob(string jobId, CalibrationRequest req) {
         try {
-            // Available masters in the library, by category. Pulled
-            // once at job start, if the user creates a new master
-            // mid-job they'd have to re-start anyway.
+            // Available masters in the library, by category. Used
+            // only by the auto-match fallback when the caller didn't
+            // pin a specific master path.
             var masters = LoadMasterIndex();
             _logger.LogInformation("Calibration job {Job}: {Lights} lights, masters available: " +
                 "darks={D} flats={F} biases={B}",
-                jobId, req.LightIds.Count,
+                jobId, req.LightPaths.Count,
                 masters.Darks.Count, masters.Flats.Count, masters.Biases.Count);
 
-            // Cache decoded masters across lights, a typical session
-            // uses 1-2 darks and 1-2 flats for an entire batch.
-            var loadedMasters = new Dictionary<int, BaseImageData>();
-            BaseImageData LoadMaster(int id) {
-                if (loadedMasters.TryGetValue(id, out var cached)) return cached;
-                var row = _library.GetById(id)
-                    ?? throw new InvalidOperationException($"Master {id} missing from library.");
-                using var fs = File.OpenRead(row.Path);
+            // Cache decoded masters across lights. Keyed by absolute
+            // path now that we're not id-driven.
+            var loadedMasters = new Dictionary<string, BaseImageData>(StringComparer.OrdinalIgnoreCase);
+            BaseImageData LoadMaster(string path) {
+                if (loadedMasters.TryGetValue(path, out var cached)) return cached;
+                if (!File.Exists(path))
+                    throw new InvalidOperationException($"Master missing on disk: {path}");
+                using var fs = File.OpenRead(path);
                 var img = FITSReader.Read(fs);
-                loadedMasters[id] = img;
+                loadedMasters[path] = img;
                 return img;
             }
 
-            // Precompute normalized flat per (flatId, calibratorId) key.
-            var flatCache = new Dictionary<(int flat, int? cal), (double[] norm, double mean)>();
-            (double[] norm, double mean) GetNormalizedFlat(int flatId, int? calibratorId) {
-                var key = (flatId, calibratorId);
+            var flatCache = new Dictionary<(string flat, string? cal), (double[] norm, double mean)>();
+            (double[] norm, double mean) GetNormalizedFlat(string flatPath, string? calibratorPath) {
+                var key = (flatPath, calibratorPath);
                 if (flatCache.TryGetValue(key, out var cached)) return cached;
-                var flat = LoadMaster(flatId);
-                BaseImageData? cal = calibratorId.HasValue ? LoadMaster(calibratorId.Value) : null;
+                var flat = LoadMaster(flatPath);
+                BaseImageData? cal = calibratorPath != null ? LoadMaster(calibratorPath) : null;
                 var (norm, mean) = NormalizeFlat(flat, cal);
                 flatCache[key] = (norm, mean);
                 return (norm, mean);
@@ -109,20 +111,20 @@ public class CalibrationService {
             int failed = 0;
             string? firstError = null;
 
-            for (int i = 0; i < req.LightIds.Count; i++) {
-                var lightId = req.LightIds[i];
+            for (int i = 0; i < req.LightPaths.Count; i++) {
+                var lightPath = req.LightPaths[i];
                 _jobs[jobId] = _jobs[jobId] with {
-                    Stage = $"calibrating {i + 1}/{req.LightIds.Count}",
+                    Stage = $"calibrating {i + 1}/{req.LightPaths.Count}",
                     Done = done
                 };
                 try {
-                    CalibrateOne(lightId, req, masters, LoadMaster, GetNormalizedFlat,
+                    CalibrateOne(lightPath, req, masters, LoadMaster, GetNormalizedFlat,
                                  outRoot, rigName);
                     succeeded++;
                 } catch (Exception ex) {
                     failed++;
-                    if (firstError == null) firstError = $"{lightId}: {ex.Message}";
-                    _logger.LogWarning(ex, "Calibration of frame {Id} failed", lightId);
+                    if (firstError == null) firstError = $"{Path.GetFileName(lightPath)}: {ex.Message}";
+                    _logger.LogWarning(ex, "Calibration of frame {Path} failed", lightPath);
                 }
                 done++;
             }
@@ -149,39 +151,49 @@ public class CalibrationService {
     }
 
     private void CalibrateOne(
-            int lightId, CalibrationRequest req, MasterIndex masters,
-            Func<int, BaseImageData> loadMaster,
-            Func<int, int?, (double[] norm, double mean)> getNormFlat,
+            string lightPath, CalibrationRequest req, MasterIndex masters,
+            Func<string, BaseImageData> loadMaster,
+            Func<string, string?, (double[] norm, double mean)> getNormFlat,
             string outRoot, string rigName) {
-        var row = _library.GetById(lightId)
-            ?? throw new InvalidOperationException($"Light {lightId} not found in library.");
-        using var fs = File.OpenRead(row.Path);
+        if (!File.Exists(lightPath))
+            throw new InvalidOperationException($"Light missing on disk: {lightPath}");
+        using var fs = File.OpenRead(lightPath);
         var light = FITSReader.Read(fs);
         int W = light.Properties.Width;
         int H = light.Properties.Height;
         int gain = light.MetaData.Camera.Gain;
         double exposure = light.MetaData.Exposure.ExposureTime;
         string filter = light.MetaData.Exposure.Filter ?? "";
+        // Target name comes from the FITS OBJECT header; previously
+        // we pulled it from the FrameLibrary row which was just a
+        // cache of the same header value. Direct read avoids the
+        // library lookup entirely.
+        string target = light.MetaData.Target.Name ?? "";
+        if (string.IsNullOrEmpty(target)) target = "Unknown";
 
         // ---- Pick which masters to apply --------------------------
-        int? darkId = req.MasterDarkId ?? FindNearestDark(masters.Darks, exposure, gain);
-        int? flatId = req.MasterFlatId ?? FindMatchingFlat(masters.Flats, filter, gain);
+        // FrameLibrary helpers return FrameRow (with .Path); we
+        // discard the row beyond .Path here so the downstream
+        // pipeline stays path-only.
+        string? darkPath = req.MasterDarkPath ?? FindNearestDark(masters.Darks, exposure, gain)?.Path;
+        string? flatPath = req.MasterFlatPath ?? FindMatchingFlat(masters.Flats, filter, gain)?.Path;
         // Bias only matters if we don't have a dark, darks already
-        // include the bias signal. If user *explicitly* passes a bias
-        // id we honour it as a flat-calibrator override.
-        int? biasId = req.MasterBiasId ?? (darkId == null ? FindMatchingBias(masters.Biases, gain) : null);
+        // include the bias signal. If user explicitly passes a bias
+        // path we honour it as a flat-calibrator override.
+        string? biasPath = req.MasterBiasPath
+            ?? (darkPath == null ? FindMatchingBias(masters.Biases, gain)?.Path : null);
         // Flat needs a calibration frame to subtract before normalising:
         // prefer master_dark_flat (matched on flat's exposure+gain),
         // fall back to master_bias.
-        int? flatCalibrator = null;
-        if (flatId.HasValue) {
-            var flatMeta = loadMaster(flatId.Value).MetaData;
-            int? darkFlatId = FindNearestDark(masters.DarkFlats,
-                flatMeta.Exposure.ExposureTime, flatMeta.Camera.Gain);
-            flatCalibrator = darkFlatId ?? biasId ?? req.MasterBiasId;
+        string? flatCalibrator = null;
+        if (flatPath != null) {
+            var flatMeta = loadMaster(flatPath).MetaData;
+            string? darkFlatPath = FindNearestDark(masters.DarkFlats,
+                flatMeta.Exposure.ExposureTime, flatMeta.Camera.Gain)?.Path;
+            flatCalibrator = darkFlatPath ?? biasPath ?? req.MasterBiasPath;
         }
 
-        if (darkId == null && flatId == null && biasId == null) {
+        if (darkPath == null && flatPath == null && biasPath == null) {
             throw new InvalidOperationException(
                 $"No matching masters found for this light (gain={gain}, " +
                 $"exposure={exposure}s, filter='{filter}').");
@@ -190,10 +202,10 @@ public class CalibrationService {
         // ---- Pixel math (in-place on a copy) ----------------------
         var pixels = new ushort[light.Data.Length];
         var src = light.Data;
-        ushort[]? darkPx = darkId.HasValue ? loadMaster(darkId.Value).Data : null;
-        ushort[]? biasPx = (darkId == null && biasId.HasValue) ? loadMaster(biasId.Value).Data : null;
-        (double[] norm, double mean)? flat = flatId.HasValue
-            ? getNormFlat(flatId.Value, flatCalibrator)
+        ushort[]? darkPx = darkPath != null ? loadMaster(darkPath).Data : null;
+        ushort[]? biasPx = (darkPath == null && biasPath != null) ? loadMaster(biasPath).Data : null;
+        (double[] norm, double mean)? flat = flatPath != null
+            ? getNormFlat(flatPath, flatCalibrator)
             : null;
 
         if (darkPx != null && darkPx.Length != pixels.Length)
@@ -215,12 +227,11 @@ public class CalibrationService {
         });
 
         // ---- Write output ----------------------------------------
-        var target = string.IsNullOrEmpty(row.Target) ? "Unknown" : row.Target;
         var filterFolder = string.IsNullOrEmpty(filter) ? "L" : filter;
         var dir = Path.Combine(outRoot, Sanitize(rigName), "calibrated",
             Sanitize(target), Sanitize(filterFolder));
         Directory.CreateDirectory(dir);
-        var fileName = "cal_" + Path.GetFileName(row.Path);
+        var fileName = "cal_" + Path.GetFileName(lightPath);
         var outPath = Path.Combine(dir, fileName);
         int copy = 1;
         while (File.Exists(outPath)) {
@@ -243,12 +254,9 @@ public class CalibrationService {
         var kw = new List<KeyValuePair<string, string>> {
             new("CALSTAT", calstat)
         };
-        if (darkId.HasValue)
-            kw.Add(new("MDARK", Path.GetFileName(_library.GetById(darkId.Value)?.Path ?? "")));
-        if (flatId.HasValue)
-            kw.Add(new("MFLAT", Path.GetFileName(_library.GetById(flatId.Value)?.Path ?? "")));
-        if (biasId.HasValue && darkId == null)
-            kw.Add(new("MBIAS", Path.GetFileName(_library.GetById(biasId.Value)?.Path ?? "")));
+        if (darkPath != null) kw.Add(new("MDARK", Path.GetFileName(darkPath)));
+        if (flatPath != null) kw.Add(new("MFLAT", Path.GetFileName(flatPath)));
+        if (biasPath != null && darkPath == null) kw.Add(new("MBIAS", Path.GetFileName(biasPath)));
         FITSWriter.Write(calibrated, outPath, customKeywords: kw);
     }
 
@@ -272,12 +280,10 @@ public class CalibrationService {
         return index;
     }
 
-    private static int? FindNearestDark(IReadOnlyList<FrameRow> darks, double exposure, int gain) {
+    // UNIF-3a: return the whole FrameRow (caller grabs .Path) instead
+    // of the int? id. The internal pipeline is path-driven now.
+    private static FrameRow? FindNearestDark(IReadOnlyList<FrameRow> darks, double exposure, int gain) {
         if (darks.Count == 0) return null;
-        // Require exact gain match, gain affects read noise pattern,
-        // can't substitute across gains. Within that, pick the closest
-        // exposure (typical pattern is one master dark per (gain, exposure)
-        // anyway, so the "closest" usually matches exactly).
         FrameRow? best = null;
         double bestDelta = double.MaxValue;
         foreach (var d in darks) {
@@ -285,23 +291,19 @@ public class CalibrationService {
             var delta = Math.Abs(d.ExposureSec - exposure);
             if (delta < bestDelta) { bestDelta = delta; best = d; }
         }
-        return best?.Id;
+        return best;
     }
 
-    private static int? FindMatchingFlat(IReadOnlyList<FrameRow> flats, string filter, int gain) {
+    private static FrameRow? FindMatchingFlat(IReadOnlyList<FrameRow> flats, string filter, int gain) {
         if (flats.Count == 0) return null;
-        // Flats are filter+gain specific (different filters have
-        // different vignetting + dust patterns at different focus).
-        var match = flats.FirstOrDefault(f =>
+        return flats.FirstOrDefault(f =>
             f.Gain == gain &&
             string.Equals(f.Filter ?? "", filter ?? "", StringComparison.OrdinalIgnoreCase));
-        return match?.Id;
     }
 
-    private static int? FindMatchingBias(IReadOnlyList<FrameRow> biases, int gain) {
+    private static FrameRow? FindMatchingBias(IReadOnlyList<FrameRow> biases, int gain) {
         if (biases.Count == 0) return null;
-        var match = biases.FirstOrDefault(b => b.Gain == gain);
-        return match?.Id;
+        return biases.FirstOrDefault(b => b.Gain == gain);
     }
 
     /// <summary>Build the normalised flat: subtract a bias/dark-flat

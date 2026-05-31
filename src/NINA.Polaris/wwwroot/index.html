@@ -4529,9 +4529,16 @@
                      it), the canvas inside doesn't need clicks, so
                      promoting the panel-level click to "hide" is
                      safe and obvious. -->
+                <!-- x-show traded for :class force-hide because of an
+                     Alpine reactivity issue (slewPreviewVisible flips
+                     to false but x-show doesn't re-render). Adding
+                     the .force-hidden class drops display:none with
+                     !important via CSS, sidestepping whatever was
+                     blocking the reactive update. The active-gate is
+                     kept as a second class so the panel stays out of
+                     the DOM flow entirely when stream is inactive. -->
                 <div class="cam-float-panel cam-float-clickable"
-                     x-show="slewPreview?.active && slewPreviewVisible"
-                     x-cloak
+                     :class="{ 'force-hidden': !slewPreview?.active || !slewPreviewVisible }"
                      :style="`left: ${cameraPanel.x}px; top: ${cameraPanel.y}px;`"
                      @click="console.log('[Polaris] camera panel clicked -> hide'); slewPreviewVisible = false; persistSlewPreviewToggle()"
                      title="Click anywhere to hide">
@@ -4918,9 +4925,10 @@
                      the panel. Position survives across reloads via
                      localStorage. A small "Mount" pill in the corner
                      re-opens it when hidden. -->
+                <!-- Same .force-hidden trick as the camera popup below
+                     to dodge the Alpine x-show reactivity issue. -->
                 <div class="mount-float-panel"
-                     x-show="mount.connected && mountPanel.visible"
-                     x-cloak
+                     :class="{ 'force-hidden': !mount.connected || !mountPanel.visible }"
                      :style="`left: ${mountPanel.x}px; top: ${mountPanel.y}px;`">
                     <div class="mount-float-header"
                          @mousedown="mountPanelDragStart($event)"

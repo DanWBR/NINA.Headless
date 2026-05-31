@@ -1996,6 +1996,18 @@ label select.input-sm {
     background: var(--bg-primary);
     color: var(--text-primary);
 }
+/* Brute-force hide rule for both float panels. Replaces x-show
+   because that was getting blocked by an Alpine reactivity quirk
+   (operator clicked close, slewPreviewVisible was set to false,
+   but x-show never re-rendered display:none). With !important +
+   visibility:hidden the panel is GUARANTEED to disappear regardless
+   of what other CSS rules or inline styles are competing. */
+.cam-float-panel.force-hidden,
+.mount-float-panel.force-hidden {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
 /* Panel-level click-to-dismiss surface. Pointer hint so the user
    sees that the whole popup is interactive and dismissible — even
    when the X button in the corner is somehow blocked by some

@@ -11,6 +11,10 @@
   <ItemGroup>
     <ProjectReference Include="..\NINA.Core.Portable\NINA.Core.Portable.csproj" />
     <ProjectReference Include="..\NINA.Image.Portable\NINA.Image.Portable.csproj" />
+    <!-- Logging abstractions for IndiFocuser diagnostic logs. The
+         concrete provider is set up in NINA.Polaris (LogBufferLoggerProvider
+         from DBGLOG-2); we just need the ILogger interface here. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.*" />
   </ItemGroup>
 
 </Project>

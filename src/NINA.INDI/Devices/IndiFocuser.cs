@@ -1,9 +1,12 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using NINA.INDI.Client;
 
 namespace NINA.INDI.Devices;
 
 public class IndiFocuser : NINA.Image.Interfaces.IFocuser {
     private readonly IndiClient _client;
+    private readonly ILogger _logger;
 
     public string DeviceName { get; }
     /// <summary>
@@ -24,9 +27,16 @@ public class IndiFocuser : NINA.Image.Interfaces.IFocuser {
         }
     }
 
-    public IndiFocuser(IndiClient client, string deviceName) {
+    public IndiFocuser(IndiClient client, string deviceName, ILogger? logger = null) {
         _client = client;
         DeviceName = deviceName;
+        // Optional logger so existing call sites (and tests) that
+        // don't have a logger handy keep compiling. When present, every
+        // MoveAbsoluteAsync logs its inputs + the resulting INDI write
+        // -- LogBufferLoggerProvider (DBGLOG-2) mirrors that into the
+        // ring buffer so the operator can see exactly what was sent
+        // when a crash happens.
+        _logger = logger ?? NullLogger.Instance;
     }
 
     public async Task ConnectAsync(CancellationToken ct = default) {
@@ -40,12 +50,23 @@ public class IndiFocuser : NINA.Image.Interfaces.IFocuser {
     }
 
     public async Task MoveAbsoluteAsync(int position, CancellationToken ct = default) {
+        // Snapshot state once so the diagnostic log + the guards
+        // see the same values (Position can shift between reads when
+        // the driver is mid-update).
+        var pos = Position;
+        var max = MaxPosition;
+        var moving = IsMoving;
+        var connected = IsConnected;
+        _logger.LogInformation(
+            "IndiFocuser MoveAbsoluteAsync '{Device}' requested={Requested} currentPos={Pos} max={Max} moving={Moving} connected={Connected}",
+            DeviceName, position, pos, max, moving, connected);
+
         // Pre-flight: refuse to send to a disconnected device. Some
         // drivers (ZWO EAF) silently accept a number vector while
         // disconnected and only error out when the next operation
         // probes CONNECTION -- by then the UI thinks the move
         // succeeded when it never started.
-        if (!IsConnected) {
+        if (!connected) {
             throw new InvalidOperationException(
                 $"Focuser '{DeviceName}' is not connected. Connect it from the RIGS tab before moving.");
         }
@@ -54,7 +75,7 @@ public class IndiFocuser : NINA.Image.Interfaces.IFocuser {
         // FOCUS_ABSOLUTE_POSITION write mid-flight as a relative
         // command, which can over-shoot and trip the limit switch
         // (visible to the user as "disconnect on move").
-        if (IsMoving) {
+        if (moving) {
             throw new InvalidOperationException(
                 $"Focuser '{DeviceName}' is already moving. Wait for the current move to settle.");
         }
@@ -66,16 +87,42 @@ public class IndiFocuser : NINA.Image.Interfaces.IFocuser {
         // before the driver populates FOCUS_MAX; in that case skip the
         // upper clamp and trust the caller.
         var target = position;
-        var max = MaxPosition;
         if (max > 0) target = Math.Clamp(target, 0, max);
         else        target = Math.Max(0, target);
         // Short-circuit moves to the current position. Some EAF
         // firmware revisions treat "move to where you already are"
         // as an error condition and toggle CONNECTION off as the
         // response. Cheap to guard, expensive to recover from.
-        if (target == Position) return;
-        await _client.SetNumberAsync(DeviceName, "ABS_FOCUS_POSITION",
-            new Dictionary<string, double> { ["FOCUS_ABSOLUTE_POSITION"] = target }, ct);
+        if (target == pos) {
+            _logger.LogInformation("IndiFocuser '{Device}' already at target {Target}, skipping", DeviceName, target);
+            return;
+        }
+        _logger.LogInformation(
+            "IndiFocuser '{Device}' sending ABS_FOCUS_POSITION FOCUS_ABSOLUTE_POSITION={Target}",
+            DeviceName, target);
+        try {
+            await _client.SetNumberAsync(DeviceName, "ABS_FOCUS_POSITION",
+                new Dictionary<string, double> { ["FOCUS_ABSOLUTE_POSITION"] = target }, ct);
+        } catch (Exception ex) {
+            _logger.LogWarning(ex,
+                "IndiFocuser '{Device}' ABS_FOCUS_POSITION write FAILED (target={Target})",
+                DeviceName, target);
+            throw;
+        }
+        // Brief post-write probe: if CONNECTION dropped within 500ms
+        // of the write, the driver crashed on our command and we want
+        // that visible in the log. We're NOT going to retry or
+        // reconnect -- only surface the diagnosis.
+        try {
+            await Task.Delay(500, ct);
+            if (!IsConnected) {
+                _logger.LogWarning(
+                    "IndiFocuser '{Device}' DISCONNECTED within 500ms of move to {Target} (driver likely crashed on the command)",
+                    DeviceName, target);
+            }
+        } catch (OperationCanceledException) {
+            // request cancelled mid-wait; not the focuser's fault
+        }
     }
 
     public async Task MoveRelativeAsync(int steps, CancellationToken ct = default) {

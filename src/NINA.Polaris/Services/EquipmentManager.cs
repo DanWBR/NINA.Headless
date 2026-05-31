@@ -400,7 +400,7 @@ public class EquipmentManager : IDisposable {
     public IFocuser SelectFocuser(string driver, string deviceId) {
         driver = (driver ?? "indi").Trim().ToLowerInvariant();
         Focuser = driver switch {
-            "indi" => new IndiFocuser(_indiClient, deviceId),
+            "indi" => new IndiFocuser(_indiClient, deviceId, _logger),
             "ascom-com" => CreateAscomFocuser(deviceId),
             "alpaca" => AlpacaFocuser.FromDeviceId(deviceId),
             _ => throw new NotSupportedException(

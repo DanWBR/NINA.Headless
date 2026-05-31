@@ -112,26 +112,61 @@ public class HardwareAutoConnectService : IHostedService {
             _notify.Push("ok", $"INDI already connected ({_indiClient.Host}:{_indiClient.Port})");
             return true;
         }
-        try {
-            _notify.Push("info", $"Connecting INDI {_indiClient.Host}:{_indiClient.Port}…", 2500);
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(8));
-            await _indiClient.ConnectAsync(timeoutCts.Token);
-            // Devices populate asynchronously as getProperties responses
-            // come in. Give the server up to 2s to enumerate before we
-            // try to bind rig devices, without this the device list is
-            // empty and every Select* lookup misses.
-            for (int i = 0; i < 20 && _indiClient.Devices.Count == 0; i++) {
-                await Task.Delay(100, ct);
+        // Retry with backoff. The original single-attempt path raced
+        // with IndiWebManagerService -- on a Pi 2 boot it takes 10-20 s
+        // for indi-web to spawn indiserver, and our 8 s timeout fell
+        // squarely inside that gap, surfacing as the noisy
+        // "Connection refused" toast every cold start.
+        //
+        // 10 attempts × ~6 s each (1 s connect timeout + 5 s sleep) =
+        // up to ~60 s wall clock. Short connect timeout per attempt
+        // keeps the loop responsive: each "indiserver not up yet"
+        // probe fails fast (refused → instant) so the 5 s sleep
+        // dominates and the loop sleeps gracefully waiting for the
+        // socket to open. First few attempts are silent (would spam
+        // toasts every retry); only the first user-visible
+        // notification ("Connecting…") fires once, then either the
+        // success or final-give-up toast.
+        const int MaxAttempts = 10;
+        const int SleepSeconds = 5;
+        Exception? lastError = null;
+        _notify.Push("info", $"Connecting INDI {_indiClient.Host}:{_indiClient.Port}…", 2500);
+        for (int attempt = 1; attempt <= MaxAttempts; attempt++) {
+            if (ct.IsCancellationRequested) return false;
+            try {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
+                await _indiClient.ConnectAsync(timeoutCts.Token);
+                // Devices populate asynchronously as getProperties responses
+                // come in. Give the server up to 2s to enumerate before we
+                // try to bind rig devices, without this the device list is
+                // empty and every Select* lookup misses.
+                for (int i = 0; i < 20 && _indiClient.Devices.Count == 0; i++) {
+                    await Task.Delay(100, ct);
+                }
+                _notify.Push("ok",
+                    $"INDI connected ({_indiClient.Host}:{_indiClient.Port}) · {_indiClient.Devices.Count} device(s)");
+                return true;
+            } catch (Exception ex) {
+                lastError = ex;
+                // Log at Debug for the silent retries so a noisy log
+                // doesn't bury actual problems; the final give-up
+                // surfaces as an Information entry below.
+                _logger.LogDebug(ex,
+                    "INDI connect attempt {Attempt}/{Max} to {Host}:{Port} failed",
+                    attempt, MaxAttempts, _indiClient.Host, _indiClient.Port);
+                if (attempt < MaxAttempts) {
+                    try { await Task.Delay(TimeSpan.FromSeconds(SleepSeconds), ct); }
+                    catch (OperationCanceledException) { return false; }
+                }
             }
-            _notify.Push("ok",
-                $"INDI connected ({_indiClient.Host}:{_indiClient.Port}) · {_indiClient.Devices.Count} device(s)");
-            return true;
-        } catch (Exception ex) {
-            _logger.LogInformation(ex, "Auto-connect to INDI {Host}:{Port} failed", _indiClient.Host, _indiClient.Port);
-            _notify.Push("warn", $"INDI unavailable at {_indiClient.Host}:{_indiClient.Port}, connect manually from Rigs.");
-            return false;
         }
+        _logger.LogInformation(lastError,
+            "Auto-connect to INDI {Host}:{Port} failed after {Attempts} attempts",
+            _indiClient.Host, _indiClient.Port, MaxAttempts);
+        _notify.Push("warn",
+            $"INDI unavailable at {_indiClient.Host}:{_indiClient.Port} after {MaxAttempts} retries, connect manually from Rigs.");
+        return false;
     }
 
     private async Task TryConnectPhd2Async(CancellationToken ct) {

@@ -1253,7 +1253,7 @@ function ninaApp() {
             const selected = (this.files.selectedPaths || [])
                 .filter(p => this._stackIsStackable(p));
             if (selected.length === 0) {
-                this.toast('Selecione FITS no navegador antes de adicionar', 'warn');
+                this.toast('Select FITS files in the browser before adding', 'warn');
                 return;
             }
             const before = this.stack[slotKey].length;

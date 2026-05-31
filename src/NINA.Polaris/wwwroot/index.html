@@ -6135,7 +6135,7 @@
                 <aside class="files-right">
                     <!-- UNIF-2: Stack workspace. Four slot cards
                          (lights/darks/flats/biases) populated by
-                         the "+ Adicionar selecao" button -- it pulls
+                         the "+ Add selection" button -- it pulls
                          from files.selectedPaths, filters non-FITS,
                          dedupes, and clears the browser selection
                          for visual feedback. Lists scroll inside the
@@ -8367,10 +8367,10 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                 variants when you don't have masters yet.
             </p>
 
-            <!-- Encadear GraXpert BGE antes do Siril stack. Útil em
-                 céus com forte poluição luminosa onde cada light
-                 tem gradient distinto: cada um sai limpo do BGE,
-                 depois o Siril stacka frames já uniformes. -->
+            <!-- Chain GraXpert BGE before the Siril stack. Useful under
+                 heavy light pollution where each light carries its own
+                 gradient: each frame comes out clean from BGE, then
+                 Siril stacks already-uniform frames. -->
             <div x-show="graxpert.status?.available && !siril.currentJob" style="margin: 8px 0">
                 <label class="seq-dither-checkbox">
                     <input type="checkbox" x-model="siril.modalInjectBge">
@@ -9069,7 +9069,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
          development that this is a per-commit nuisance, but the cost
          of users running stale JS for hours (with FrameKind routing
          bugs ending up on the wrong canvas) is higher. -->
-    <script src="/js/app.js?v=20260530-tabunify"></script>
+    <script src="/js/app.js?v=20260530-ptcleanup"></script>
     <!-- CLST-2: WASM live-stack module bootstrap. The .NET runtime
          loads, hangs the [JSExport] surface off globalThis.NINA.Polaris.Wasm,
          then dispatches the 'nina-wasm-ready' event app.js listens for.

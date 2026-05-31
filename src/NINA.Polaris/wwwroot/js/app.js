@@ -728,6 +728,18 @@ function ninaApp() {
         // Persisted in localStorage so the choice survives reloads.
         slewPreviewVisible: true,
 
+        // Custom confirm() modal -- replaces window.confirm() so OK/Cancel
+        // labels are in English regardless of browser locale. Driven via
+        // _confirmAsync() which returns a Promise that resolves true on
+        // confirm, false on cancel/ESC/backdrop click. _resolver is the
+        // pending Promise resolver (set by _confirmAsync, called by
+        // _confirmAccept/_confirmCancel). Reused across the app -- any
+        // call site that previously used window.confirm() can switch to
+        // `if (await this._confirmAsync('Title?')) { ... }`.
+        confirmModal: { open: false, title: '', message: '',
+                        okLabel: 'OK', cancelLabel: 'Cancel', danger: false },
+        _confirmResolver: null,
+
         // Activity bar (bottom). Populated from the status WS message
         // each second. host comes from HostMetricsService; sirilActiveJobs
         // and graXpertActiveJobs are compact summaries of the respective
@@ -2382,6 +2394,7 @@ function ninaApp() {
             // specific tab / state combinations. Single Esc keypress
             // closes whichever is open.
             window.addEventListener('keydown', (ev) => this._floatPanelEscapeClose(ev));
+            window.addEventListener('keydown', (ev) => this._confirmModalKeydown(ev));
             this.fetchPhd2ProcessStatus();
             this.fetchPhd2InstallInfo();
         },
@@ -4054,7 +4067,9 @@ function ninaApp() {
         // intentionally NOT reset — subsequent WS ticks will see a
         // truncated:true flag and the panel UI can show "buffer cleared".
         async logClear() {
-            if (!confirm('Clear all server log entries? This cannot be undone.')) return;
+            if (!await this._confirmAsync(
+                    'Clear all server log entries? This cannot be undone.',
+                    { title: 'Clear debug log', okLabel: 'Clear', danger: true })) return;
             try {
                 await this.apiFetch('/api/logs/', { method: 'DELETE' });
                 this.logs.entries = [];
@@ -12255,6 +12270,14 @@ function ninaApp() {
         // always works.
         _floatPanelEscapeClose(ev) {
             if (ev.key !== 'Escape' && ev.key !== 'Esc') return;
+            // Confirm modal takes priority -- ESC cancels it, not float
+            // panels behind it. Enter accepts. Both stop here so the
+            // float panel handler doesn't run too.
+            if (this.confirmModal.open) {
+                this._confirmCancel();
+                ev.preventDefault();
+                return;
+            }
             let closed = false;
             if (this.mountPanel?.visible) {
                 this.mountPanel.visible = false;
@@ -12269,6 +12292,49 @@ function ninaApp() {
             // Diagnostic so the operator can see in DevTools that the
             // ESC handler fired even if the X buttons don't react.
             if (closed) console.log('[Polaris] ESC closed floating panels');
+        },
+
+        // Custom replacement for window.confirm(). Returns a Promise
+        // that resolves true on OK, false on Cancel/ESC/backdrop.
+        // Usage: `if (await this._confirmAsync('Wipe it?', { danger: true })) {...}`
+        _confirmAsync(message, opts = {}) {
+            // If a previous prompt is still open, cancel it before opening
+            // a new one -- avoids stuck Promises with no resolver.
+            if (this.confirmModal.open && this._confirmResolver) {
+                this._confirmResolver(false);
+                this._confirmResolver = null;
+            }
+            this.confirmModal = {
+                open: true,
+                title: opts.title || 'Confirm',
+                message: message || '',
+                okLabel: opts.okLabel || 'OK',
+                cancelLabel: opts.cancelLabel || 'Cancel',
+                danger: !!opts.danger
+            };
+            return new Promise(resolve => {
+                this._confirmResolver = resolve;
+            });
+        },
+        _confirmAccept() {
+            const r = this._confirmResolver;
+            this._confirmResolver = null;
+            this.confirmModal.open = false;
+            if (r) r(true);
+        },
+        _confirmCancel() {
+            const r = this._confirmResolver;
+            this._confirmResolver = null;
+            this.confirmModal.open = false;
+            if (r) r(false);
+        },
+        // Enter-key shortcut so the operator can hit return to accept.
+        _confirmModalKeydown(ev) {
+            if (!this.confirmModal.open) return;
+            if (ev.key === 'Enter') {
+                this._confirmAccept();
+                ev.preventDefault();
+            }
         },
 
         // Keep the panel header on-screen when the window resizes or

@@ -9704,13 +9704,13 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                         padding:12px 16px; border-bottom:1px solid var(--border);
                         flex-wrap:wrap;">
                 <strong style="font-size:14px;">Debug log</strong>
-                <select x-model="logs.filterLevel" style="margin-left:12px;">
+                <select class="log-ctl" x-model="logs.filterLevel" style="margin-left:12px;">
                     <option value="debug">All (debug+)</option>
                     <option value="info">Info+</option>
                     <option value="warn">Warnings+</option>
                     <option value="error">Errors only</option>
                 </select>
-                <select x-model="logs.filterSource">
+                <select class="log-ctl" x-model="logs.filterSource">
                     <option value="all">All sources</option>
                     <option value="server">Server</option>
                     <option value="http">HTTP requests</option>
@@ -9719,7 +9719,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                     <option value="apiFetch">API calls (client)</option>
                     <option value="exception">Exceptions</option>
                 </select>
-                <input type="text" x-model="logs.searchText"
+                <input class="log-ctl" type="text" x-model="logs.searchText"
                        placeholder="Search…"
                        style="flex:1; min-width:140px;">
                 <button class="btn btn-sm" @click="logExport('jsonl')">Export JSONL</button>
@@ -9776,6 +9776,30 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                 <span x-show="logs.truncated" style="color:#fcd34d;">
                     · older entries dropped from buffer
                 </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- App-wide confirmation modal -- replaces native window.confirm()
+         calls so OK/Cancel labels stay in English regardless of the
+         browser's OS locale. Driven by the _confirmAsync() helper in
+         app.js which returns a Promise. ESC = cancel, Enter = confirm
+         (wired via window keydown in app.js). z-index 2000 keeps it
+         above the log panel (1500) and activity-bar (50). -->
+    <div x-show="confirmModal.open" x-cloak
+         @click.self="_confirmCancel()"
+         style="position:fixed; inset:0; background:rgba(0,0,0,0.6);
+                backdrop-filter:blur(4px); z-index:2000;
+                display:flex; align-items:center; justify-content:center;">
+        <div class="confirm-modal-card">
+            <h3 class="confirm-modal-title" x-text="confirmModal.title"></h3>
+            <p class="confirm-modal-message" x-text="confirmModal.message"></p>
+            <div class="confirm-modal-actions">
+                <button class="btn btn-sm" @click="_confirmCancel()"
+                        x-text="confirmModal.cancelLabel || 'Cancel'"></button>
+                <button class="btn btn-sm" :class="confirmModal.danger ? 'btn-danger' : 'btn-primary'"
+                        @click="_confirmAccept()"
+                        x-text="confirmModal.okLabel || 'OK'"></button>
             </div>
         </div>
     </div>

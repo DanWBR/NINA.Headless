@@ -9485,3 +9485,57 @@ label select.input-sm {
 .log-panel-body::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.5) !important;
 }
+
+/* Debug-log header controls (select + search input). Without an
+   explicit class they fell back to UA white -- jarring on the dark
+   panel and unreadable on the operator's tablet. Matches the
+   .equip-input pattern used elsewhere. */
+.log-ctl {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+}
+.log-ctl:focus {
+    border-color: var(--accent);
+    background: rgba(255, 255, 255, 0.08);
+}
+/* <select> arrow stays system-default for clarity; just paint the
+   option list so opened menus aren't bright white either. */
+.log-ctl option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+/* Custom confirm() modal card. Sized for readability on tablet
+   without overflowing on phones. Sits inside the high-z-index
+   overlay defined inline in index.html. */
+.confirm-modal-card {
+    width: min(420px, 92vw);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px 16px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+.confirm-modal-title {
+    margin: 0 0 8px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.confirm-modal-message {
+    margin: 0 0 18px;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+.confirm-modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}

@@ -4002,6 +4002,10 @@ function ninaApp() {
             const minRank = lvlRank[this.logs.filterLevel] ?? 1;
             const src = this.logs.filterSource;
             const needle = (this.logs.searchText || '').trim().toLowerCase();
+            // .slice() before .reverse() because reverse() mutates in place
+            // and Alpine treats the array reference as stable -- mutating
+            // it would scramble the on-screen render. Newest first means
+            // the operator sees the latest event without scrolling.
             return this.logs.entries.filter(e => {
                 if ((lvlRank[e.level] ?? 1) < minRank) return false;
                 if (src && src !== 'all' && e.source !== src) return false;
@@ -4010,7 +4014,7 @@ function ninaApp() {
                     if (!hay.includes(needle)) return false;
                 }
                 return true;
-            });
+            }).slice().reverse();
         },
 
         // DBGLOG-7: insert a server-supplied LogEntry into our local

@@ -9727,12 +9727,20 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                 <button class="btn btn-sm btn-danger" @click="logClear()">Clear</button>
                 <button class="btn btn-sm" @click="logClose()">✕ Close</button>
             </div>
+            <!-- Larger font (16px) + tighter line-height (1.25) + minimal
+                 row padding (0 -- separator alone gives visual break) so
+                 the operator gets maximum entries on screen without
+                 reading-strain. Newest-first ordering comes from
+                 logFiltered() doing a .slice().reverse() on output.
+                 Wider scrollbar (.log-panel-body::-webkit-scrollbar)
+                 declared in app.css makes touch-scrolling on the Pi
+                 tablet usable. -->
             <div class="log-panel-body" style="flex:1; overflow:auto; font-family:var(--font-mono, monospace);
-                        font-size:14px; line-height:1.5; padding:10px 14px;">
+                        font-size:16px; line-height:1.25; padding:6px 14px;">
                 <template x-for="e in logFiltered()" :key="e.id">
                     <div :class="'log-row log-' + e.level"
                          style="white-space:pre-wrap; word-break:break-word;
-                                padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+                                padding:0; border-bottom:1px solid rgba(255,255,255,0.04);">
                         <span x-text="(e.at || '').replace('T',' ').slice(0,23)"
                               style="opacity:0.6;"></span>
                         <span :style="
@@ -9748,9 +9756,9 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                         <span x-show="e.exceptionType" style="color:#fb7185;"
                               x-text="' ' + e.exceptionType + ': ' + (e.exceptionMsg || '')"></span>
                         <pre x-show="e.stackTrace"
-                             style="margin:4px 0 4px 24px; padding:8px 12px;
+                             style="margin:2px 0 2px 24px; padding:6px 10px;
                                     background:rgba(0,0,0,0.3); color:#fda4af;
-                                    font-size:13px; line-height:1.45;
+                                    font-size:14px; line-height:1.3;
                                     border-left:2px solid #fb7185;
                                     overflow-x:auto;"
                              x-text="e.stackTrace"></pre>

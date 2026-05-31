@@ -9459,3 +9459,26 @@ label select.input-sm {
     letter-spacing: 0.5px;
 }
 .flatwiz-trained-table tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+
+/* Debug log panel scrollbar -- bumped from default ~8px to 16px so
+   touch-scrolling on the Pi tablet is comfortable. Webkit-only
+   (Chrome/Edge/Safari on iOS+Android) -- Firefox uses default. */
+.log-panel-body::-webkit-scrollbar {
+    width: 16px;
+    height: 16px;
+}
+.log-panel-body::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+}
+.log-panel-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+}
+.log-panel-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.32);
+    background-clip: padding-box;
+    border: 3px solid transparent;
+}

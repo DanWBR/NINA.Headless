@@ -3055,6 +3055,51 @@ label select.input-sm {
 
 /* Sky Explorer */
 
+/* Sub-tab pills for the Sky planning group (Sky map / Tonight /
+   Weather). The same row repeats at the top of all three panels so
+   the sidebar can collapse them under a single "Sky" entry. Active
+   pill picks up the accent colour; idle pills stay quiet so they
+   don't compete with the toolbar / map below. */
+.sky-subtabs {
+    display: flex;
+    gap: 6px;
+    padding: 10px 14px 0;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+.sky-subtab-pill {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 6px 14px;
+    border-radius: 999px 999px 0 0;
+    border-bottom: none;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    margin-bottom: -1px; /* overlap the bottom border so active pill flows into the toolbar */
+}
+.sky-subtab-pill:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.04);
+}
+.sky-subtab-pill.active {
+    background: var(--bg-primary);
+    color: var(--accent);
+    border-color: var(--border);
+    border-bottom-color: var(--bg-primary);
+}
+.sky-subtab-icon {
+    font-size: 14px;
+    line-height: 1;
+}
+
 .sky-toolbar {
     display: flex;
     gap: 8px;

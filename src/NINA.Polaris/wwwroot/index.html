@@ -427,7 +427,13 @@
                 <svg viewBox="0 0 24 24" width="22" height="22"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a3 3 0 0 1-4.2 4.2L7 20a2 2 0 0 1-2.8-2.8l10.3-10.3a3 3 0 0 1 4.2-4.2l-3.8 3.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <span class="nav-label">Rigs</span>
             </button>
-            <button class="nav-btn" :class="{ active: tab === 'sky' }" @click="tab = 'sky'; $nextTick(() => initSkyViewer())" title="Sky Explorer">
+            <!-- Sky group: this single button covers the Sky map,
+                 Tonight's Best, and Weather sub-tabs (selectable
+                 via the pill row at the top of each panel). The
+                 sidebar highlight stays on whichever sub-tab is
+                 active so the user always knows they're in the
+                 planning section. -->
+            <button class="nav-btn" :class="{ active: tab === 'sky' || tab === 'tonight' || tab === 'weather' }" @click="tab = 'sky'; $nextTick(() => initSkyViewer())" title="Sky Explorer (map · Tonight · Weather)">
                 <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><ellipse cx="12" cy="12" rx="10" ry="4" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" stroke-width="1.5"/></svg>
                 <span class="nav-label">Sky</span>
             </button>
@@ -467,14 +473,13 @@
                 <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 4h6v6H3V4zm0 10h6v6H3v-6zm10-10h8m-8 4h6m-6 10h8m-8 4h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                 <span class="nav-label">Adv</span>
             </button>
-            <button class="nav-btn" :class="{ active: tab === 'tonight' }" @click="tab = 'tonight'; loadTonightsBest()" title="Tonight's Best">
-                <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 2 L13.5 10.5 L22 12 L13.5 13.5 L12 22 L10.5 13.5 L2 12 L10.5 10.5 Z" fill="currentColor"/></svg>
-                <span class="nav-label">Tonight</span>
-            </button>
-            <button class="nav-btn" :class="{ active: tab === 'weather' }" @click="tab = 'weather'; loadWeatherForecast()" title="Weather forecast">
-                <svg viewBox="0 0 24 24" width="22" height="22"><path d="M7 18h11a4 4 0 1 0-.7-7.95A6 6 0 0 0 6.2 12.04 4.5 4.5 0 0 0 7 18z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="6" cy="6" r="1.5" fill="currentColor"/><circle cx="19" cy="5" r="1" fill="currentColor"/></svg>
-                <span class="nav-label">Weather</span>
-            </button>
+            <!-- Tonight and Weather are now sub-tabs of Sky (accessed
+                 via the pill row at the top of each panel). The
+                 standalone sidebar buttons + the sky-toolbar shortcut
+                 buttons that used to live here are gone; the planning
+                 group (Sky / Tonight / Weather) shares a single sidebar
+                 slot via the Sky icon below. -->
+
             <!-- Studio: server file browser + Stack workspace + Editor
                  modal. Internally the tab token stays 'files' so
                  persisted localStorage keys, legacy bindings, and
@@ -4079,20 +4084,28 @@
                         <canvas id="slewPreviewCanvas" class="slew-preview-canvas"></canvas>
                     </div>
                 </div>
-                <div class="sky-toolbar">
-                    <!-- Quick jumps to the two planning tabs the user
-                         typically hits before scouting on the sky map.
-                         Same one-click pattern as the sidebar buttons
-                         (tab switch + loader kick) so a user who's
-                         already in SKY doesn't have to ping-pong via
-                         the sidebar to check what's worth shooting
-                         tonight or whether the weather agrees. -->
-                    <button class="btn btn-sm"
+                <!-- Sub-tab pills for the Sky planning group. The same
+                     row repeats at the top of the Tonight and Weather
+                     panels so the user always sees the current sub-tab
+                     and can switch between them in one click. -->
+                <div class="sky-subtabs">
+                    <button class="sky-subtab-pill" :class="{ active: tab === 'sky' }"
+                            @click="tab = 'sky'; $nextTick(() => initSkyViewer())">
+                        <span class="sky-subtab-icon">🌌</span> Sky map
+                    </button>
+                    <button class="sky-subtab-pill" :class="{ active: tab === 'tonight' }"
                             @click="tab = 'tonight'; loadTonightsBest()"
-                            title="Tonight's Best — ranked list of DSOs/planets/moon worth observing this session">⭐ Tonight</button>
-                    <button class="btn btn-sm"
+                            title="Ranked list of DSOs/planets/moon worth observing this session">
+                        <span class="sky-subtab-icon">⭐</span> Tonight's Best
+                    </button>
+                    <button class="sky-subtab-pill" :class="{ active: tab === 'weather' }"
                             @click="tab = 'weather'; loadWeatherForecast()"
-                            title="Weather forecast — 3-day cloud / seeing / transparency outlook">☁ Weather</button>
+                            title="3-day cloud / seeing / transparency outlook">
+                        <span class="sky-subtab-icon">☁</span> Weather
+                    </button>
+                </div>
+
+                <div class="sky-toolbar">
                     <input type="text" class="search-input" placeholder="Search object (M31, NGC 7000, Orion...)"
                            x-model="skySearch" @keyup.enter="searchSky()" @input="skyShowResults = false">
                     <button class="btn btn-sm" @click="searchSky()">Search</button>
@@ -4675,8 +4688,26 @@
                 </div>
             </div>
 
-            <!-- TONIGHT'S BEST -->
+            <!-- TONIGHT'S BEST -- a sub-tab of the Sky planning group.
+                 The sidebar's Sky button stays highlighted while we're
+                 in here (see :class="..." on that button); the pill
+                 row at the top of the panel lets the user pivot back
+                 to the Sky map or jump to Weather. -->
             <div x-show="tab === 'tonight'" class="tab-panel tonight-panel">
+                <div class="sky-subtabs">
+                    <button class="sky-subtab-pill" :class="{ active: tab === 'sky' }"
+                            @click="tab = 'sky'; $nextTick(() => initSkyViewer())">
+                        <span class="sky-subtab-icon">🌌</span> Sky map
+                    </button>
+                    <button class="sky-subtab-pill" :class="{ active: tab === 'tonight' }"
+                            @click="tab = 'tonight'; loadTonightsBest()">
+                        <span class="sky-subtab-icon">⭐</span> Tonight's Best
+                    </button>
+                    <button class="sky-subtab-pill" :class="{ active: tab === 'weather' }"
+                            @click="tab = 'weather'; loadWeatherForecast()">
+                        <span class="sky-subtab-icon">☁</span> Weather
+                    </button>
+                </div>
                 <div class="panel-header">
                     Tonight's Best
                     <span class="status-indicator-sm"
@@ -4809,8 +4840,25 @@
                 </div>
             </div>
 
-            <!-- WEATHER -->
+            <!-- WEATHER -- a sub-tab of the Sky planning group. See
+                 the comment on TONIGHT'S BEST above; same pill row
+                 sits at the top so the user can pivot inside the
+                 planning group without bouncing through the sidebar. -->
             <div x-show="tab === 'weather'" class="tab-panel weather-panel">
+                <div class="sky-subtabs">
+                    <button class="sky-subtab-pill" :class="{ active: tab === 'sky' }"
+                            @click="tab = 'sky'; $nextTick(() => initSkyViewer())">
+                        <span class="sky-subtab-icon">🌌</span> Sky map
+                    </button>
+                    <button class="sky-subtab-pill" :class="{ active: tab === 'tonight' }"
+                            @click="tab = 'tonight'; loadTonightsBest()">
+                        <span class="sky-subtab-icon">⭐</span> Tonight's Best
+                    </button>
+                    <button class="sky-subtab-pill" :class="{ active: tab === 'weather' }"
+                            @click="tab = 'weather'; loadWeatherForecast()">
+                        <span class="sky-subtab-icon">☁</span> Weather
+                    </button>
+                </div>
                 <div class="panel-header">
                     Weather forecast
                     <span class="status-indicator-sm"
@@ -9021,7 +9069,7 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
          development that this is a per-commit nuisance, but the cost
          of users running stale JS for hours (with FrameKind routing
          bugs ending up on the wrong canvas) is higher. -->
-    <script src="/js/app.js?v=20260530-studio"></script>
+    <script src="/js/app.js?v=20260530-skysubs"></script>
     <!-- CLST-2: WASM live-stack module bootstrap. The .NET runtime
          loads, hangs the [JSExport] surface off globalThis.NINA.Polaris.Wasm,
          then dispatches the 'nina-wasm-ready' event app.js listens for.

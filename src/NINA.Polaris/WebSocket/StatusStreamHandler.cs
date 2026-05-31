@@ -48,7 +48,14 @@ public static class StatusStreamHandler {
         var network = context.RequestServices.GetRequiredService<NetworkManagerService>();
         var notifications = context.RequestServices.GetRequiredService<NotificationService>();
         var polarAlign = context.RequestServices.GetRequiredService<PolarAlignmentService>();
+        var logService = context.RequestServices.GetRequiredService<NINA.Polaris.Services.Logging.LogService>();
         var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+        // DBGLOG-5: per-connection cursor. Each client tick we ship
+        // entries with Id > debugLogCursor (capped at 50) so reconnecting
+        // browsers catch up without re-streaming the whole buffer, and
+        // chatty servers don't blow a single tick's payload over 100 KB.
+        long debugLogCursor = 0;
 
         using var ws = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext {
             KeepAliveInterval = PingInterval
@@ -418,7 +425,13 @@ public static class StatusStreamHandler {
                             lastError = polarAlign.CurrentJob.LastError,
                             startedAt = polarAlign.CurrentJob.StartedAt,
                             completedAt = polarAlign.CurrentJob.CompletedAt
-                        }
+                        },
+                        // DBGLOG-5: ship new log entries since last tick
+                        // (max 50 per tick). truncated=true if the
+                        // cursor fell behind the ring-buffer head so the
+                        // client knows it missed entries and should
+                        // refetch via GET /api/logs.
+                        debugLog = BuildDebugLogPayload(logService, ref debugLogCursor)
                     };
 
                     await SendJsonAsync(ws, status, cts.Token);
@@ -454,6 +467,35 @@ public static class StatusStreamHandler {
         try { await sendTask; } catch { }
 
         await CloseGracefully(ws);
+    }
+
+    /// <summary>DBGLOG-5: build the per-tick <c>debugLog</c> sub-object.
+    /// Mutates <paramref name="cursor"/> in place so the caller's
+    /// per-connection state advances. Returns null when there's nothing
+    /// new (caller can skip serialising) but actually serialises as the
+    /// `null` field so the client sees consistent shape.</summary>
+    private static object BuildDebugLogPayload(
+        NINA.Polaris.Services.Logging.LogService svc, ref long cursor) {
+        try {
+            var snap = svc.SnapshotSince(cursor, max: 50);
+            if (snap.Entries.Count > 0) cursor = snap.Cursor;
+            return new {
+                entries = snap.Entries,
+                cursor = snap.Cursor,
+                truncated = snap.Truncated,
+                currentCursor = svc.CurrentId,
+                oldestRetained = svc.OldestId
+            };
+        } catch {
+            // Never let the debug-log subsystem take down the WS tick.
+            return new {
+                entries = System.Array.Empty<object>(),
+                cursor,
+                truncated = false,
+                currentCursor = 0L,
+                oldestRetained = 0L
+            };
+        }
     }
 
     private static async Task SendJsonAsync(System.Net.WebSockets.WebSocket ws, object data, CancellationToken ct) {

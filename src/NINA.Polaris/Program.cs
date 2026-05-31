@@ -80,6 +80,13 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o =>
 });
 
 // Services
+// DBGLOG-1/2: ring buffer + ILogger provider that mirrors every
+// server-side log call into it. Registered FIRST so other singletons
+// that resolve ILogger<T> in their constructor get the bridged logger.
+builder.Services.AddSingleton<NINA.Polaris.Services.Logging.LogService>();
+builder.Logging.Services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(sp =>
+    new NINA.Polaris.Services.Logging.LogBufferLoggerProvider(
+        sp.GetRequiredService<NINA.Polaris.Services.Logging.LogService>()));
 builder.Services.AddSingleton<ImageRelayService>();
 builder.Services.AddSingleton<CameraStreamService>();
 builder.Services.AddSingleton<NINA.Polaris.Services.Planetary.VideoRecordingService>();
@@ -418,6 +425,11 @@ app.UseStaticFiles(new StaticFileOptions {
 // NOTE: the /sky CSP-strip middleware above also runs before this
 // for path matching, but it only adds a Response.OnStarting hook
 // and calls next() unconditionally, so we still catch /sky/ here.
+// DBGLOG-3: HTTP request logger BEFORE the auth gate so 401s still
+// produce an entry. Static assets + /api/logs* are skipped inside the
+// middleware (no value, and avoids feedback loops).
+app.UseMiddleware<NINA.Polaris.Middleware.RequestLoggingMiddleware>();
+
 app.UseAuthMiddleware();
 
 app.UseWebSockets();
@@ -698,6 +710,10 @@ app.MapMeridianFlipEndpoints();
 // disable,enable}. Mapped here; AuthMiddleware (AUTH-2) exempts the
 // whole /api/auth/* prefix so these are reachable without a token.
 app.MapAuthEndpoints();
+// DBGLOG-4: /api/logs/* (gated by AuthMiddleware along with the
+// rest of /api/*). The middleware skip-list for /api/logs* only
+// blocks the http-request-logging entry, NOT the auth gate.
+NINA.Polaris.Endpoints.LogsEndpoints.MapLogsEndpoints(app);
 app.MapPolarAlignmentEndpoints();
 app.MapFlatWizardEndpoints();
 app.MapAlpacaEndpoints();

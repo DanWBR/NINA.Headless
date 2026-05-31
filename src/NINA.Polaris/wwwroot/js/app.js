@@ -691,6 +691,39 @@ function ninaApp() {
         // bar. done=true triggers a short "✓ Done" hold before removal.
         transfers: [],
         _nextTransferId: 1,
+        // DBGLOG-6: client-side log mirror of the server ring buffer.
+        // entries: rolling window of LogEntry objects ingested from the
+        //   /ws/status debugLog sub-object + locally-generated client
+        //   entries (toasts, apiFetch metadata, window.onerror). Capped
+        //   at 5000 so we mirror the server-side MaxKept.
+        // cursor: server-assigned Id of the most-recent entry we've
+        //   absorbed; the WS sub-object advances it monotonically.
+        // unreadErrors / unreadWarnings: counters since the last time
+        //   the user opened the log panel. Drives the badge colour +
+        //   number in the header.
+        // panelOpen: fullscreen overlay shown when the user clicks the
+        //   header badge. Filters live in filterLevel / filterSource /
+        //   searchText, all server-side via GET /api/logs query params.
+        logs: {
+            entries: [],
+            cursor: 0,
+            unreadErrors: 0,
+            unreadWarnings: 0,
+            panelOpen: false,
+            filterLevel: 'info',
+            filterSource: 'all',
+            searchText: '',
+            truncated: false,
+            persistToDisk: false
+        },
+        // Client-side batch queue + debounce timer. POST /api/logs/client
+        // is fired ~1s after the last entry queues OR when the queue
+        // hits 50 entries, whichever first. Keeps a runaway error loop
+        // (e.g. window.onerror in a render loop) from saturating both
+        // the network and the server ring buffer.
+        _logClientQueue: [],
+        _logClientFlushTimer: null,
+        _logHooksInstalled: false,
         // Internal: deltas accumulated since last meter tick. Tick
         // reads + zeroes them. Separate from the rolling window samples
         // so the meter can compute "bytes in last 3s" cheaply.
@@ -1974,6 +2007,11 @@ function ninaApp() {
             this.updateClock();
             setInterval(() => this.updateClock(), 1000);
             this.updateFov();
+            // DBGLOG-6: window error + unhandledrejection capture.
+            // Installed once per app boot. apiFetch + toast wrappers
+            // are inlined into those methods themselves (cleaner than
+            // monkey-patching at runtime + survives Alpine re-init).
+            this._installLogHooks();
 
             // XFER: expose transfer helpers to plain scripts that can't
             // reach the Alpine component directly (e.g. onnx-pipelines.js
@@ -2288,6 +2326,11 @@ function ninaApp() {
                 headers.Authorization = 'Bearer ' + this.auth.token;
             }
 
+            // DBGLOG-6: measure round-trip for the log entry. performance.now()
+            // gives sub-ms precision, which surfaces slow endpoints (>100ms)
+            // visibly in the panel.
+            const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
             const promise = fetch(url, {
                 ...options,
                 headers,
@@ -2299,6 +2342,20 @@ function ninaApp() {
                 if (!this.serverReachable) {
                     this.serverReachable = true;
                     this.toast('Server reconnected', 'ok');
+                }
+
+                // DBGLOG-6: log the response. error level for 5xx, warn for
+                // 4xx (including 401 — useful for diagnosing auth churn),
+                // info otherwise. Skip /api/logs/client to break the feedback
+                // loop (POSTing a log entry would log the POST, recursion).
+                if (!url.startsWith('/api/logs')) {
+                    const dur = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0;
+                    const lvl = resp.status >= 500 ? 'error'
+                              : resp.status >= 400 ? 'warn'
+                              : 'info';
+                    this._logFromClient(lvl, `${method} ${url} ${resp.status} ${dur.toFixed(0)}ms`, {
+                        source: 'apiFetch', method, path: url, status: resp.status, durationMs: dur
+                    });
                 }
 
                 if (resp.status === 401) {
@@ -2325,6 +2382,18 @@ function ninaApp() {
             }).catch(err => {
                 clearTimeout(timer);
                 delete this._pending[key];
+
+                // DBGLOG-6: log the network failure (timeout, DNS, refused).
+                // Skip /api/logs/client to prevent the same recursion loop
+                // as the success branch.
+                if (!url.startsWith('/api/logs')) {
+                    const dur = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0;
+                    const msg = err && err.message ? err.message : String(err);
+                    this._logFromClient('error', `${method} ${url} failed: ${msg}`, {
+                        source: 'apiFetch', method, path: url, durationMs: dur,
+                        exceptionType: err && err.name, exceptionMsg: msg
+                    });
+                }
 
                 if (err.name === 'AbortError') {
                     this.serverReachable = false;
@@ -3704,6 +3773,182 @@ function ninaApp() {
         },
 
         // Toast notification (auto-dismiss)
+        // DBGLOG-6: install one-time global error capture. window.onerror
+        // covers thrown exceptions; unhandledrejection catches awaited
+        // promises that rejected without a .catch. Both are silently
+        // dropped by browsers when no handler is set, which is exactly
+        // what we want to fix: those silent drops are the worst bugs to
+        // diagnose remotely. We do NOT preventDefault so the default
+        // browser console output still happens for the dev sitting in
+        // front of devtools.
+        _installLogHooks() {
+            if (this._logHooksInstalled) return;
+            this._logHooksInstalled = true;
+            const self = this;
+            window.addEventListener('error', (ev) => {
+                try {
+                    const e = ev && ev.error;
+                    const msg = ev && ev.message ? ev.message : String(ev);
+                    self._logFromClient('error', 'window.onerror: ' + msg, {
+                        source: 'exception',
+                        exceptionType: e && e.name,
+                        exceptionMsg: e && e.message,
+                        stackTrace: e && e.stack ? String(e.stack).split('\n').slice(0, 20).join('\n') : null,
+                        path: ev && ev.filename
+                    });
+                } catch (_) {}
+            });
+            window.addEventListener('unhandledrejection', (ev) => {
+                try {
+                    const r = ev && ev.reason;
+                    const msg = r && r.message ? r.message : String(r);
+                    self._logFromClient('error', 'unhandledrejection: ' + msg, {
+                        source: 'exception',
+                        exceptionType: r && r.name,
+                        exceptionMsg: msg,
+                        stackTrace: r && r.stack ? String(r.stack).split('\n').slice(0, 20).join('\n') : null
+                    });
+                } catch (_) {}
+            });
+        },
+
+        // DBGLOG-6: queue a single client-side entry. Debounced flush
+        // bundles up to 50 entries per POST to /api/logs/client. The
+        // server enforces a 100-entry hard cap and rate-limits per IP
+        // so even a runaway error loop won't saturate the buffer.
+        _logFromClient(level, message, extra) {
+            try {
+                const entry = {
+                    at: new Date().toISOString(),
+                    level: level || 'info',
+                    source: (extra && extra.source) || 'client',
+                    message: String(message || ''),
+                    category: extra && extra.category,
+                    method: extra && extra.method,
+                    path: extra && extra.path,
+                    status: extra && extra.status,
+                    durationMs: extra && extra.durationMs,
+                    exceptionType: extra && extra.exceptionType,
+                    exceptionMsg: extra && extra.exceptionMsg,
+                    stackTrace: extra && extra.stackTrace
+                };
+                this._logClientQueue.push(entry);
+                if (this._logClientQueue.length >= 50) {
+                    this._flushClientLogs();
+                } else if (!this._logClientFlushTimer) {
+                    this._logClientFlushTimer = setTimeout(
+                        () => this._flushClientLogs(), 1000);
+                }
+            } catch (_) {
+                // logging must never throw into the calling code path
+            }
+        },
+
+        async _flushClientLogs() {
+            if (this._logClientFlushTimer) {
+                clearTimeout(this._logClientFlushTimer);
+                this._logClientFlushTimer = null;
+            }
+            if (this._logClientQueue.length === 0) return;
+            const batch = this._logClientQueue.splice(0, 100);
+            try {
+                await this.apiFetch('/api/logs/client', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ entries: batch })
+                });
+            } catch (_) {
+                // drop on failure — re-queueing risks an infinite loop
+                // when the server is down. Local entries already render
+                // in the panel via _ingestLocalEntry below.
+            }
+        },
+
+        // DBGLOG-7: log panel open/close + filter helpers. Backfill on
+        // open via GET /api/logs?since=cursor so a long-gap reconnection
+        // picks up entries that fell out of our local 5000-cap window.
+        async logOpen() {
+            this.logs.panelOpen = true;
+            this.logs.unreadErrors = 0;
+            this.logs.unreadWarnings = 0;
+            try {
+                const r = await this.apiFetch(
+                    `/api/logs/?since=${this.logs.cursor}&max=1000`);
+                const data = await r.json();
+                if (data && Array.isArray(data.entries)) {
+                    for (const e of data.entries) this._absorbLogEntry(e);
+                }
+            } catch (_) {}
+        },
+        logClose() { this.logs.panelOpen = false; },
+
+        // DBGLOG-7: client-side filter pass. Server pre-filters via the
+        // initial backfill query, but the WS stream pushes everything;
+        // re-filtering here keeps the panel responsive when the user
+        // tweaks level/source/search without an extra round-trip.
+        logFiltered() {
+            const lvlRank = { debug: 0, info: 1, warn: 2, error: 3, critical: 4 };
+            const minRank = lvlRank[this.logs.filterLevel] ?? 1;
+            const src = this.logs.filterSource;
+            const needle = (this.logs.searchText || '').trim().toLowerCase();
+            return this.logs.entries.filter(e => {
+                if ((lvlRank[e.level] ?? 1) < minRank) return false;
+                if (src && src !== 'all' && e.source !== src) return false;
+                if (needle) {
+                    const hay = (e.message + ' ' + (e.category || '') + ' ' + (e.path || '')).toLowerCase();
+                    if (!hay.includes(needle)) return false;
+                }
+                return true;
+            });
+        },
+
+        // DBGLOG-7: insert a server-supplied LogEntry into our local
+        // window, advance cursor, tick unread counters when the panel
+        // is closed. Truncates at 5000 to mirror the server cap.
+        _absorbLogEntry(entry) {
+            if (!entry || typeof entry.id !== 'number') return;
+            if (entry.id <= this.logs.cursor) return;   // already have it
+            this.logs.entries.push(entry);
+            if (this.logs.entries.length > 5000) this.logs.entries.shift();
+            if (entry.id > this.logs.cursor) this.logs.cursor = entry.id;
+            if (!this.logs.panelOpen) {
+                if (entry.level === 'error' || entry.level === 'critical') {
+                    this.logs.unreadErrors++;
+                } else if (entry.level === 'warn') {
+                    this.logs.unreadWarnings++;
+                }
+            }
+        },
+
+        // DBGLOG-8: download the full ring buffer as JSONL via the
+        // browser's download dialog. Uses the auth-attached cookie
+        // (same origin) so the GET works without us baking the token
+        // into the URL (avoids logging the token in the access log).
+        logExport(format) {
+            const fmt = format === 'txt' ? 'txt' : 'jsonl';
+            const url = '/api/logs/export?format=' + fmt;
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';   // browser uses Content-Disposition filename
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        },
+
+        // DBGLOG-8: confirm + wipe the server ring buffer. Local cursor
+        // intentionally NOT reset — subsequent WS ticks will see a
+        // truncated:true flag and the panel UI can show "buffer cleared".
+        async logClear() {
+            if (!confirm('Apagar todas as entradas de log do servidor? Isso não pode ser desfeito.')) return;
+            try {
+                await this.apiFetch('/api/logs/', { method: 'DELETE' });
+                this.logs.entries = [];
+                this.toast('Log do servidor limpo', 'ok');
+            } catch (e) {
+                this.toast('Falha ao limpar log: ' + (e.message || ''), 'error');
+            }
+        },
+
         toast(message, type = 'info', duration = 4000) {
             const id = ++this._toastId;
             this.toasts.push({ id, message, type });
@@ -3711,6 +3956,14 @@ function ninaApp() {
             setTimeout(() => {
                 this.toasts = this.toasts.filter(t => t.id !== id);
             }, duration);
+            // DBGLOG-6: mirror every toast into the debug log. Map our
+            // 4-tier ui type ('info'|'ok'|'warn'|'error') to the canonical
+            // 5-level scheme; treat 'ok' as info because it's positive
+            // feedback rather than a problem worth flagging.
+            const level = type === 'error' ? 'error'
+                        : type === 'warn'  ? 'warn'
+                        : 'info';
+            this._logFromClient(level, message, { source: 'toast' });
         },
 
         dismissToast(id) {
@@ -16841,6 +17094,14 @@ function ninaApp() {
 
         handleStatusMessage(msg) {
             if (msg.type !== 'status') return;
+
+            // DBGLOG-6: absorb the debug log sub-object before anything
+            // else. Cheap, side-effect-only, and the badge needs to
+            // refresh before the rest of the UI sees the tick.
+            if (msg.debugLog && Array.isArray(msg.debugLog.entries)) {
+                for (const e of msg.debugLog.entries) this._absorbLogEntry(e);
+                if (msg.debugLog.truncated) this.logs.truncated = true;
+            }
 
             const eq = msg.equipment || {};
 

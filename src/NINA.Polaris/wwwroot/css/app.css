@@ -1440,6 +1440,35 @@ label select.input-sm {
     color: var(--text-primary);
 }
 
+/* DBGLOG-6: log badge in the status bar. Always present, swaps colour
+   on unread error/warning counts so the operator notices trouble
+   without staring at the panel. */
+.log-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+.log-badge-warn {
+    color: #fcd34d;
+    border-color: rgba(245, 158, 11, 0.5);
+}
+.log-badge-error {
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.6);
+    background: rgba(239, 68, 68, 0.08);
+}
+.log-badge-count {
+    display: inline-block;
+    min-width: 14px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.15);
+    font-size: 10px;
+    text-align: center;
+}
+
 .btn-active {
     background: var(--accent);
     border-color: var(--accent);

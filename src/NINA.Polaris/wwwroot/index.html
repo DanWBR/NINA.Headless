@@ -402,6 +402,23 @@
                 <span class="chip-icon">S</span>
                 <span x-text="liveStackFrames + ' frames'"></span>
             </span>
+            <!-- DBGLOG-6: log inspector badge. Always visible (helps
+                 trust + discoverability), colours by unread severity:
+                 red when there are unread errors, amber for unread
+                 warnings, default grey when idle. Clicking opens the
+                 panel and zeroes counters. -->
+            <button class="btn-icon log-badge"
+                    :class="{
+                        'log-badge-error': logs.unreadErrors > 0,
+                        'log-badge-warn': logs.unreadErrors === 0 && logs.unreadWarnings > 0
+                    }"
+                    @click="logOpen()"
+                    title="Open debug log">
+                <span>LOG</span>
+                <span class="log-badge-count"
+                      x-show="logs.unreadErrors + logs.unreadWarnings > 0"
+                      x-text="logs.unreadErrors + logs.unreadWarnings"></span>
+            </button>
             <button class="btn-icon" @click="toggleNightMode()" :title="nightMode ? 'Day Mode' : 'Night Mode'">
                 <span x-text="nightMode ? 'DAY' : 'NIGHT'"></span>
             </button>
@@ -9231,6 +9248,87 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
          development that this is a per-commit nuisance, but the cost
          of users running stale JS for hours (with FrameKind routing
          bugs ending up on the wrong canvas) is higher. -->
+    <!-- DBGLOG-7: log inspector overlay. Fixed-position fullscreen
+         panel mimicking .files-editor-modal so the visual language is
+         consistent (backdrop blur + close-on-backdrop-click). Lazy:
+         template body only renders when panelOpen is true. -->
+    <div class="log-panel" x-show="logs.panelOpen" x-cloak
+         style="display:none; position:fixed; inset:0; z-index:9000;
+                background:rgba(5,8,16,0.78); backdrop-filter:blur(8px);">
+        <div @click="logClose()" style="position:absolute; inset:0;"></div>
+        <div style="position:absolute; inset:24px; background:var(--bg-elev, #0f1420);
+                    border:1px solid var(--border); border-radius:12px;
+                    display:flex; flex-direction:column; overflow:hidden;">
+            <div class="log-panel-header" style="display:flex; gap:10px; align-items:center;
+                        padding:12px 16px; border-bottom:1px solid var(--border);
+                        flex-wrap:wrap;">
+                <strong style="font-size:14px;">Debug log</strong>
+                <select x-model="logs.filterLevel" style="margin-left:12px;">
+                    <option value="debug">All (debug+)</option>
+                    <option value="info">Info+</option>
+                    <option value="warn">Warnings+</option>
+                    <option value="error">Errors only</option>
+                </select>
+                <select x-model="logs.filterSource">
+                    <option value="all">All sources</option>
+                    <option value="server">Server</option>
+                    <option value="http">HTTP requests</option>
+                    <option value="client">Client</option>
+                    <option value="toast">Toasts</option>
+                    <option value="apiFetch">API calls (client)</option>
+                    <option value="exception">Exceptions</option>
+                </select>
+                <input type="text" x-model="logs.searchText"
+                       placeholder="Search…"
+                       style="flex:1; min-width:140px;">
+                <button class="btn btn-sm" @click="logExport('jsonl')">Export JSONL</button>
+                <button class="btn btn-sm" @click="logExport('txt')">Export TXT</button>
+                <button class="btn btn-sm btn-danger" @click="logClear()">Clear</button>
+                <button class="btn btn-sm" @click="logClose()">✕ Close</button>
+            </div>
+            <div class="log-panel-body" style="flex:1; overflow:auto; font-family:var(--font-mono, monospace);
+                        font-size:11px; padding:8px 12px;">
+                <template x-for="e in logFiltered()" :key="e.id">
+                    <div :class="'log-row log-' + e.level"
+                         style="white-space:pre-wrap; word-break:break-word;
+                                padding:2px 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+                        <span x-text="(e.at || '').replace('T',' ').slice(0,23)"
+                              style="opacity:0.6;"></span>
+                        <span :style="
+                            e.level === 'error' || e.level === 'critical' ? 'color:#f87171; font-weight:600;' :
+                            e.level === 'warn'  ? 'color:#fcd34d;' :
+                            e.level === 'info'  ? 'color:#93c5fd;' :
+                            'color:#9ca3af;'"
+                            x-text="' [' + (e.level || '').toUpperCase().padEnd(5) + ']'"></span>
+                        <span style="opacity:0.7;" x-text="' [' + (e.source || '') + ']'"></span>
+                        <span x-show="e.category" style="opacity:0.5;"
+                              x-text="' ' + (e.category || '')"></span>
+                        <span x-text="' ' + (e.message || '')"></span>
+                        <span x-show="e.exceptionType" style="color:#fb7185;"
+                              x-text="' ' + e.exceptionType + ': ' + (e.exceptionMsg || '')"></span>
+                        <pre x-show="e.stackTrace"
+                             style="margin:4px 0 4px 24px; padding:6px 10px;
+                                    background:rgba(0,0,0,0.3); color:#fda4af;
+                                    font-size:10px; border-left:2px solid #fb7185;
+                                    overflow-x:auto;"
+                             x-text="e.stackTrace"></pre>
+                    </div>
+                </template>
+                <div x-show="logFiltered().length === 0"
+                     style="text-align:center; padding:40px; opacity:0.6;">
+                    No entries match the current filter.
+                </div>
+            </div>
+            <div style="padding:6px 16px; border-top:1px solid var(--border);
+                        font-size:11px; opacity:0.7;">
+                <span x-text="logs.entries.length + ' entries · cursor ' + logs.cursor"></span>
+                <span x-show="logs.truncated" style="color:#fcd34d;">
+                    · older entries dropped from buffer
+                </span>
+            </div>
+        </div>
+    </div>
+
     <script src="/js/app.js?v=20260530-indicp"></script>
     <!-- CLST-2: WASM live-stack module bootstrap. The .NET runtime
          loads, hangs the [JSExport] surface off globalThis.NINA.Polaris.Wasm,

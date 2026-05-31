@@ -53,17 +53,27 @@ public static class TelescopeEndpoints {
         group.MapPost("/park", async (EquipmentManager equip) => {
             if (equip.Telescope == null)
                 return Results.BadRequest(new { error = "No telescope selected" });
-
-            await equip.Telescope.ParkAsync();
-            return Results.Ok(new { status = "parking" });
+            try {
+                await equip.Telescope.ParkAsync();
+                return Results.Ok(new { status = "parking" });
+            } catch (NotSupportedException ex) {
+                return Results.Json(new { error = ex.Message }, statusCode: 501);
+            } catch (Exception ex) {
+                return Results.Json(new { error = "Park failed: " + ex.Message }, statusCode: 500);
+            }
         });
 
         group.MapPost("/unpark", async (EquipmentManager equip) => {
             if (equip.Telescope == null)
                 return Results.BadRequest(new { error = "No telescope selected" });
-
-            await equip.Telescope.UnparkAsync();
-            return Results.Ok(new { status = "unparking" });
+            try {
+                await equip.Telescope.UnparkAsync();
+                return Results.Ok(new { status = "unparking" });
+            } catch (NotSupportedException ex) {
+                return Results.Json(new { error = ex.Message }, statusCode: 501);
+            } catch (Exception ex) {
+                return Results.Json(new { error = "Unpark failed: " + ex.Message }, statusCode: 500);
+            }
         });
 
         // Drive the mount to its mechanical home position. Surfaces
@@ -176,9 +186,16 @@ public static class TelescopeEndpoints {
         group.MapPost("/tracking", async (EquipmentManager equip, TrackingRequest request) => {
             if (equip.Telescope == null)
                 return Results.BadRequest(new { error = "No telescope selected" });
-
-            await equip.Telescope.SetTrackingAsync(request.Enabled);
-            return Results.Ok(new { tracking = request.Enabled });
+            try {
+                await equip.Telescope.SetTrackingAsync(request.Enabled);
+                return Results.Ok(new { tracking = request.Enabled });
+            } catch (NotSupportedException ex) {
+                return Results.Json(new { error = ex.Message }, statusCode: 501);
+            } catch (Exception ex) {
+                return Results.Json(new {
+                    error = $"Tracking toggle failed: {ex.Message}"
+                }, statusCode: 500);
+            }
         });
 
         // Push wall-clock UTC + the host's local-timezone offset into
@@ -247,25 +264,41 @@ public static class TelescopeEndpoints {
         group.MapPost("/abort", async (EquipmentManager equip) => {
             if (equip.Telescope == null)
                 return Results.BadRequest(new { error = "No telescope selected" });
-
-            await equip.Telescope.AbortSlewAsync();
-            return Results.Ok(new { status = "stopped" });
+            try {
+                await equip.Telescope.AbortSlewAsync();
+                return Results.Ok(new { status = "stopped" });
+            } catch (Exception ex) {
+                return Results.Json(new { error = "Abort failed: " + ex.Message }, statusCode: 500);
+            }
         });
 
+        // Manual jog. Surfaces driver exceptions as actionable 500 +
+        // message instead of letting them bubble up as a generic
+        // "Internal Server Error" -- without the body the frontend
+        // toast can only say "failed" and the operator has no idea
+        // whether the driver rejected the write, the cable dropped,
+        // or the property name was wrong for the specific mount.
         group.MapPost("/move/{direction}", async (EquipmentManager equip, string direction) => {
             if (equip.Telescope == null)
                 return Results.BadRequest(new { error = "No telescope selected" });
-
-            switch (direction.ToLowerInvariant()) {
-                case "north": await equip.Telescope.MoveNorthAsync(); break;
-                case "south": await equip.Telescope.MoveSouthAsync(); break;
-                case "east": await equip.Telescope.MoveEastAsync(); break;
-                case "west": await equip.Telescope.MoveWestAsync(); break;
-                case "stop": await equip.Telescope.StopMotionAsync(); break;
-                default: return Results.BadRequest(new { error = $"Unknown direction: {direction}" });
+            try {
+                switch (direction.ToLowerInvariant()) {
+                    case "north": await equip.Telescope.MoveNorthAsync(); break;
+                    case "south": await equip.Telescope.MoveSouthAsync(); break;
+                    case "east":  await equip.Telescope.MoveEastAsync();  break;
+                    case "west":  await equip.Telescope.MoveWestAsync();  break;
+                    case "stop":  await equip.Telescope.StopMotionAsync(); break;
+                    default:
+                        return Results.BadRequest(new { error = $"Unknown direction: {direction}" });
+                }
+                return Results.Ok(new { status = "moving", direction });
+            } catch (NotSupportedException ex) {
+                return Results.Json(new { error = ex.Message }, statusCode: 501);
+            } catch (Exception ex) {
+                return Results.Json(new {
+                    error = $"Move {direction} failed: {ex.Message}"
+                }, statusCode: 500);
             }
-
-            return Results.Ok(new { status = "moving", direction });
         });
 
         group.MapPost("/select/{deviceName}", (EquipmentManager equip, string deviceName, string? driver) => {

@@ -12054,17 +12054,40 @@ function ninaApp() {
             }
         },
 
+        // Helper: pull the {error} field out of an ApiError body so
+        // the toast shows the actual driver-side reason ("Device not
+        // connected", "Property TELESCOPE_MOTION_NS not found", etc.)
+        // instead of a generic "failed". apiFetch throws ApiError with
+        // the response body in .message; that's typically JSON.
+        _mountErrorText(e) {
+            const msg = e?.message || String(e);
+            try {
+                const j = JSON.parse(msg);
+                if (j?.error) return j.error;
+            } catch { /* not JSON, fall through */ }
+            return msg;
+        },
+
         async mountMove(direction) {
             const dirMap = { n: 'north', s: 'south', e: 'east', w: 'west', stop: 'stop' };
+            const dir = dirMap[direction] || direction;
             try {
-                await this.apiPost(`/api/telescope/move/${dirMap[direction] || direction}`);
+                await this.apiPost(`/api/telescope/move/${dir}`);
+                // Quiet success — the mount panel's status row updates
+                // via the next WS tick (Track / RA / Dec / Slewing) and
+                // the user sees the motion immediately.
             } catch (e) {
-                this.toast('Mount move failed', 'error');
+                this.toast(`Move ${dir} failed: ${this._mountErrorText(e)}`, 'error');
             }
         },
 
         async mountStop() {
-            try { await this.apiPost('/api/telescope/abort'); } catch (e) { }
+            try {
+                await this.apiPost('/api/telescope/abort');
+                this.toast('Mount stopped', 'info');
+            } catch (e) {
+                this.toast('Stop failed: ' + this._mountErrorText(e), 'error');
+            }
         },
 
         async parkMount() {
@@ -12072,7 +12095,7 @@ function ninaApp() {
                 await this.apiPost('/api/telescope/park');
                 this.toast('Parking mount...', 'info');
             } catch (e) {
-                this.toast('Park failed', 'error');
+                this.toast('Park failed: ' + this._mountErrorText(e), 'error');
             }
         },
 
@@ -12081,15 +12104,17 @@ function ninaApp() {
                 await this.apiPost('/api/telescope/unpark');
                 this.toast('Unparking mount...', 'info');
             } catch (e) {
-                this.toast('Unpark failed', 'error');
+                this.toast('Unpark failed: ' + this._mountErrorText(e), 'error');
             }
         },
 
         async toggleTracking() {
+            const newState = !this.mount.tracking;
             try {
-                await this.apiPost('/api/telescope/tracking', { enabled: !this.mount.tracking });
+                await this.apiPost('/api/telescope/tracking', { enabled: newState });
+                this.toast('Tracking ' + (newState ? 'ON' : 'OFF'), 'info');
             } catch (e) {
-                this.toast('Tracking toggle failed', 'error');
+                this.toast('Tracking toggle failed: ' + this._mountErrorText(e), 'error');
             }
         },
 

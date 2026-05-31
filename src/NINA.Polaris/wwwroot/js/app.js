@@ -10054,6 +10054,34 @@ function ninaApp() {
                 this.toast?.('Failed to load optics catalogue: ' + e.message, 'warn');
                 this.opticsCatalogue = { telescopes: [], accessories: [], loaded: true };
             }
+            // Re-sync the Main Telescope / Guidescope dropdowns to the
+            // active rig's saved brand + model. Without this step, the
+            // common load order (loadRigs resolves first, then this
+            // catalogue) leaves the <select>s stuck on "Manual entry"
+            // and "Pick a model": when _applyRigToChoices set
+            // settings.telescopeBrand the brand <option> template was
+            // still empty, so the native select silently dropped the
+            // value, and Alpine's x-model never re-evaluates on
+            // template population alone. Toggling the value through
+            // null + back via $nextTick forces the select to pick up
+            // the now-present option.
+            const active = this.rigs?.find(r => r.id === this.activeRigId);
+            if (active) {
+                const bt = active.telescopeBrand || '';
+                const mt = active.telescopeModel || '';
+                const bg = active.guideTelescopeBrand || '';
+                const mg = active.guideTelescopeModel || '';
+                this.settings.telescopeBrand = '';
+                this.settings.telescopeModel = '';
+                this.settings.guideTelescopeBrand = '';
+                this.settings.guideTelescopeModel = '';
+                await this.$nextTick();
+                this.settings.telescopeBrand = bt;
+                this.settings.guideTelescopeBrand = bg;
+                await this.$nextTick();
+                this.settings.telescopeModel = mt;
+                this.settings.guideTelescopeModel = mg;
+            }
         },
 
         /// Distinct telescope brands in the catalogue, sorted.

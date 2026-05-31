@@ -5036,12 +5036,17 @@
                      popup. .active class gives visual feedback
                      for the current state. Toggle semantics, like
                      the Camera pill below. -->
+                <!-- @contextmenu (right-click) + shift+click rescue:
+                     resets the popup to its default position. Saves
+                     the operator when they drag the panel off-screen
+                     and can't grab the header anymore. -->
                 <button class="mount-float-reopen"
                         :class="{ 'active': mountPanel.visible }"
                         x-show="mount.connected"
                         x-cloak
-                        @click="mountPanel.visible = !mountPanel.visible; persistMountPanel()"
-                        :title="mountPanel.visible ? 'Hide mount control' : 'Show mount control'">
+                        @click="if ($event.shiftKey) { resetMountPanelPosition(); mountPanel.visible = true; } else { mountPanel.visible = !mountPanel.visible; persistMountPanel(); }"
+                        @contextmenu.prevent="resetMountPanelPosition(); mountPanel.visible = true"
+                        :title="(mountPanel.visible ? 'Hide' : 'Show') + ' mount control (shift+click or right-click resets position)'">
                     <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
                         <path d="M12 2L2 22h20L12 2z" fill="none" stroke="currentColor" stroke-width="2"/>
                     </svg>
@@ -5062,8 +5067,9 @@
                         :class="{ 'active': slewPreviewVisible }"
                         x-show="slewPreview?.active"
                         x-cloak
-                        @click="slewPreviewVisible = !slewPreviewVisible; persistSlewPreviewToggle()"
-                        :title="slewPreviewVisible ? 'Hide live camera preview' : 'Show live camera preview'">
+                        @click="if ($event.shiftKey) { resetCameraPanelPosition(); slewPreviewVisible = true; } else { slewPreviewVisible = !slewPreviewVisible; persistSlewPreviewToggle(); }"
+                        @contextmenu.prevent="resetCameraPanelPosition(); slewPreviewVisible = true"
+                        :title="(slewPreviewVisible ? 'Hide' : 'Show') + ' live camera preview (shift+click or right-click resets position)'">
                     <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
                         <path d="M4 7h3l2-2h6l2 2h3v12H4z" fill="none"
                               stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>

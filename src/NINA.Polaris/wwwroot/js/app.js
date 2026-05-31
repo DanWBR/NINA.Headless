@@ -12279,6 +12279,26 @@ function ninaApp() {
             this.mountPanel.y = Math.max(minY, Math.min(maxY, this.mountPanel.y));
         },
 
+        // Snap the mount popup back to its default top-left corner
+        // and persist. Used by the toggle pill's right-click /
+        // long-press rescue path when the operator drags the popup
+        // off-screen and can't grab the header anymore.
+        resetMountPanelPosition() {
+            this.mountPanel.x = 24;
+            this.mountPanel.y = 80;
+            this._clampMountPanel();
+            try { this.persistMountPanel(); } catch {}
+        },
+
+        // Same idea for the Camera float. Default coords mirror the
+        // initial state in `cameraPanel: { x: 24, y: 360 }`.
+        resetCameraPanelPosition() {
+            this.cameraPanel.x = 24;
+            this.cameraPanel.y = 360;
+            this._clampCameraPanel();
+            try { this.persistCameraPanel(); } catch {}
+        },
+
         mountPanelDragStart(ev) {
             // Don't start a drag from the close button, that has its
             // own click handler with .stop already.

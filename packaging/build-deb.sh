@@ -24,6 +24,45 @@ set -euo pipefail
 VERSION="${1:-0.0.0-dev}"
 ARCH="${2:-arm64}"
 
+# Resolve dotnet. Many users install the .NET SDK via the install
+# script (~/.dotnet) or the Microsoft apt feed (/usr/share/dotnet)
+# without dropping a symlink on PATH for non-login shells. Look in
+# the usual spots before bailing so the script just works without
+# the operator hand-editing PATH.
+if command -v dotnet >/dev/null 2>&1; then
+    DOTNET="$(command -v dotnet)"
+else
+    for candidate in \
+        "$HOME/.dotnet/dotnet" \
+        "/usr/share/dotnet/dotnet" \
+        "/usr/local/share/dotnet/dotnet" \
+        "/opt/dotnet/dotnet" \
+        "/snap/dotnet-sdk/current/dotnet"; do
+        if [ -x "$candidate" ]; then
+            DOTNET="$candidate"
+            break
+        fi
+    done
+fi
+if [ -z "${DOTNET:-}" ]; then
+    cat >&2 <<EOF
+ERROR: dotnet SDK not found.
+
+Looked in PATH and the standard install locations:
+  ~/.dotnet/dotnet
+  /usr/share/dotnet/dotnet
+  /usr/local/share/dotnet/dotnet
+  /opt/dotnet/dotnet
+  /snap/dotnet-sdk/current/dotnet
+
+Install the .NET 10 SDK first:
+  curl -L https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0
+  export PATH="\$HOME/.dotnet:\$PATH"
+EOF
+    exit 1
+fi
+echo "    dotnet:     $DOTNET"
+
 case "$ARCH" in
     arm64)
         RID=linux-arm64
@@ -60,7 +99,7 @@ cp -r "$SRC_DEB/." "$BUILD_DIR/"
 #    .deb is named with, instead of the auto-generated date-based
 #    stamp the csproj falls back to for local dev builds.
 echo "==> dotnet publish (this takes a few minutes)"
-dotnet publish "$REPO_ROOT/src/NINA.Polaris/NINA.Polaris.csproj" \
+"$DOTNET" publish "$REPO_ROOT/src/NINA.Polaris/NINA.Polaris.csproj" \
     -c Release \
     -r "$RID" \
     --self-contained true \

@@ -1,9 +1,24 @@
+using System.Globalization;
 using NINA.Polaris.Endpoints;
 using NINA.Polaris.Middleware;
 using NINA.Polaris.Services;
 using NINA.Polaris.WebSocket;
 using NINA.INDI.Client;
 using Yarp.ReverseProxy.Forwarder;
+
+// Force English exception messages + invariant number/date formatting
+// regardless of the host's locale. The rest of the UI is English-only,
+// so localized SocketException / IOException strings (e.g. "Nenhuma
+// conexão pôde ser feita..." on pt-BR systems) leaking into the
+// debug-log panel breaks the consistent reading experience. Setting
+// DefaultThreadCurrentUICulture covers any thread that doesn't
+// explicitly opt in to a different culture; the existing thread's
+// own culture is also overridden because Program.cs runs on the
+// process's main thread.
+CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo("en-US");
+Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+Thread.CurrentThread.CurrentUICulture = CultureInfo.GetCultureInfo("en-US");
 
 // Sub-process entry: when the parent server spawns us with
 // `--ascom-setup <ProgID>` we run the ASCOM SetupDialog and exit,

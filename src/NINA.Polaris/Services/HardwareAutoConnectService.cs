@@ -223,7 +223,17 @@ public class HardwareAutoConnectService : IHostedService {
         // today so we don't pass a driver.
         var devices = new (string Label, string? Name, Func<string, Task> Bind)[] {
             ("Camera",       rig.Camera,      async name => { var c = _equip.SelectCamera(rig.CameraDriver ?? "indi", name);    await c.ConnectAsync(ct); }),
-            ("Mount",        rig.Telescope,   async name => { var t = _equip.SelectTelescope(rig.TelescopeDriver ?? "indi", name); await t.ConnectAsync(ct); }),
+            ("Mount",        rig.Telescope,   async name => {
+                var t = _equip.SelectTelescope(rig.TelescopeDriver ?? "indi", name);
+                await t.ConnectAsync(ct);
+                // Auto-sync TIME_UTC + GEOGRAPHIC_COORD right after
+                // connect. Without these the mount can't compute LST
+                // and rejects every slew. Mirror of the same block in
+                // /api/telescope/connect (TelescopeEndpoints) so the
+                // boot-time auto-connect path gets the same treatment
+                // as a manual click from the RIGS card.
+                await TrySyncMountTimeAndLocation(t, ct);
+            }),
             ("Focuser",      rig.Focuser,     async name => { var f = _equip.SelectFocuser(name);                                await f.ConnectAsync(ct); }),
             ("Filter wheel", rig.FilterWheel, async name => { var w = _equip.SelectFilterWheel(name);                            await w.ConnectAsync(ct); }),
             ("Rotator",      rig.Rotator,     async name => { var r = _equip.SelectRotator(name);                                await r.ConnectAsync(ct); }),
@@ -267,6 +277,49 @@ public class HardwareAutoConnectService : IHostedService {
         } else {
             _notify.Push("ok",
                 $"Rig '{rig.Name}': {connected} connected, {missing} missing, {failed} failed.");
+        }
+    }
+
+    /// <summary>Push wall-clock UTC + observatory location into a freshly-
+    /// connected mount. INDI drivers boot with TIME_UTC = 2000-01-01
+    /// (epoch) and GEOGRAPHIC_COORD all-zeros; without correct values
+    /// the mount can't compute local sidereal time, so the
+    /// equatorial-to-horizontal projection puts every target "below
+    /// horizon" and slews get silently rejected with Alert state.
+    /// Mirror of the same logic in /api/telescope/connect endpoint so
+    /// auto-connect at boot gets the same treatment as a manual click.
+    /// Best-effort: NotSupportedException from a driver that doesn't
+    /// expose TIME_UTC or GEOGRAPHIC_COORD is logged but doesn't fail
+    /// the connect.</summary>
+    private async Task TrySyncMountTimeAndLocation(
+            NINA.Image.Interfaces.ITelescope telescope, CancellationToken ct) {
+        try {
+            var utc = DateTime.UtcNow;
+            var offsetHours = TimeZoneInfo.Local.GetUtcOffset(utc).TotalHours;
+            await telescope.SetSiteTimeAsync(utc, offsetHours);
+            _logger.LogInformation(
+                "Mount auto-sync TIME_UTC: {Utc} offset={Offset:F2}h", utc, offsetHours);
+        } catch (NotSupportedException) {
+            // Driver doesn't expose TIME_UTC -- nothing to do, won't block connect
+        } catch (Exception ex) {
+            _logger.LogWarning(ex, "Mount auto-sync TIME_UTC failed (continuing)");
+        }
+
+        try {
+            var p = _profiles.Active;
+            if (p.Latitude != 0 || p.Longitude != 0) {
+                await telescope.SetSiteLocationAsync(p.Latitude, p.Longitude, p.Altitude);
+                _logger.LogInformation(
+                    "Mount auto-sync GEOGRAPHIC_COORD: lat={Lat:F4} lon={Lon:F4} elev={Elev:F0}m",
+                    p.Latitude, p.Longitude, p.Altitude);
+            } else {
+                _notify.Push("warn",
+                    "Observatory location is (0,0) — set lat/lon in Settings or slews will be rejected.");
+            }
+        } catch (NotSupportedException) {
+            // Driver doesn't expose GEOGRAPHIC_COORD
+        } catch (Exception ex) {
+            _logger.LogWarning(ex, "Mount auto-sync GEOGRAPHIC_COORD failed (continuing)");
         }
     }
 }

@@ -344,12 +344,70 @@ public static class TelescopeEndpoints {
             return Results.Ok(Array.Empty<DiscoveredCamera>());
         });
 
-        group.MapPost("/connect", async (EquipmentManager equip) => {
+        group.MapPost("/connect", async (EquipmentManager equip,
+                                          ProfileService profiles,
+                                          ILogger<EquipmentManager> logger) => {
             if (equip.Telescope == null)
                 return Results.BadRequest(new { error = "No telescope selected" });
 
             await equip.Telescope.ConnectAsync();
-            return Results.Ok(new { status = "connected", device = equip.Telescope.DeviceName });
+
+            // Auto-push site time + location right after CONNECT. Without
+            // these the mount can't compute local sidereal time (LST) and
+            // every slew gets rejected because the equatorial -> horizontal
+            // projection puts the target "below horizon". The INDI
+            // TIME_UTC default is the Unix epoch (2000-01-01), so on a
+            // mount that just power-cycled the equator+meridian sit
+            // wherever the year-2000 LST says they sit — random failures
+            // on every slew until the operator manually opens INDI Web
+            // and types the date.
+            //
+            // Fire-and-forget per step so a driver that doesn't expose
+            // TIME_UTC or GEOGRAPHIC_COORD (NotSupportedException from
+            // IndiTelescope) doesn't break the connect. Both writes
+            // honour the SetSiteLocation element-name negotiation so
+            // they work across LX200 / EQMod / iOptron / AM3.
+            string? timeStatus = null, locationStatus = null;
+            try {
+                var utc = DateTime.UtcNow;
+                var offsetHours = TimeZoneInfo.Local.GetUtcOffset(utc).TotalHours;
+                await equip.Telescope.SetSiteTimeAsync(utc, offsetHours);
+                timeStatus = $"utc={utc:o}, offset={offsetHours:F2}h";
+                logger.LogInformation(
+                    "Telescope auto-sync TIME_UTC after connect: {Status}", timeStatus);
+            } catch (NotSupportedException) {
+                timeStatus = "driver does not expose TIME_UTC (skipped)";
+            } catch (Exception ex) {
+                logger.LogWarning(ex, "Telescope auto-sync TIME_UTC failed (continuing)");
+                timeStatus = "failed: " + ex.Message;
+            }
+
+            try {
+                var p = profiles.Active;
+                if (p.Latitude != 0 || p.Longitude != 0) {
+                    await equip.Telescope.SetSiteLocationAsync(p.Latitude, p.Longitude, p.Altitude);
+                    locationStatus = $"lat={p.Latitude:F4}, lon={p.Longitude:F4}, elev={p.Altitude:F0}m";
+                    logger.LogInformation(
+                        "Telescope auto-sync GEOGRAPHIC_COORD after connect: {Status}", locationStatus);
+                } else {
+                    locationStatus = "skipped: observatory location not configured in Settings";
+                    logger.LogWarning(
+                        "Telescope auto-sync skipped — observatory location is (0,0). " +
+                        "Set latitude/longitude in Settings or the mount won't compute LST correctly.");
+                }
+            } catch (NotSupportedException) {
+                locationStatus = "driver does not expose GEOGRAPHIC_COORD (skipped)";
+            } catch (Exception ex) {
+                logger.LogWarning(ex, "Telescope auto-sync GEOGRAPHIC_COORD failed (continuing)");
+                locationStatus = "failed: " + ex.Message;
+            }
+
+            return Results.Ok(new {
+                status = "connected",
+                device = equip.Telescope.DeviceName,
+                timeSync = timeStatus,
+                locationSync = locationStatus
+            });
         });
 
         group.MapPost("/disconnect", async (EquipmentManager equip) => {

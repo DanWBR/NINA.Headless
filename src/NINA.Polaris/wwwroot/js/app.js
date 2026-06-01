@@ -3260,7 +3260,8 @@ function ninaApp() {
                         docLink: 'rigs.md',
                         body: [
                             'Open the RIGS tab. Each device (Main Telescope, Main Camera, Mount, Focuser, Filter Wheel, Guidescope, Guide Camera) is a card. Pick the driver, pick the specific device the driver reports, hit Connect.',
-                            'Save the result as a named rig profile ("OnStep + ASI2600MC + EAF"). Polaris remembers it and lets you switch rigs without re-typing focal lengths, pixel sizes, etc.'
+                            'Save the result as a named rig profile ("OnStep + ASI2600MC + EAF"). Polaris remembers it and lets you switch rigs without re-typing focal lengths, pixel sizes, etc.',
+                            'Device-level tweaks (slew rate, tracking mode, EAF backlash, EFW filter names, etc) persist automatically via INDI CONFIG_PROCESS: 3 seconds after any change in the INDI properties panel, Polaris saves to ~/.indi/{driver}_config.xml; on the next connect the values reload automatically. Set things once, they survive reboots and reconnects.'
                         ]
                     },
                     {
@@ -3306,7 +3307,8 @@ function ninaApp() {
                         docLink: 'sky-explorer.md',
                         body: [
                             'With the target picked, hit "Slew & Center". The mount slews, Polaris takes a plate-solve frame, computes the offset, nudges the mount, and re-checks. The loop converges until the target is inside the tolerance you configured (default 30 arcsec).',
-                            'No more "I hope the alignment was good" trial-and-error. The center is exact.'
+                            'No more "I hope the alignment was good" trial-and-error. The center is exact.',
+                            'During the slew a live camera preview pops up over the SKY map so you can confirm framing. A Mount control popup (jog buttons, Park, tracking) is also available. Both have pills at the bottom-right of SKY that toggle their visibility. Tap anywhere on the camera popup to dismiss it; the Mount popup has an X. ESC closes both. Right-click (or shift+click) on either pill to reset the popup back to its default position if you accidentally drag it off-screen.'
                         ]
                     },
                     {
@@ -3329,7 +3331,8 @@ function ninaApp() {
                         docLink: 'sequence.md',
                         body: [
                             'AUTORUN runs the simple sequencer: N frames per filter at a given exposure + gain, with optional triggers (auto-refocus on temperature change, dither every K frames, meridian flip, etc).',
-                            'For a typical 3-hour OSC session: target name, 60-120 lights of 60-120s each, dither every 3, refocus on +/-3 degC delta, meridian flip enabled. Hit Start.'
+                            'For a typical 3-hour OSC session: target name, 60-120 lights of 60-120s each, dither every 3, refocus on +/-3 degC delta, meridian flip enabled. Hit Start.',
+                            'The big round shutter button is the universal capture control (same component appears in PREVIEW, FOCUS, VIDEO, and LIVE tabs). Tap = single snap, long-press (~600ms) = loop, tap while a capture is running = abort. The progress ring around it fills as the exposure advances so you always know how far in you are.'
                         ],
                         warn: 'Advanced (ADV) sequencer is the tree-based version with conditional containers and parallel branches. Pick that for multi-target nights with rotator + filter wheel choreography.'
                     },

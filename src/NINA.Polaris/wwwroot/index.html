@@ -1045,6 +1045,39 @@
                              x-show="liveStackStatus?.triggers?.lastError"
                              x-text="'⚠ ' + (liveStackStatus?.triggers?.lastError || '')"></div>
 
+                        <!-- One-shot "before stacking begins" prep.
+                             Distinct from the per-frame fire rules
+                             below: these checkboxes only matter once,
+                             when the operator clicks Stack ON. The
+                             button handler awaits the chosen prep ops
+                             (autofocus + recenter) before arming the
+                             stacker. Safe to enable both even if the
+                             rig doesn't have a focuser / mount target —
+                             missing prerequisites silently skip. -->
+                        <fieldset class="livestack-triggers-block">
+                            <legend>🚦 Before stacking starts (one-shot)</legend>
+                            <div class="livestack-triggers-row">
+                                <label class="checkbox-label">
+                                    <input type="checkbox"
+                                           x-model="liveStackTriggers.refocusOnStart"
+                                           @change="saveLiveStackTriggers()">
+                                    Run auto-focus before first frame
+                                </label>
+                            </div>
+                            <div class="livestack-triggers-row">
+                                <label class="checkbox-label">
+                                    <input type="checkbox"
+                                           x-model="liveStackTriggers.recenterOnStart"
+                                           @change="saveLiveStackTriggers()">
+                                    Run recenter (slew + plate-solve) before first frame
+                                </label>
+                            </div>
+                            <p class="hint" style="margin: 4px 0 0 0; font-size: 11px">
+                                Fires once when you click <strong>▶ Stack ON</strong>.
+                                Skips silently if no focuser / mount is configured.
+                            </p>
+                        </fieldset>
+
                         <fieldset class="livestack-triggers-block">
                             <legend>
                                 <label class="checkbox-label">

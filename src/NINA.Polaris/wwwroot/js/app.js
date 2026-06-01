@@ -12188,17 +12188,68 @@ function ninaApp() {
         // --- Live Stacking ---
 
         async toggleLiveStack() {
-            this.liveStackEnabled = !this.liveStackEnabled;
+            const enabling = !this.liveStackEnabled;
+            // Read-before-flip: if the operator is resuming after a
+            // pause, we want to ask "continue or restart?" while the
+            // current state still reflects how many frames are stacked.
+            const existingFrames = this.liveStackFrames || 0;
+            this.liveStackEnabled = enabling;
             try {
-                if (this.liveStackEnabled) {
-                    await this.apiPost('/api/livestack/start');
-                    this.toast('Live stacking started', 'ok');
-                } else {
+                if (!enabling) {
                     await this.apiPost('/api/livestack/stop');
-                    this.toast('Live stacking stopped', 'warn');
+                    this.toast('Live stacking paused', 'warn');
+                    return;
+                }
+                const trig = this.liveStackTriggers || {};
+                const wantsPrep = trig.refocusOnStart || trig.recenterOnStart;
+
+                // Resume vs fresh start prompt: only when there's
+                // already a stack to continue from. First-ever start
+                // and post-Reset start both skip the prompt.
+                let action = 'start';   // 'resume' | 'start' | 'start-with-prep'
+                if (existingFrames > 0) {
+                    const choice = window.confirm(
+                        existingFrames + ' frame(s) already stacked.\n\n' +
+                        'OK = CONTINUE adding to the existing stack.\n' +
+                        'Cancel = RESTART (clear the stack and begin fresh).');
+                    action = choice ? 'resume' : (wantsPrep ? 'start-with-prep' : 'start');
+                } else {
+                    action = wantsPrep ? 'start-with-prep' : 'start';
+                }
+
+                let url, label;
+                switch (action) {
+                    case 'resume':
+                        url = '/api/livestack/resume';
+                        label = 'Live stacking resumed';
+                        break;
+                    case 'start-with-prep':
+                        url = '/api/livestack/start-with-prep';
+                        label = 'Live stacking starting (running prep…)';
+                        break;
+                    default:
+                        url = '/api/livestack/start';
+                        label = 'Live stacking started';
+                }
+                this.toast(label, 'ok');
+                const r = await this.apiPost(url);
+                if (action === 'start-with-prep' && r) {
+                    if (r.refocusFired || r.recenterFired) {
+                        const parts = [];
+                        if (r.refocusFired) parts.push('auto-focus done');
+                        if (r.recenterFired) parts.push('recenter done');
+                        this.toast('Prep complete: ' + parts.join(' + '), 'success');
+                    }
+                    if (r.prepError) {
+                        this.toast('Prep raised: ' + r.prepError + ' (stack started anyway)', 'warn');
+                    }
                 }
             } catch (e) {
-                this.toast('Live stack toggle failed', 'error');
+                this.toast('Live stack toggle failed: ' + (e?.message || ''), 'error');
+                // Roll back the optimistic flip so the UI state matches
+                // the server (still stopped/started, depending on which
+                // direction we were going).
+                this.liveStackEnabled = !enabling;
             }
         },
 

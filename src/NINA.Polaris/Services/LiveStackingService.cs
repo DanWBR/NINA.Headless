@@ -240,21 +240,39 @@ public class LiveStackingService {
         }
     }
 
-    /// <summary>Arm stacking (no-op if already armed) AND clear the
-    /// current accumulator. Kept for backwards compatibility — the
-    /// service is armed by default at startup, callers should
-    /// prefer <see cref="Reset"/> when all they want is to clear
-    /// the buffer.</summary>
+    /// <summary>Arm stacking AND clear the current accumulator. The
+    /// "fresh start" path — use when the operator wants to begin a
+    /// new target / discard whatever was stacked before. Prefer
+    /// <see cref="Resume"/> when the operator paused mid-session
+    /// and wants to keep building on the existing stack.</summary>
     public void Start() {
         Reset();
         _isRunning = true;
-        _logger.LogInformation("Live stacking started");
+        _logger.LogInformation("Live stacking started (buffer reset)");
+    }
+
+    /// <summary>Re-arm stacking WITHOUT clearing the accumulator. New
+    /// frames continue to integrate into the running mean. Lets the
+    /// operator pause (e.g. clouds rolled in), fix things, then pick
+    /// up where they left off — typical workflow when wifi drops or
+    /// you need to disconnect the laptop for a minute.</summary>
+    public void Resume() {
+        if (_frameCount == 0) {
+            // Nothing to resume FROM — fall through to Start so the
+            // first frame still establishes the reference. Avoids a
+            // confusing state where Resume succeeds but the next
+            // frame can't align to an empty buffer.
+            Start();
+            return;
+        }
+        _isRunning = true;
+        _logger.LogInformation("Live stacking resumed at {Count} frames", _frameCount);
     }
 
     /// <summary>Disarm stacking. Frames still flow through the relay
     /// + per-frame save path but no longer update the running mean.
-    /// Rare — the typical workflow leaves stacking on permanently
-    /// and uses <see cref="Reset"/> to switch targets.</summary>
+    /// Pair with <see cref="Resume"/> to continue or
+    /// <see cref="Start"/> to begin a new stack.</summary>
     public void Stop() {
         _isRunning = false;
         _logger.LogInformation("Live stacking stopped after {Count} frames", _frameCount);

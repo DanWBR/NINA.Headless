@@ -8,13 +8,70 @@ public static class LiveStackEndpoints {
         var group = app.MapGroup("/api/livestack");
 
         group.MapPost("/start", (LiveStackingService stack) => {
+            // Always begins a fresh stack (resets buffer). Use /resume
+            // when the operator paused mid-session and wants to keep
+            // building on the existing accumulator.
             stack.Start();
             return Results.Ok(new { status = "started" });
+        });
+
+        // Re-arm WITHOUT clearing the accumulator. Pair with /stop for
+        // a true pause/resume workflow: user clicks Pause (frames keep
+        // saving to disk but the running mean freezes), then clicks
+        // Resume here to pick up where they left off. Falls through to
+        // Start when there's nothing to resume from (frameCount == 0).
+        group.MapPost("/resume", (LiveStackingService stack) => {
+            stack.Resume();
+            return Results.Ok(new { status = "resumed", frameCount = stack.FrameCount });
         });
 
         group.MapPost("/stop", (LiveStackingService stack) => {
             stack.Stop();
             return Results.Ok(new { status = "stopped", frameCount = stack.FrameCount });
+        });
+
+        // Start-with-prep: kicks off the optional one-shot autofocus
+        // and/or recenter (gated by LiveStackTriggers.RefocusOnStart /
+        // RecenterOnStart) BEFORE arming the stacker. Returns once both
+        // prep ops settle. UI calls this when the operator clicks
+        // Stack ON and at least one OnStart flag is true; for the
+        // common case (no prep) /start is still the cheap path.
+        group.MapPost("/start-with-prep", async (
+            LiveStackingService stack,
+            LiveStackTriggersService triggers,
+            ProfileService profiles,
+            ILogger<Program> logger) => {
+
+            var cfg = profiles.ActiveEquipmentProfile?.LiveStackTriggers
+                      ?? new LiveStackTriggers();
+            var didRefocus = false;
+            var didRecenter = false;
+            string? prepError = null;
+            try {
+                if (cfg.RefocusOnStart) {
+                    logger.LogInformation("Live stack OnStart: triggering autofocus");
+                    await triggers.FireRefocusNowAsync();
+                    didRefocus = true;
+                }
+                if (cfg.RecenterOnStart) {
+                    logger.LogInformation("Live stack OnStart: triggering recenter");
+                    await triggers.FireRecenterNowAsync();
+                    didRecenter = true;
+                }
+            } catch (Exception ex) {
+                // Don't block the stack on prep failures — the operator
+                // wanted to stack regardless. Report what tripped so
+                // the toast can warn but the stack still starts.
+                prepError = ex.Message;
+                logger.LogWarning(ex, "Live stack OnStart prep raised; stacking will start anyway");
+            }
+            stack.Start();
+            return Results.Ok(new {
+                status = "started",
+                refocusFired = didRefocus,
+                recenterFired = didRecenter,
+                prepError
+            });
         });
 
         group.MapPost("/reset", (LiveStackingService stack,

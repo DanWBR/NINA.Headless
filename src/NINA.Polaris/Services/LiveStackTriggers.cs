@@ -60,4 +60,22 @@ public class LiveStackTriggers {
 
     /// <summary>Convergence tolerance passed to <see cref="SlewCenterService.StartJob"/>.</summary>
     public double RecenterToleranceArcsec { get; set; } = 30;
+
+    // ----- One-shot "before starting stack" prep -----
+
+    /// <summary>When true, the LIVE tab's "Stack ON" handler triggers
+    /// an auto-focus run before the first frame is accepted. Distinct
+    /// from <see cref="RefocusEnabled"/> (which fires DURING the stack);
+    /// this is a one-time warm-up so the operator doesn't have to
+    /// manually click Auto Focus before clicking Stack. Skipped silently
+    /// when no focuser is connected.</summary>
+    public bool RefocusOnStart { get; set; }
+
+    /// <summary>When true, the LIVE tab's "Stack ON" handler triggers
+    /// a slew + plate-solve recenter on the current target before the
+    /// first frame is accepted. Useful when the operator drove the
+    /// mount manually and wants Polaris to re-center precisely before
+    /// stacking commits to that pointing. Skipped silently when no
+    /// mount target is set.</summary>
+    public bool RecenterOnStart { get; set; }
 }

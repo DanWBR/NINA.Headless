@@ -1933,7 +1933,7 @@ label select.input-sm {
 .mount-float-panel {
     position: fixed;
     z-index: 90;
-    width: 360px;
+    width: 700px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -1978,8 +1978,8 @@ label select.input-sm {
    so a single tap closes immediately. */
 .mount-float-close {
     position: absolute;
-    top: 4px;
-    right: 6px;
+    top: 2px;
+    right: 4px;
     z-index: 100;
     pointer-events: auto;
     background: rgba(0, 0, 0, 0.25);
@@ -1991,8 +1991,8 @@ label select.input-sm {
     padding: 2px 8px;
     border-radius: 4px;
     touch-action: manipulation;
-    min-width: 28px;
-    min-height: 28px;
+    min-width: 24px;
+    min-height: 24px;
 }
 .mount-float-close:hover {
     background: var(--bg-primary);

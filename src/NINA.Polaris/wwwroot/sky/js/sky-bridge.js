@@ -14,6 +14,7 @@
  *   { type: "search", query }
  *   { type: "get-center" }                   (replies "center")
  *   { type: "set-fov-overlays", mount, target }
+ *   { type: "set-alignment-markers", target, actual, drawLine? }  // RDPA-3
  *   { type: "set-drag-mode", mode }          ("free" | "fixed-target")
  *
  * Message protocol (iframe → parent):
@@ -411,7 +412,13 @@
     // remove old, add fresh. Cheap (≤ few polygons).
     // -----------------------------------------------------------------
     var __skyFovLayer = null;
-    var __skyFovObjs = { mount: null, target: null, mosaic: null };
+    // RDPA-3: alignTarget / alignActual / alignLine slots are used by
+    // the rudimentary polar alignment workflow. Target = where the
+    // mount SHOULD be pointing (the catalog object the user picked),
+    // actual = where it actually ended up (from plate solve). The line
+    // between them visualises the pointing error as an angular vector.
+    var __skyFovObjs = { mount: null, target: null, mosaic: null,
+                          alignTarget: null, alignActual: null, alignLine: null };
 
     function skyEnsureFovLayer() {
         if (__skyFovLayer || !window.__stel) return __skyFovLayer;
@@ -773,6 +780,88 @@
     }
 
     // -----------------------------------------------------------------
+    // RDPA-3: alignment-marker overlay for the rudimentary polar
+    // alignment workflow.
+    //
+    // Renders two coloured points (target green, actual red) and an
+    // optional line between them. Same FOV layer as the FOV
+    // rectangles; each marker lives in its own slot so re-running the
+    // call just replaces the points without disturbing mount/target
+    // FOV rects already on screen.
+    //
+    // Each `marker` arg is { raDeg, decDeg } or null. Passing null
+    // clears that marker. The line is drawn iff both target AND
+    // actual are non-null AND drawLine !== false.
+    // -----------------------------------------------------------------
+    function skySetAlignmentMarkers(target, actual, drawLine) {
+        var stel = window.__stel;
+        if (!stel) return;
+        skyEnsureFovLayer();
+        if (!__skyFovLayer) return;
+
+        skyRemoveObj('alignTarget');
+        skyRemoveObj('alignActual');
+        skyRemoveObj('alignLine');
+
+        try {
+            if (target && typeof target.raDeg === 'number'
+                       && typeof target.decDeg === 'number') {
+                __skyFovObjs.alignTarget = stel.createObj('geojson', {
+                    data: {
+                        type: 'Feature',
+                        properties: {
+                            'marker-color': '#22c55e',  // bright green
+                            'marker-size': 'medium',
+                            stroke: '#22c55e', 'stroke-width': 2,
+                            fill: '#22c55e', 'fill-opacity': 0.4
+                        },
+                        geometry: { type: 'Point', coordinates: [target.raDeg, target.decDeg] }
+                    }
+                });
+                __skyFovLayer.add(__skyFovObjs.alignTarget);
+            }
+            if (actual && typeof actual.raDeg === 'number'
+                       && typeof actual.decDeg === 'number') {
+                __skyFovObjs.alignActual = stel.createObj('geojson', {
+                    data: {
+                        type: 'Feature',
+                        properties: {
+                            'marker-color': '#ef4444',  // bright red
+                            'marker-size': 'medium',
+                            stroke: '#ef4444', 'stroke-width': 2,
+                            fill: '#ef4444', 'fill-opacity': 0.4
+                        },
+                        geometry: { type: 'Point', coordinates: [actual.raDeg, actual.decDeg] }
+                    }
+                });
+                __skyFovLayer.add(__skyFovObjs.alignActual);
+            }
+            if (drawLine !== false && target && actual) {
+                __skyFovObjs.alignLine = stel.createObj('geojson', {
+                    data: {
+                        type: 'Feature',
+                        properties: {
+                            stroke: '#f59e0b',  // amber for the error vector
+                            'stroke-width': 2,
+                            'stroke-opacity': 0.85
+                        },
+                        geometry: {
+                            type: 'LineString',
+                            coordinates: [
+                                [target.raDeg, target.decDeg],
+                                [actual.raDeg, actual.decDeg]
+                            ]
+                        }
+                    }
+                });
+                __skyFovLayer.add(__skyFovObjs.alignLine);
+            }
+        } catch (e) {
+            console.warn('[Sky] set-alignment-markers failed:', e);
+        }
+    }
+
+    // -----------------------------------------------------------------
     // SWE-5: emit 'center' to the parent whenever the user drags the
     // sky (changes observer.yaw/pitch). The engine fires stel.change()
     // for any property update; we filter to observer pose changes and
@@ -938,6 +1027,15 @@
                 // optional mosaic grid (yellow). Each side is null to
                 // clear that overlay.
                 skySetFovOverlays(msg.mount || null, msg.target || null, msg.mosaic || null);
+                break;
+            case 'set-alignment-markers':
+                // RDPA-3: target (green) + actual (red) point markers
+                // + amber line for the rudimentary polar alignment
+                // workflow. Each side null to clear that marker.
+                // drawLine defaults to true; set false to only show
+                // the two dots without the connecting segment.
+                skySetAlignmentMarkers(msg.target || null, msg.actual || null,
+                    msg.drawLine !== false);
                 break;
             case 'set-dss-visible':
                 // Parent toggle for the DSS Color HiPS streamed from

@@ -1684,8 +1684,50 @@
                         </div>
                     </div>
 
-                    <!-- Aim mode + action buttons -->
+                    <!-- Capture settings + aim mode + action buttons.
+                         Exposure / gain / settle bind to the SAME per-rig
+                         polar.* fields the TPPA pane uses, so tuning one
+                         updates the other and both persist via
+                         savePolarRigSettings(). Operator usually wants
+                         a brighter / longer exposure than TPPA for the
+                         single-target solve to land on faint stars
+                         (TPPA averages over 3 frames; rudimentary
+                         relies on each frame solving on its own). -->
                     <div class="quick-controls" style="margin-bottom: 12px">
+                        <div class="control-row">
+                            <label>Exposure (s)
+                                <input type="number" class="input-sm" min="0" step="any"
+                                       list="exposure-presets"
+                                       x-model.number="polar.exposureSec"
+                                       @change="savePolarRigSettings()"
+                                       :disabled="rudimentary.busy">
+                            </label>
+                            <label>Gain
+                                <input type="number" class="input-sm" min="0" max="600" step="10"
+                                       x-model.number="polar.gain"
+                                       @change="savePolarRigSettings()"
+                                       :disabled="rudimentary.busy">
+                            </label>
+                            <span class="zwo-gain-presets"
+                                  x-show="zwoPresetsForActiveCamera() && !rudimentary.busy"
+                                  :title="'ZWO preset gains'">
+                                <button type="button" class="zwo-gain-preset"
+                                        :data-active="polar.gain === zwoPresetsForActiveCamera()?.L"
+                                        @click="applyGainPreset('polar.gain', zwoPresetsForActiveCamera().L); savePolarRigSettings()">L</button>
+                                <button type="button" class="zwo-gain-preset"
+                                        :data-active="polar.gain === zwoPresetsForActiveCamera()?.M"
+                                        @click="applyGainPreset('polar.gain', zwoPresetsForActiveCamera().M); savePolarRigSettings()">M</button>
+                                <button type="button" class="zwo-gain-preset"
+                                        :data-active="polar.gain === zwoPresetsForActiveCamera()?.H"
+                                        @click="applyGainPreset('polar.gain', zwoPresetsForActiveCamera().H); savePolarRigSettings()">H</button>
+                            </span>
+                            <label>Settle (s)
+                                <input type="number" class="input-sm" min="0" max="30" step="1"
+                                       x-model.number="polar.settleSec"
+                                       @change="savePolarRigSettings()"
+                                       :disabled="rudimentary.busy">
+                            </label>
+                        </div>
                         <div class="control-row">
                             <label>
                                 <input type="radio" name="rudimentary-aim"

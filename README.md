@@ -1117,19 +1117,30 @@ screen.
 
 See [docs/user-guide/remote-terminal.md](docs/user-guide/remote-terminal.md).
 
-### Polar Alignment (TPPA)
+### Polar Alignment (TPPA + Rudimentary)
 
-Three-point polar alignment built into the **POLAR** sidebar tab. Slews the
-mount to three configurable RA positions, plate-solves at each, computes
-the mount axis vs the true celestial pole, and reports azimuth + altitude
-errors in arcminutes. Hemisphere-aware (works in both N + S latitudes).
+The **POLAR** sidebar tab hosts two complementary alignment workflows:
 
-- **Refine** mode loops capture + solve in real time so you watch the
-  error vector shrink as you adjust the tripod knobs (SharpCap-style UX,
-  red → amber → green overlay on the live frame)
-- Per-rig parameters (slew step, exposure, settle, gain) saved in the
-  active equipment profile
-- Cancel mid-flight via the standard panic-stop control
+**TPPA (Three-Point Polar Alignment)** — the default. Slews the
+mount to three configurable RA positions, plate-solves at each,
+computes the mount axis vs the true celestial pole, and reports
+azimuth + altitude errors in arcminutes. Hemisphere-aware (works in
+both N + S latitudes).
+
+- **Refine** mode loops capture + solve in real time so you watch
+  the error vector shrink as you adjust the tripod knobs
+  (SharpCap-style UX, red → amber → green overlay on the live frame)
+- Per-rig parameters (slew step, exposure, settle, gain) saved in
+  the active equipment profile
+
+**Rudimentary (single-target iterative)** — alternative for setups
+where TPPA isn't viable: balconies / blocked polar regions / manual
+mounts / quick first-night sanity check. Pick a bright visible
+target, optionally slew, capture + solve once, see the pointing
+error, nudge the mount, click **Re-capture + solve**, repeat until
+satisfied. Inline sparkline tracks convergence; embedded sky map
+shows target (green) vs solved (red) markers with the error vector
+between them. See [docs/user-guide/polar-alignment-rudimentary.md](docs/user-guide/polar-alignment-rudimentary.md).
 
 ## Architecture
 

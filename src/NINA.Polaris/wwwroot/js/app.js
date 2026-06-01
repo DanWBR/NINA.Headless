@@ -4246,7 +4246,11 @@ function ninaApp() {
         // Render a received binary image frame to the live canvas.
         // In JPEG mode, the frame is a raw JPEG blob, draw via Image element.
         // In raw mode, the frame is: [4B headerLen][header][LZ4 compressed uint16 pixels].
-        handleImageFrame(arrayBuffer) {
+        // LSPP-5: now async because the WASM stack path awaits BGE
+        // pre-processing (ORT inference). The WS handler that calls
+        // this (`evt.data`) doesn't await -- that's fine, the message
+        // event loop just sees a Promise it ignores.
+        async handleImageFrame(arrayBuffer) {
             this.liveActive = true;
 
             // Three on-wire formats now possible:
@@ -5162,8 +5166,45 @@ function ninaApp() {
         // server so the LSTR trigger orchestrator gets HFR + star
         // count even though the server itself isn't accumulating
         // anymore (MetricsOnly mode).
-        _stackViaWasm(pixels, width, height) {
+        //
+        // LSPP-5: async because BGE pre-processing (when enabled)
+        // runs ORT inference which is fundamentally async. handleImageFrame
+        // awaits this -- no caller relies on a sync return.
+        async _stackViaWasm(pixels, width, height) {
             const interop = globalThis.NINA.Polaris.Wasm.Interop;
+
+            // LSPP-5: BGE per-frame before stacking. Lazy-load the
+            // pipeline first time it's enabled in the session so the
+            // 208MB model isn't fetched until the operator actually
+            // turns BGE on. Graceful fallback on error -- the frame
+            // still gets stacked, just without gradient removal.
+            const bgeOn = this.liveStackStatus?.preProc?.bge?.enabled === true;
+            if (bgeOn && globalThis.OnnxRegistry?.BgePipeline) {
+                try {
+                    if (!this._lsppBgePipeline) {
+                        this._lsppBgePipeline = new OnnxRegistry.BgePipeline();
+                        this._lsppBgeProcessed = 0;
+                        this._lsppBgeFallback = 0;
+                        console.log('[Polaris] live-stack BGE pipeline initialised');
+                    }
+                    const correction = this.liveStackStatus?.preProc?.bge?.correction || 'Subtraction';
+                    const smoothing  = this.liveStackStatus?.preProc?.bge?.smoothing ?? 1.0;
+                    const bgeOut = await this._lsppBgePipeline.run(pixels, width, height,
+                        { channels: 1, correction, smoothing });
+                    if (bgeOut?.pixels?.length === pixels.length) {
+                        pixels = bgeOut.pixels;
+                        this._lsppBgeProcessed = (this._lsppBgeProcessed || 0) + 1;
+                    } else {
+                        this._lsppBgeFallback = (this._lsppBgeFallback || 0) + 1;
+                        console.warn('[Polaris] live-stack BGE returned mismatched buffer, using raw');
+                    }
+                } catch (e) {
+                    this._lsppBgeFallback = (this._lsppBgeFallback || 0) + 1;
+                    this._lsppBgeLastError = e?.message || String(e);
+                    console.warn('[Polaris] live-stack BGE failed, using raw frame:', e);
+                }
+            }
+
             // JSExport marshaller doesn't grok Uint16Array directly;
             // pass through Int32Array (free aliasing, no per-element
             // copy, JS just reinterprets the buffer view).
@@ -5206,6 +5247,11 @@ function ninaApp() {
             // SNR fields feed the LIVE overlay + ETA widget without
             // the server having to re-process the accumulator itself.
             if (this.imageWs && this.imageWs.readyState === WebSocket.OPEN) {
+                // LSPP-5: include BGE counters when BGE is on so the
+                // server mirrors them to every connected browser via
+                // the WS preProc.bge sub-object. Older clients (pre-
+                // LSPP) omit these; ImageStreamHandler treats them as
+                // optional and falls back to the 3-arg overload.
                 this._wsSendTracked(this.imageWs, JSON.stringify({
                     type: 'client-stack-progress',
                     frameCount,
@@ -5213,7 +5259,10 @@ function ninaApp() {
                     starCount,
                     alignmentOk: !!alignmentOk,
                     frameSnr: frameSnrX100 / 100,
-                    cumulativeSnr: cumSnrX100 / 100
+                    cumulativeSnr: cumSnrX100 / 100,
+                    bgeProcessed: this._lsppBgeProcessed || 0,
+                    bgeFallback: this._lsppBgeFallback || 0,
+                    bgeError: this._lsppBgeLastError || null
                 }));
             }
 
@@ -5250,7 +5299,12 @@ function ninaApp() {
             return out;
         },
 
-        _renderRawFrame(arrayBuffer) {
+        // LSPP-5: async because the WASM stack path awaits BGE
+        // pre-processing. handleImageFrame chains this call without
+        // awaiting -- safe because there's no synchronous downstream
+        // code that needs the result; rendering happens via the
+        // _lastRawFrame cache + manual stretch path.
+        async _renderRawFrame(arrayBuffer) {
             const dv = new DataView(arrayBuffer);
             if (arrayBuffer.byteLength < 24) return; // too small
 
@@ -5386,7 +5440,13 @@ function ninaApp() {
                 && frameKind === 0
                 && globalThis.NINA?.Polaris?.Wasm?.Interop) {
                 try {
-                    pixels = this._stackViaWasm(pixels, width, height);
+                    // LSPP-5: now async because BGE pre-processing
+                    // (when enabled) does ORT inference inside the
+                    // WASM path. handleImageFrame isn't awaited by
+                    // the WS handler, so returning a Promise from
+                    // here is harmless on its own; we await to keep
+                    // the downstream `pixels` cache consistent.
+                    pixels = await this._stackViaWasm(pixels, width, height);
                 } catch (e) {
                     console.warn('[Polaris] WASM stack failed, rendering raw frame as-is:', e);
                 }

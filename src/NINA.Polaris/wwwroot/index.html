@@ -10123,6 +10123,60 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                                     </div>
                                 </div>
                             </details>
+
+                            <!-- INDIROB-3: per-device pre-connect delay
+                                 table. Same shape as Filter offsets above
+                                 because both are string-keyed per-rig
+                                 maps. Operator types the INDI device
+                                 name (the string the driver advertises
+                                 in defXxxVector, visible in the device
+                                 dropdowns on the RIGS tab) + a sleep
+                                 duration in ms; the IndiClient awaits
+                                 Task.Delay(ms,ct) before sending the
+                                 CONNECTION switch. Useful for slow USB-
+                                 serial bridges, ESP32-based mounts
+                                 (Onstep, AM3 WiFi), and focusers whose
+                                 firmware needs ~1-2s after USB power
+                                 stabilises. -->
+                            <details class="rig-filter-offsets" style="margin-top:8px">
+                                <summary style="font-size:11px;color:var(--text-muted);text-transform:uppercase;cursor:pointer">
+                                    Pre-connect delays
+                                    <span x-show="Object.keys(r.preConnectDelayMsByDevice || {}).length"
+                                          x-text="'(' + Object.keys(r.preConnectDelayMsByDevice || {}).length + ')'"></span>
+                                </summary>
+                                <div style="margin-top:6px">
+                                    <p class="text-muted" style="font-size:11px;margin:0 0 4px 0">
+                                        Sleep N ms before sending CONNECTION to the named INDI device.
+                                        Use when the driver loses CONNECT writes during USB enumeration
+                                        (ESP32 mounts, slow serial bridges). Leave empty for instant connect.
+                                    </p>
+                                    <table style="width:100%;font-size:12px;border-collapse:collapse">
+                                        <template x-for="(delayMs, deviceName) in (r.preConnectDelayMsByDevice || {})" :key="deviceName">
+                                            <tr>
+                                                <td style="padding:2px 4px"><code x-text="deviceName"></code></td>
+                                                <td style="padding:2px 4px">
+                                                    <input type="number" step="100" min="0" :value="delayMs"
+                                                           @input="setPreConnectDelay(r, deviceName, $event.target.value)"
+                                                           class="input-sm" style="width:90px"> ms
+                                                </td>
+                                                <td style="padding:2px 4px">
+                                                    <button class="btn btn-sm btn-danger"
+                                                            @click="removePreConnectDelay(r, deviceName)" title="Remove">✕</button>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </table>
+                                    <div style="display:flex;gap:4px;margin-top:4px">
+                                        <input type="text" :id="'newPreDelayDev-' + r.id"
+                                               placeholder="INDI device name (e.g. EQMod Mount)"
+                                               class="input-sm" style="flex:1">
+                                        <input type="number" :id="'newPreDelayMs-' + r.id"
+                                               step="100" min="100" placeholder="ms"
+                                               class="input-sm" style="width:90px">
+                                        <button class="btn btn-sm" @click="addPreConnectDelay(r)">+ Add</button>
+                                    </div>
+                                </div>
+                            </details>
                         </div>
                         <div class="rig-row-actions">
                             <button class="btn btn-sm btn-primary"

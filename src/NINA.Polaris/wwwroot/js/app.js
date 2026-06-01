@@ -10842,6 +10842,48 @@ function ninaApp() {
             this.saveRig(rig);
         },
 
+        // ---- INDIROB-3: per-device pre-connect delay ----
+        // Backend (IndiClient.ConnectDeviceAsync) honours
+        // rig.preConnectDelayMsByDevice[deviceName] = ms before
+        // sending CONNECTION. Useful for ESP32-based mounts (Onstep,
+        // ZWO AM3 WiFi bridge), USB-serial focusers with slow firmware
+        // init. Mirror of the Filter offsets helpers above — both edit
+        // a string-keyed map on the rig and ride saveRig's debounce.
+        setPreConnectDelay(rig, deviceName, valueStr) {
+            const v = parseInt(valueStr, 10);
+            if (isNaN(v) || v < 0) return;
+            rig.preConnectDelayMsByDevice = rig.preConnectDelayMsByDevice || {};
+            if (v === 0) {
+                // 0 = no delay = drop the entry so the dict only
+                // carries actual configured delays.
+                delete rig.preConnectDelayMsByDevice[deviceName];
+            } else {
+                rig.preConnectDelayMsByDevice[deviceName] = v;
+            }
+            this.saveRig(rig);
+        },
+        addPreConnectDelay(rig) {
+            const nameInput  = document.getElementById('newPreDelayDev-' + rig.id);
+            const delayInput = document.getElementById('newPreDelayMs-' + rig.id);
+            const name  = nameInput?.value?.trim();
+            const delay = parseInt(delayInput?.value, 10);
+            if (!name) { this.toast('Device name required', 'warn'); return; }
+            if (isNaN(delay) || delay <= 0) {
+                this.toast('Delay must be a positive integer (ms)', 'warn');
+                return;
+            }
+            rig.preConnectDelayMsByDevice = rig.preConnectDelayMsByDevice || {};
+            rig.preConnectDelayMsByDevice[name] = delay;
+            this.saveRig(rig);
+            nameInput.value = '';
+            delayInput.value = '';
+        },
+        removePreConnectDelay(rig, deviceName) {
+            if (!rig.preConnectDelayMsByDevice) return;
+            delete rig.preConnectDelayMsByDevice[deviceName];
+            this.saveRig(rig);
+        },
+
         async deleteRig(id) {
             if (this.rigs.length <= 1) {
                 this.toast('Cannot delete the last rig', 'warn');

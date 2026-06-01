@@ -8167,11 +8167,15 @@
                      upgrade banner only shows when the user somehow
                      landed on plain HTTP (legacy bookmark, Server:Http:
                      Bind=any, etc.), where it's still actionable. -->
-                <template x-if="httpsInfo && httpsInfo.httpsEnabled">
+                <!-- Whole card collapses out of the layout when the user
+                     IS already on a secure context (the common case after
+                     TLS-A2 wizard) — otherwise the parent <div> renders
+                     an empty settings-section card with nothing inside.
+                     The HTTPS-cert install panel above already covers
+                     fingerprint + alternate URLs + download. -->
+                <template x-if="httpsInfo && httpsInfo.httpsEnabled && !window.isSecureContext">
                     <div class="settings-section settings-section--wide">
-                        <!-- Full upgrade banner: only when NOT on a secure
-                             context. Drives the user to switch origins. -->
-                        <div x-show="!window.isSecureContext">
+                        <div>
                             <h3><span class="settings-card-icon">🔒</span>HTTPS endpoints (for WebGPU + multi-thread WASM)</h3>
                             <p class="hint" style="margin-top:0">
                                 Plain HTTP is what you're on right now, Chrome blocks

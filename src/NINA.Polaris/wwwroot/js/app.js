@@ -14077,10 +14077,17 @@ function ninaApp() {
         // home moves are typically large + irreversible until the
         // user takes another action.
         async telescopeFindHome() {
-            if (!confirm('Send the mount to its home position?\n\n' +
-                         'The mount will slew at full speed to its mechanical ' +
-                         'home (CW down, RA/Dec hard stops). Use this only when ' +
-                         'you have clearance for the move.')) return;
+            const ok = await this._confirmAsync(
+                'The mount will slew at full speed to its mechanical home ' +
+                '(CW down, RA/Dec hard stops). Use this only when you ' +
+                'have clearance for the move.',
+                {
+                    title: 'Send the mount to its home position?',
+                    okLabel: 'Send to home',
+                    cancelLabel: 'Cancel',
+                    danger: true   // red OK button -- this is a full-speed slew
+                });
+            if (!ok) return;
             try {
                 await this.apiPost('/api/telescope/find-home');
                 this.toast('Mount moving to home', 'info');
@@ -14101,13 +14108,19 @@ function ninaApp() {
         // settle before chaining the next step, so this call can
         // take up to 60s end-to-end.
         async telescopeFindHomeReset() {
-            if (!confirm('Run Park -> Unpark -> Home?\n\n' +
-                         'This is the workaround for strain-wave mounts (ZWO AM3 ' +
-                         'and similar) where plain Home does nothing after the ' +
-                         'mount has been power-cycled.\n\n' +
-                         'The mount will park first (slewing to its park position) ' +
-                         'then unpark and slew to home. Make sure the full slew ' +
-                         'path is clear of obstructions.')) return;
+            const ok = await this._confirmAsync(
+                'Workaround for strain-wave mounts (ZWO AM3 and similar) where ' +
+                'plain Home does nothing after the mount has been power-cycled.\n\n' +
+                'The mount will park first (slewing to its park position) then ' +
+                'unpark and slew to home. Make sure the full slew path is clear ' +
+                'of obstructions.',
+                {
+                    title: 'Run Park → Unpark → Home?',
+                    okLabel: 'Run reset sequence',
+                    cancelLabel: 'Cancel',
+                    danger: true
+                });
+            if (!ok) return;
             this.toast('Reset & Home: park -> unpark -> home (up to 90s)...', 'info');
             try {
                 // 90s client-side timeout: backend allows 30s for park

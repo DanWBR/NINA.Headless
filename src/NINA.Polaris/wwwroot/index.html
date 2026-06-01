@@ -2745,10 +2745,22 @@
                              sensor grey out. Hidden when the camera
                              reports SupportsRoi=false (DSLRs, most
                              Alpaca remotes). -->
-                        <div class="control-row"
+                        <!-- Single FOV block that flows left-right with
+                             wrap. Earlier layout split the presets into
+                             two stacked rows that both used `flex: 1`
+                             button growth, which clipped the longer
+                             rectangular labels (1024×768, 1920×1080)
+                             once 5+ pills competed for the row width.
+                             A single flex-wrap container with intrinsic-
+                             width buttons lets the operator scan FULL +
+                             squares + rectangles in one pass, and pills
+                             that don't fit drop to the next line cleanly
+                             without overlapping each other. -->
+                        <div class="fov-preset-block"
                              x-show="cameraCaps.roi !== false">
-                            <span style="font-size:11px; color:var(--text-muted); min-width:34px">FOV</span>
-                            <span class="bin-presets" role="group" aria-label="Field of view / ROI">
+                            <span class="fov-preset-label">FOV</span>
+                            <div class="fov-preset-flow"
+                                 role="group" aria-label="Field of view / ROI">
                                 <button type="button" class="bin-preset"
                                         :data-active="video.roiSize === 0"
                                         :disabled="cameraStream.running || videoRecording.recording"
@@ -2762,12 +2774,6 @@
                                             @click="videoSetRoiRect(sz, sz, 'square', sz)"
                                             x-text="sz"></button>
                                 </template>
-                            </span>
-                        </div>
-                        <div class="control-row"
-                             x-show="cameraCaps.roi !== false">
-                            <span style="font-size:11px; color:var(--text-muted); min-width:34px"></span>
-                            <span class="bin-presets" role="group" aria-label="Rectangular ROI presets">
                                 <template x-for="r in [
                                     { w: 640,  h: 480,  label: '640×480',   aspect: '4:3'  },
                                     { w: 1024, h: 768,  label: '1024×768',  aspect: '4:3'  },
@@ -2783,14 +2789,14 @@
                                             @click="videoSetRoiRect(r.w, r.h, r.aspect, 0)"
                                             x-text="r.label"></button>
                                 </template>
-                            </span>
-                            <span class="text-muted" style="font-size:11px"
-                                  x-show="cameraCaps.maxX > 0 && cameraCaps.maxY > 0"
-                                  x-text="video.roiSize === 0 && video.roiW === 0
-                                      ? ('full sensor · ' + cameraCaps.maxX + ' × ' + cameraCaps.maxY)
-                                      : (video.roiW + ' × ' + video.roiH
-                                         + ' @ (' + video.roiX + ', ' + video.roiY + ')'
-                                         + ' on ' + cameraCaps.maxX + ' × ' + cameraCaps.maxY)"></span>
+                            </div>
+                            <div class="fov-preset-readout"
+                                 x-show="cameraCaps.maxX > 0 && cameraCaps.maxY > 0"
+                                 x-text="video.roiSize === 0 && video.roiW === 0
+                                     ? ('full sensor · ' + cameraCaps.maxX + ' × ' + cameraCaps.maxY)
+                                     : (video.roiW + ' × ' + video.roiH
+                                        + ' @ (' + video.roiX + ', ' + video.roiY + ')'
+                                        + ' on ' + cameraCaps.maxX + ' × ' + cameraCaps.maxY)"></div>
                         </div>
 
                         <!-- White-balance row, only visible for OSC color

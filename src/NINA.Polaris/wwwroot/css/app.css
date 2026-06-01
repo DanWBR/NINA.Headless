@@ -8769,6 +8769,44 @@ label select.input-sm {
     gap: 6px;
     width: 100%;
 }
+
+/* FOV preset block in the VIDEO sidebar. Replaces the older
+   two-row layout that used `flex: 1` button growth and clipped
+   the longer rectangular labels (640×480 → 1920×1080) into each
+   other once 5+ pills competed for the row width. The flow
+   container uses flex-wrap with intrinsic-width buttons so pills
+   that don't fit drop to the next line cleanly. */
+.video-pane .quick-controls .fov-preset-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 4px 0;
+}
+.video-pane .quick-controls .fov-preset-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.video-pane .quick-controls .fov-preset-flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.video-pane .quick-controls .fov-preset-flow > .bin-preset {
+    /* Intrinsic width, not flex:1 -- keeps the longest label
+       (1920×1080) from forcing the rest of the row to crush.
+       Padding bumped up vs the inline 3/8 default for touch. */
+    flex: 0 0 auto;
+    padding: 6px 10px;
+    font-size: 11px;
+    min-width: 0;
+}
+.video-pane .quick-controls .fov-preset-readout {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: normal;
+}
 .video-pane .quick-controls .control-row > .zwo-gain-presets > button,
 .video-pane .quick-controls .control-row > .bin-presets > button {
     flex: 1;

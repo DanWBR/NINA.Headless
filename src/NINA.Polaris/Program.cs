@@ -376,6 +376,35 @@ app.Services.GetRequiredService<RefocusSuggestionService>();
     profiles.EquipmentProfileActivated += _ => ApplyDurationCap("rig-switch");
 }
 
+// INDIROB-3: sync the active rig's PreConnectDelayMsByDevice dict
+// into IndiClient.PreConnectDelaysMs so ConnectDeviceAsync honours
+// per-device sleep windows before sending CONNECTION. Runs on
+// startup and on every rig switch — operators with multiple
+// rigs (mini-PC + Pi, different mounts) can have different
+// settling needs per setup.
+{
+    var indi = app.Services.GetRequiredService<IndiClient>();
+    var profiles = app.Services.GetRequiredService<ProfileService>();
+    var indiLogger = app.Services.GetRequiredService<ILogger<IndiClient>>();
+
+    void ApplyPreConnectDelays(string trigger) {
+        var src = profiles.ActiveEquipmentProfile?.PreConnectDelayMsByDevice
+                  ?? new Dictionary<string, int>();
+        indi.PreConnectDelaysMs.Clear();
+        foreach (var (k, v) in src) {
+            if (v > 0) indi.PreConnectDelaysMs[k] = v;
+        }
+        if (indi.PreConnectDelaysMs.Count > 0) {
+            indiLogger.LogInformation(
+                "INDI per-device pre-connect delays applied ({Trigger}): {Pairs}",
+                trigger,
+                string.Join(", ", indi.PreConnectDelaysMs.Select(kv => $"{kv.Key}={kv.Value}ms")));
+        }
+    }
+    ApplyPreConnectDelays("startup");
+    profiles.EquipmentProfileActivated += _ => ApplyPreConnectDelays("rig-switch");
+}
+
 // SWE-3-bugfix: strip CSP for /sky/* responses. The ASP.NET dev-time
 // browser refresh middleware injects a strict Content-Security-Policy
 // header (no 'unsafe-eval', no 'wasm-unsafe-eval') into HTML responses.

@@ -150,6 +150,18 @@ public static class EquipmentEndpoints {
                 // the existing FlatWizard block untouched.
                 if (update.FlatWizard != null)
                     r.FlatWizard = update.FlatWizard;
+                // INDIROB-3: per-device pre-connect delays. Replace
+                // wholesale when supplied (operator-driven full edit
+                // of the table), preserve when null/missing so a
+                // partial PUT from an older client doesn't wipe out
+                // delays the user set. Strip zero-value entries server-
+                // side so the stored dict only carries actual
+                // configured delays.
+                if (update.PreConnectDelayMsByDevice != null) {
+                    r.PreConnectDelayMsByDevice = update.PreConnectDelayMsByDevice
+                        .Where(kv => kv.Value > 0)
+                        .ToDictionary(kv => kv.Key, kv => kv.Value);
+                }
                 // CLST-7: live-stack compute target override. "auto"
                 // (default), "server", or "client". Empty/null from
                 // old clients leaves the existing setting alone.

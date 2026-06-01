@@ -273,7 +273,11 @@ public class ProfileService {
                 BgeEnabled            = src.LiveStackPreProcessing.BgeEnabled,
                 BgeSmoothing          = src.LiveStackPreProcessing.BgeSmoothing,
                 BgeCorrection         = src.LiveStackPreProcessing.BgeCorrection
-            }
+            },
+            // INDIROB-3: pre-connect delays follow the rig — different
+            // setups (mini-PC vs Pi, USB hub topology, ESP32 vs FTDI
+            // bridges) have different settling needs.
+            PreConnectDelayMsByDevice = new Dictionary<string, int>(src.PreConnectDelayMsByDevice)
         };
         _activeProfile.EquipmentProfiles.Add(copy);
         Save();
@@ -711,6 +715,17 @@ public class EquipmentProfile {
     /// the binary search doesn't waste iterations).
     /// </summary>
     public FlatWizardSettings FlatWizard { get; set; } = new();
+
+    /// <summary>INDIROB-3: per-device pre-connect delay (ms). Some INDI
+    /// drivers need extra time after USB enumeration before the
+    /// CONNECTION switch is accepted -- ESP32-based mounts (Onstep,
+    /// ZWO AM3 WiFi bridge), USB-serial focusers with slow firmware
+    /// init, etc. Keyed by INDI device name (the same string the
+    /// driver advertises in defXxxVector). Missing key or value 0 =
+    /// no delay (default). Operator sets these from the RIGS card
+    /// per device when a particular piece of hardware misbehaves on
+    /// connect; survives restarts because it lives on the profile.</summary>
+    public Dictionary<string, int> PreConnectDelayMsByDevice { get; set; } = new();
 
     /// <summary>CLST-7: where live-stacking math runs.
     /// <list type="bullet">

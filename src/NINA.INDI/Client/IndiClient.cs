@@ -302,6 +302,18 @@ public class IndiClient : IDisposable {
 
     public TimeSpan DefaultAckTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>Per-device pre-connect delay table (INDIROB-3). Keyed
+    /// by INDI device name; value is the number of milliseconds to
+    /// sleep BEFORE the CONNECTION switch goes out. Useful for slow
+    /// hardware that needs time to boot after a USB enumeration:
+    /// ESP32-based mounts (Onstep, AM3 WiFi bridge), USB-serial
+    /// adapters with chip-side init, focusers that wake the firmware
+    /// only after USB power stabilises (~1-2s). Missing key or value 0
+    /// = no delay. NINA.Polaris populates this from
+    /// <c>EquipmentProfile.PreConnectDelayMsByDevice</c> on startup
+    /// and whenever the active rig changes.</summary>
+    public Dictionary<string, int> PreConnectDelaysMs { get; } = new();
+
     /// <summary>Connect a specific INDI device by sending the
     /// standard <c>CONNECTION</c> switch with CONNECT=true. INDIROB-2
     /// (from NINA PINS): before sending, check whether the driver is
@@ -310,13 +322,22 @@ public class IndiClient : IDisposable {
     /// focuser interface from a single driver) won't reply to a
     /// redundant CONNECT, leaving us to wait 30s for an ack that
     /// never comes. Skipping the write when the switch is already
-    /// true avoids that hang and is well-defined per the INDI spec.</summary>
+    /// true avoids that hang and is well-defined per the INDI spec.
+    /// INDIROB-3: also honours <see cref="PreConnectDelaysMs"/> by
+    /// sleeping briefly before the write when the device has a
+    /// per-device delay configured.</summary>
     public async Task ConnectDeviceAsync(string device, CancellationToken ct = default) {
         if (GetSwitch(device, "CONNECTION", "CONNECT")) {
             DiagLogger.LogInformation(
                 "INDI device '{Device}' CONNECTION.CONNECT already true — skipping redundant CONNECT (avoids 30s no-reply hang on shared drivers)",
                 device);
             return;
+        }
+        if (PreConnectDelaysMs.TryGetValue(device, out var delayMs) && delayMs > 0) {
+            DiagLogger.LogInformation(
+                "INDI device '{Device}': waiting {DelayMs}ms before CONNECT (per-device pre-connect delay)",
+                device, delayMs);
+            await Task.Delay(delayMs, ct);
         }
         await SetSwitchAsync(device, "CONNECTION",
             new Dictionary<string, bool> { ["CONNECT"] = true, ["DISCONNECT"] = false }, ct);

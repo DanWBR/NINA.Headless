@@ -710,6 +710,11 @@ body {
     min-height: 0;
     overflow: hidden;
     padding: 8px 8px 0;
+    /* LIVE / PREVIEW (and indirectly VIDEO below) overlay their control
+       panels on top of the canvas so the bitmap always takes 100% of
+       the available pane width. position:relative anchors the
+       absolutely-positioned .quick-controls below. */
+    position: relative;
 }
 .live-pane > .preview-area,
 .preview-pane > .preview-area,
@@ -721,7 +726,41 @@ body {
     border-radius: var(--radius);
 }
 .live-pane > .quick-controls,
-.preview-pane > .quick-controls,
+.preview-pane > .quick-controls {
+    /* Floating translucent sidebar — overlays the canvas on the right
+       so the bitmap underneath spans the full pane width whether the
+       panel is open OR collapsed. Backdrop blur + 88% opacity keep the
+       text legible against bright nebulae / wide-field star fields
+       without fully hiding what's behind. */
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    bottom: 8px;
+    width: 320px;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    overflow-y: auto;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: transform 200ms ease;
+}
+/* When the operator clicks the toggle handle, the panel slides off
+   to the right leaving only a 32 px tab visible with the chevron so
+   they can pull it back. The frame underneath gains the full width. */
+.live-pane > .quick-controls.quick-controls--collapsed,
+.preview-pane > .quick-controls.quick-controls--collapsed,
+.video-pane .quick-controls.quick-controls--collapsed {
+    transform: translateX(calc(100% - 28px));
+}
+/* AUTORUN + Flat Wizard keep the old in-flow sidebar — they're
+   list-driven, not bitmap-driven, so a translucent overlay would
+   just hide content with no upside. */
 .autorun-pane > .quick-controls,
 .flatwiz-pane > .quick-controls {
     flex: 0 0 320px;
@@ -734,6 +773,42 @@ body {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     border-top: 1px solid var(--border);    /* override the default top-border-only style */
+}
+
+/* Toggle handle. Pinned to the left edge of the floating panel; the
+   chevron flips when collapsed so it always points the direction the
+   panel would slide if clicked. tap-friendly 32×40 px. */
+.quick-controls-toggle {
+    position: absolute;
+    left: -1px;
+    top: 12px;
+    transform: translateX(-100%);
+    width: 28px;
+    height: 44px;
+    padding: 0;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-right: none;
+    border-radius: var(--radius) 0 0 var(--radius);
+    color: var(--text-primary);
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+}
+.quick-controls-toggle:hover { background: rgba(30, 41, 59, 0.92); }
+/* When collapsed: the toggle sits on the visible tab so the operator
+   can grab it; chevron flips to point left (the direction the panel
+   will travel on click to come back). */
+.quick-controls--collapsed .quick-controls-toggle {
+    transform: none;
+    left: 0;
+    border-right: 1px solid var(--border);
+    border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 /* AUTORUN sidebar is shutter-only (no exposure / gain / filter
@@ -8344,42 +8419,44 @@ label select.input-sm {
 }
 .video-pane {
     display: flex;
-    /* Desktop: 2-column layout, preview canvas on the left, controls
-       in a 340 px vertical sidebar on the right. Sliders stack top
-       to bottom there (ASIAIR-style) so the user can drag a long
-       slider track without competing for horizontal real estate
-       with bin pills, FOV rows, and gain presets. Mobile falls
-       back to the legacy single-column stack (media query below). */
+    /* Desktop: floating translucent sidebar overlays the canvas (see
+       .video-pane .quick-controls below). Bitmap underneath always
+       gets 100% pane width; the operator can collapse the sidebar
+       to clear it off the bitmap entirely. */
     flex-direction: row;
     gap: 12px;
-    /* Claim all remaining space inside .video-tab-panel so the
-       preview-area's flex:1 actually has something to grow into.
-       overflow:hidden because the sidebar handles its own
-       overflow-y:auto, not the pane. */
     flex: 1;
     min-height: 0;
     overflow: hidden;
+    position: relative;
 }
-/* Preview area is the flex:1 left column; min-width:0 lets it shrink
-   under the 340 px sidebar without forcing horizontal scroll. */
 .video-pane .preview-area {
     flex: 1;
     min-width: 0;
     min-height: 200px;
 }
-/* Vertical control sidebar on the right. Fixed width so the canvas
-   gets a predictable amount of remaining width. Internal scroll
-   handles tall content (FOV rows + WB sliders + bin row + ...). */
+/* Floating control sidebar — same treatment as LIVE / PREVIEW
+   (translucent, backdrop blur, collapsible via the toggle handle).
+   340 px wide (10 px wider than LIVE/PREVIEW because VIDEO has the
+   wheel-picker drums that need a bit more breathing room). */
 .video-pane .quick-controls {
-    flex: 0 0 340px;
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    bottom: 8px;
+    width: 340px;
+    z-index: 4;
     display: flex;
     flex-direction: column;
     gap: 10px;
     padding: 12px;
     overflow-y: auto;
-    background: var(--bg-secondary);
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     border: 1px solid var(--border);
     border-radius: var(--radius);
+    transition: transform 200ms ease;
 }
 /* Inside the sidebar each .control-row becomes its own vertical
    block: the label / slider / readout still flow horizontally

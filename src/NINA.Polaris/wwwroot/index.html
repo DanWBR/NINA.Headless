@@ -805,7 +805,12 @@
                         </div>
                     </div>
                 </div>
-                <div class="quick-controls">
+                <div class="quick-controls"
+                     :class="{ 'quick-controls--collapsed': quickControlsCollapsed }">
+                    <button class="quick-controls-toggle"
+                            @click="toggleQuickControls()"
+                            :title="quickControlsCollapsed ? 'Show controls' : 'Hide controls'"
+                            x-text="quickControlsCollapsed ? '◀' : '▶'"></button>
                     <!-- SHUT-1: sidebar reorganised into three vertical
                          blocks. .shutter-inputs (Exp/Gain/Bin/Filter)
                          at the top, .shutter-wrap (the round shutter
@@ -2289,7 +2294,12 @@
                     </div>
                 </div>
 
-                <div class="quick-controls">
+                <div class="quick-controls"
+                     :class="{ 'quick-controls--collapsed': quickControlsCollapsed }">
+                    <button class="quick-controls-toggle"
+                            @click="toggleQuickControls()"
+                            :title="quickControlsCollapsed ? 'Show controls' : 'Hide controls'"
+                            x-text="quickControlsCollapsed ? '◀' : '▶'"></button>
                     <!-- SHUT-2: same three-block layout LIVE uses
                          (.shutter-inputs / .shutter-wrap / .shutter-secondary). -->
                     <div class="shutter-inputs">
@@ -2521,7 +2531,12 @@
                         </div>
                     </div>
 
-                    <div class="quick-controls">
+                    <div class="quick-controls"
+                         :class="{ 'quick-controls--collapsed': quickControlsCollapsed }">
+                        <button class="quick-controls-toggle"
+                                @click="toggleQuickControls()"
+                                :title="quickControlsCollapsed ? 'Show controls' : 'Hide controls'"
+                                x-text="quickControlsCollapsed ? '◀' : '▶'"></button>
                         <!-- ASIAIR / iOS-date-picker-style vertical drum
                              wheels for Exposure / Gain / Focus. Each
                              [data-wheel-picker] is mounted by

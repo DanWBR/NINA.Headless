@@ -66,6 +66,16 @@ function ninaApp() {
         // on first connect so what the browser shows matches the
         // server's actual state.
         liveStackEnabled: true,
+
+        // Collapse state for the LIVE / PREVIEW / VIDEO right-side
+        // floating control panels. true = panel slid out to the right,
+        // canvas underneath gets the full pane width. Persisted in
+        // localStorage so the operator's preference (drum-only fullscreen
+        // for an observing session) survives page reloads.
+        quickControlsCollapsed: (function() {
+            try { return localStorage.getItem('polaris.quickControlsCollapsed') === '1'; }
+            catch { return false; }
+        })(),
         liveStackFrames: 0,
         // SNR-7: session-level target SNR override + ETA debounce
         // timer (PUT is fired ~400 ms after the user stops typing).
@@ -12232,6 +12242,18 @@ function ninaApp() {
         },
 
         // --- Live Stacking ---
+
+        // Toggle the floating right-side control panel on LIVE /
+        // PREVIEW / VIDEO. Persisted in localStorage so the operator's
+        // choice survives reloads — useful when reviewing a long stack
+        // and they want the canvas full-screen the whole session.
+        toggleQuickControls() {
+            this.quickControlsCollapsed = !this.quickControlsCollapsed;
+            try {
+                localStorage.setItem('polaris.quickControlsCollapsed',
+                    this.quickControlsCollapsed ? '1' : '0');
+            } catch { /* private-browsing / quota — silent */ }
+        },
 
         async toggleLiveStack() {
             const enabling = !this.liveStackEnabled;

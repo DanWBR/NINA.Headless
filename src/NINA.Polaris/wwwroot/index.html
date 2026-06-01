@@ -1901,69 +1901,59 @@
                      a live temperature / moving readout. Hidden when no
                      focuser is connected so the page doesn't show
                      dead controls. -->
-                <div class="focus-controls" x-show="focusConnected">
+                <!-- Compact single-strip layout: stepper on the left
+                     (primary affordance), slow/fast inputs + readouts
+                     inline on the right. Replaces the old 3-row stack
+                     (stepper + step config + info) which was eating
+                     ~180px of vertical real estate before the user
+                     even saw the focus preview. -->
+                <div class="focus-controls focus-controls-compact" x-show="focusConnected">
                     <!-- ASIAIR-style stepper: two pairs of arrow
                          buttons (SLOW + FAST) plus the live position
-                         readout in the middle. Both step values
-                         user-editable; persisted to localStorage so
-                         the user's choice survives reloads. The FAST
-                         step is unlimited in the input -- backend
-                         chunks any move > 100 steps internally to
-                         avoid the ZWO EAF crash on large single
-                         writes. -->
-                    <div class="stepper">
-                        <button class="btn btn-lg" @click="focusMove(-focusStepFast)" :disabled="!focusConnected"
+                         readout in the middle. -->
+                    <div class="stepper stepper-compact">
+                        <button class="btn" @click="focusMove(-focusStepFast)" :disabled="!focusConnected"
                                 :title="'Move OUT by ' + focusStepFast + ' steps (FAST)'">&laquo;</button>
                         <button class="btn" @click="focusMove(-focusStepSlow)" :disabled="!focusConnected"
                                 :title="'Move OUT by ' + focusStepSlow + ' steps (SLOW)'">&lt;</button>
                         <span class="stepper-value" x-text="focusPosition">0</span>
                         <button class="btn" @click="focusMove(focusStepSlow)" :disabled="!focusConnected"
                                 :title="'Move IN by ' + focusStepSlow + ' steps (SLOW)'">&gt;</button>
-                        <button class="btn btn-lg" @click="focusMove(focusStepFast)" :disabled="!focusConnected"
+                        <button class="btn" @click="focusMove(focusStepFast)" :disabled="!focusConnected"
                                 :title="'Move IN by ' + focusStepFast + ' steps (FAST)'">&raquo;</button>
                     </div>
-                    <!-- Editable step sizes. ASIAIR uses preset
-                         dropdowns; we use number inputs because
-                         every focuser has a different sweet spot
-                         (ZWO EAF likes 5/50, FocusBoss EXT likes
-                         1/100, Pegasus FocusCube likes 10/500). -->
-                    <div class="focus-step-config">
-                        <label class="focus-step-input">
-                            <span>SLOW (steps)</span>
+                    <!-- Inline meta strip: SLOW/FAST inputs use
+                         label-on-the-left so each occupies ~110 px
+                         instead of the old 90+20 stacked version.
+                         Temperature + MOVING tag + Reconnect tuck in
+                         to the right with auto-margin. -->
+                    <div class="focus-meta-strip">
+                        <label class="focus-step-inline">
+                            <span>Slow</span>
                             <input type="number" min="1" max="500"
                                    x-model.number="focusStepSlow"
                                    @change="saveFocusSteps()">
                         </label>
-                        <label class="focus-step-input">
-                            <span>FAST (steps)</span>
+                        <label class="focus-step-inline">
+                            <span>Fast</span>
                             <input type="number" min="1" max="10000"
                                    x-model.number="focusStepFast"
                                    @change="focusStep = focusStepFast; saveFocusSteps()">
                         </label>
-                        <!-- Software recovery for a wedged EAF: cycles
-                             the device's CONNECTION switch (disconnect
-                             then reconnect) without restarting INDI.
-                             Used when the operator sees repeated
-                             "DISCONNECTED within 500ms of move" entries
-                             in the LOG and even small moves crash --
-                             the EAF firmware is gunked up from prior
-                             crashes and a CONNECT cycle often clears
-                             it without unplugging the USB cable. -->
-                        <button class="btn btn-sm"
-                                style="align-self: flex-end; margin-left: auto;"
+                        <span class="focus-readout" x-show="focusTemp !== null"
+                              :title="'Focuser temperature'"
+                              x-text="focusTemp !== null ? focusTemp.toFixed(1) + ' °C' : ''"></span>
+                        <span class="focus-readout focus-readout-warn" x-show="focusMoving">MOVING</span>
+                        <!-- Reconnect button hidden behind the "↻"
+                             glyph -- recovery action, doesn't need a
+                             full text label competing with the stepper.
+                             Same wedged-EAF use case as before. -->
+                        <button class="btn btn-sm focus-reconnect-btn"
                                 @click="focuserReconnect()"
                                 :disabled="!focusConnected"
                                 title="Cycle the focuser driver connection (DISCONNECT then CONNECT). Use when moves stop working after a driver crash. If this doesn't fix it, physically unplug the EAF USB cable for 5s and plug it back in.">
-                            ↻ Reconnect
+                            ↻
                         </button>
-                    </div>
-                    <div class="focus-info">
-                        <div class="info-row" x-show="focusTemp !== null">
-                            <span>Temperature:</span><strong x-text="focusTemp !== null ? focusTemp.toFixed(1) + ' C' : '--'"></strong>
-                        </div>
-                        <div class="info-row" x-show="focusMoving">
-                            <span>Status:</span><strong class="text-warn">MOVING</strong>
-                        </div>
                     </div>
                 </div>
 

@@ -2861,11 +2861,94 @@ label select.input-sm {
     gap: 16px;
 }
 
+/* Compact strip variant used in the FOCUS tab. Replaces the old
+   stacked layout (stepper + step-config + info) which was wasting
+   ~180 px before the focus preview. Single row: stepper left,
+   slow/fast inputs + temperature + reconnect inline right. Wraps
+   to two rows on narrow widths so the inputs never get clipped. */
+.focus-controls.focus-controls-compact {
+    padding: 8px 12px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+
 .stepper {
     display: flex;
     align-items: center;
     gap: 8px;
     justify-content: center;
+}
+/* Tighter button + value sizing for the inline strip. The big
+   btn-lg / 20 px value was an artefact of the old vertically-stacked
+   layout; in a single-row strip the stepper still reads clearly at
+   regular button size + 16 px value. */
+.stepper-compact {
+    gap: 6px;
+}
+.stepper-compact .btn {
+    padding: 4px 9px;
+    font-size: 13px;
+    min-width: 30px;
+}
+.stepper-compact .stepper-value {
+    min-width: 60px;
+    font-size: 16px;
+}
+
+/* Inline meta strip: slow/fast inputs + temperature readout +
+   reconnect button. Pushed to the right of the stepper via
+   margin-left:auto so the layout reads "stepper | meta" left-to-right
+   even at intermediate viewport widths. */
+.focus-meta-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+    flex-wrap: wrap;
+    font-size: 11px;
+    color: var(--text-muted, var(--text-secondary));
+}
+.focus-step-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.focus-step-inline input[type="number"] {
+    width: 56px;
+    padding: 3px 5px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    background: var(--input-bg, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    text-transform: none;
+}
+.focus-step-inline input[type="number"]:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+.focus-readout {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+}
+.focus-readout-warn {
+    color: var(--warn, #f5a623);
+    background: rgba(245, 166, 35, 0.12);
+    font-weight: 600;
+}
+.focus-reconnect-btn {
+    padding: 4px 9px;
+    font-size: 13px;
+    line-height: 1;
 }
 
 .stepper-value {

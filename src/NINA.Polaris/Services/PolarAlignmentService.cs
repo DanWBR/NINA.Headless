@@ -466,7 +466,230 @@ public class PolarAlignmentService {
         FITSWriter.Write(image, path);
         return path;
     }
+
+    // ─── RDPA-2: Rudimentary single-target polar alignment ──────────
+    //
+    // Different workflow from TPPA: the user picks ONE bright visible
+    // target, Polaris slews + captures + solves once, then reports the
+    // pointing error attributed to polar misalignment. The user walks
+    // to the mount, nudges azimuth/altitude knobs, and clicks
+    // "re-solve" — repeat until happy. No 3-point sweep, no auto
+    // convergence threshold (the user decides).
+    //
+    // Reuses the same PolarAlignmentJob + WS broadcast plumbing so the
+    // UI handler can render either mode without branching on Mode at
+    // the transport layer. New phases are added below to disambiguate
+    // the iteration progress without polluting the TPPA enum values.
+
+    /// <summary>
+    /// Start a rudimentary alignment session. Resets CurrentJob to a
+    /// fresh job in Rudimentary mode, optionally slews to the target,
+    /// captures one frame, plate-solves, and computes the error vector.
+    /// The job stays alive after this returns so subsequent
+    /// RudimentaryReSolveAsync calls can append to the iteration history.
+    /// </summary>
+    public async Task<RudimentaryStepResult> StartRudimentaryAsync(
+        RudimentaryStartRequest req, CancellationToken ct) {
+
+        if (CurrentJob != null && CurrentJob.IsActive) {
+            throw new InvalidOperationException(
+                "A polar-alignment job is already in progress. Abort it first.");
+        }
+
+        var job = new PolarAlignmentJob {
+            Id = Guid.NewGuid().ToString("N"),
+            Options = new PolarAlignmentOptions(
+                ExposureSeconds: req.ExposureSeconds,
+                Gain: req.Gain,
+                SettleSeconds: req.SettleSeconds),
+            Mode = "rudimentary",
+            Phase = PolarAlignmentPhase.Preflight,
+            StartedAt = DateTime.UtcNow,
+            TargetRaHours = req.TargetRaHours,
+            TargetDecDeg = req.TargetDecDeg,
+            TargetName = req.TargetName,
+        };
+        _jobs[job.Id] = job;
+        CurrentJob = job;
+        job.Cts = new CancellationTokenSource();
+
+        try { JobUpdated?.Invoke(job); } catch { }
+        return await DoRudimentaryStepAsync(job, slew: req.SlewToTarget, ct);
+    }
+
+    /// <summary>
+    /// Run another capture+solve at the current mount position (no
+    /// slew). Requires a prior StartRudimentaryAsync that established
+    /// the target. Each call appends to the iteration history so the
+    /// UI sparkline can show convergence.
+    /// </summary>
+    public async Task<RudimentaryStepResult> RudimentaryReSolveAsync(CancellationToken ct) {
+        var job = CurrentJob;
+        if (job == null || job.Mode != "rudimentary" || job.TargetRaHours == null) {
+            throw new InvalidOperationException(
+                "No active rudimentary alignment session. Call /start first.");
+        }
+        // Don't bring up a brand-new CTS; reuse the start one so the
+        // /abort endpoint cancels in-flight resolves too.
+        if (job.Cts == null || job.Cts.IsCancellationRequested) {
+            job.Cts = new CancellationTokenSource();
+        }
+        return await DoRudimentaryStepAsync(job, slew: false, ct);
+    }
+
+    private async Task<RudimentaryStepResult> DoRudimentaryStepAsync(
+        PolarAlignmentJob job, bool slew, CancellationToken externalCt) {
+
+        // Combine the caller's ct with the job's CTS so /abort works.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            externalCt, job.Cts!.Token);
+        var ct = linked.Token;
+
+        try {
+            // Preflight: camera + (optional) telescope + site lat/lon.
+            SetPhase(job, PolarAlignmentPhase.Preflight);
+            var camera = _equip.Camera;
+            var telescope = _equip.Telescope;
+            var profile = _profiles.Active;
+
+            if (camera == null || !camera.IsConnected) {
+                return FailRudimentary(job, "Camera not connected.");
+            }
+            if (profile.Latitude == 0 && profile.Longitude == 0) {
+                return FailRudimentary(job,
+                    "Site latitude/longitude not set. Configure your location in Settings.");
+            }
+            if (slew) {
+                if (telescope == null || !telescope.IsConnected) {
+                    return FailRudimentary(job,
+                        "Telescope not connected. Disable 'Slew to target' if your mount is manual.");
+                }
+                if (telescope.IsParked) {
+                    return FailRudimentary(job,
+                        "Telescope is parked. Unpark before running alignment.");
+                }
+            }
+
+            // Optionally slew.
+            if (slew && telescope != null && job.TargetRaHours.HasValue && job.TargetDecDeg.HasValue) {
+                SetPhase(job, PolarAlignmentPhase.RudimentarySlewing);
+                _notify.Push("info",
+                    $"Rudimentary align: slewing to {(job.TargetName ?? "target")}", 2500);
+                await telescope.SlewAsync(job.TargetRaHours.Value, job.TargetDecDeg.Value, ct);
+                if (job.Options.SettleSeconds > 0) {
+                    await Task.Delay(job.Options.SettleSeconds * 1000, ct);
+                }
+            }
+
+            // Capture.
+            SetPhase(job, PolarAlignmentPhase.RudimentaryCapturing);
+            var image = await camera.CaptureAsync(
+                job.Options.ExposureSeconds,
+                new CaptureOptions(Gain: job.Options.Gain, ImageType: "POLAR"),
+                ct);
+            if (image == null || image.Properties.Width <= 0 || image.Properties.Height <= 0) {
+                return FailRudimentary(job, "Camera returned an empty frame.");
+            }
+
+            // Plate solve, with one retry on doubled exposure (same
+            // rescue TPPA uses for marginal star count on first try).
+            SetPhase(job, PolarAlignmentPhase.RudimentarySolving);
+            var solve = await SolveOnceAsync(image, telescope!, ct);
+            if (!solve.Success) {
+                _logger.LogInformation(
+                    "Rudimentary: first solve failed ({Err}), retrying with 2x exposure",
+                    solve.Error);
+                var retry = await camera.CaptureAsync(
+                    job.Options.ExposureSeconds * 2.0,
+                    new CaptureOptions(Gain: job.Options.Gain, ImageType: "POLAR"),
+                    ct);
+                if (retry != null && retry.Properties.Width > 0) {
+                    solve = await SolveOnceAsync(retry, telescope!, ct);
+                }
+            }
+            if (!solve.Success) {
+                return FailRudimentary(job,
+                    $"Plate solve failed: {solve.Error}. Increase exposure or gain in rig settings.");
+            }
+
+            // Compute the single-target polar error.
+            var (azErr, altErr) = PolarAlignmentMath.ComputeErrorSingleTarget(
+                targetRaHours: job.TargetRaHours!.Value,
+                targetDecDeg: job.TargetDecDeg!.Value,
+                solvedRaHours: solve.RaHours,
+                solvedDecDeg: solve.DecDeg,
+                siteLatDeg: profile.Latitude,
+                siteLongDeg: profile.Longitude,
+                utcNow: DateTime.UtcNow);
+            var total = PolarAlignmentMath.TotalErrorArcsec(azErr, altErr);
+
+            job.SolvedRaHours = solve.RaHours;
+            job.SolvedDecDeg = solve.DecDeg;
+            job.AzErrorArcsec = azErr;
+            job.AltErrorArcsec = altErr;
+            job.TotalErrorArcsec = total;
+            job.History.Add(new RudimentaryIteration(total, DateTime.UtcNow));
+            // Cap history at 20 entries so a long session doesn't leak
+            // memory in the WS payload.
+            while (job.History.Count > 20) job.History.RemoveAt(0);
+
+            SetPhase(job, PolarAlignmentPhase.Ok);
+            return new RudimentaryStepResult(
+                Ok: true, Error: null,
+                SolvedRaHours: solve.RaHours, SolvedDecDeg: solve.DecDeg,
+                AzErrorArcsec: azErr, AltErrorArcsec: altErr,
+                TotalErrorArcsec: total,
+                IterationCount: job.History.Count);
+        } catch (OperationCanceledException) {
+            SetPhase(job, PolarAlignmentPhase.Cancelled);
+            return new RudimentaryStepResult(false, "Cancelled by user",
+                0, 0, 0, 0, 0, job.History.Count);
+        } catch (Exception ex) {
+            _logger.LogError(ex, "Rudimentary alignment step crashed");
+            return FailRudimentary(job, ex.Message);
+        }
+    }
+
+    private RudimentaryStepResult FailRudimentary(PolarAlignmentJob job, string error) {
+        job.LastError = error;
+        job.Phase = PolarAlignmentPhase.Failed;
+        try { JobUpdated?.Invoke(job); } catch { }
+        _notify.Push("error", "Polar alignment: " + error);
+        return new RudimentaryStepResult(false, error,
+            0, 0, 0, 0, 0, job.History.Count);
+    }
 }
+
+/// <summary>RDPA-2: kick off a fresh rudimentary session. Target is
+/// the bright object the user picked from the catalog dropdown or
+/// typed in by RA/Dec. SlewToTarget=false skips the GoTo (for manual
+/// mounts or when the operator already pointed by hand).</summary>
+public record RudimentaryStartRequest(
+    double TargetRaHours,
+    double TargetDecDeg,
+    string? TargetName,
+    bool SlewToTarget = true,
+    double ExposureSeconds = 3.0,
+    int Gain = 100,
+    int SettleSeconds = 2);
+
+/// <summary>Outcome of a single rudimentary iteration (Start or
+/// Re-solve). The job lives on in CurrentJob with TargetRaHours +
+/// History populated so the UI can render the sparkline.</summary>
+public record RudimentaryStepResult(
+    bool Ok,
+    string? Error,
+    double SolvedRaHours,
+    double SolvedDecDeg,
+    double AzErrorArcsec,
+    double AltErrorArcsec,
+    double TotalErrorArcsec,
+    int IterationCount);
+
+/// <summary>One entry in the rudimentary iteration history. The UI
+/// renders these as a sparkline so the user can see the error trend
+/// downward (convergence) vs flat / increasing (still need work).</summary>
+public record RudimentaryIteration(double TotalErrorArcsec, DateTime AtUtc);
 
 /// <summary>User-supplied TPPA options. All fields have sensible defaults
 /// from the active rig's profile, the UI typically passes the rig
@@ -499,12 +722,31 @@ public class PolarAlignmentJob {
     public double TotalErrorArcsec { get; set; }
     public string? LastError { get; set; }
     /// <summary>"tppa" for the initial 3-point run, "refine" for the
-    /// continuous loop. Drives UI labelling.</summary>
+    /// continuous loop, "rudimentary" for the single-target iterative
+    /// workflow (RDPA). Drives UI labelling.</summary>
     public string Mode { get; set; } = "tppa";
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     internal CancellationTokenSource? Cts { get; set; }
     internal Task? Task { get; set; }
+
+    /// <summary>RDPA-2: target the user picked for rudimentary mode.
+    /// Null in TPPA mode. Persists across re-solve iterations so the
+    /// math + sky markers always reference the same intended point.</summary>
+    public double? TargetRaHours { get; set; }
+    public double? TargetDecDeg { get; set; }
+    public string? TargetName { get; set; }
+
+    /// <summary>RDPA-2: most recent plate-solved pointing. Used by
+    /// the sky-map markers (target vs actual) and the canvas arrow.</summary>
+    public double? SolvedRaHours { get; set; }
+    public double? SolvedDecDeg { get; set; }
+
+    /// <summary>RDPA-2: rolling history of (totalError, at) per
+    /// re-solve. UI renders a small sparkline so user can see the
+    /// trend converge (or not) across knob adjustments. Capped at
+    /// 20 entries in the service.</summary>
+    public List<RudimentaryIteration> History { get; set; } = new();
 
     /// <summary>True while RunAsync is still chewing through phases.
     /// Used by the second-StartJob guard.</summary>
@@ -534,4 +776,11 @@ public enum PolarAlignmentPhase {
     /// <summary>PA-5: continuous capture+solve loop while the user
     /// adjusts the mount knobs.</summary>
     Refining,
+    /// <summary>RDPA-2: rudimentary single-target alignment phases.
+    /// Lumped under one mode but split into 3 sub-phases so the WS
+    /// payload + UI status pill can show "Slewing to target" vs
+    /// "Capturing" vs "Solving" without ambiguity.</summary>
+    RudimentarySlewing,
+    RudimentaryCapturing,
+    RudimentarySolving,
 }

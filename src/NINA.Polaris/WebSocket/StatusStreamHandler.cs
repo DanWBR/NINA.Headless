@@ -451,7 +451,18 @@ public static class StatusStreamHandler {
                             totalErrorArcsec = polarAlign.CurrentJob.TotalErrorArcsec,
                             lastError = polarAlign.CurrentJob.LastError,
                             startedAt = polarAlign.CurrentJob.StartedAt,
-                            completedAt = polarAlign.CurrentJob.CompletedAt
+                            completedAt = polarAlign.CurrentJob.CompletedAt,
+                            // RDPA-2: rudimentary-mode fields. Null in TPPA
+                            // mode (the frontend gates on mode==='rudimentary'
+                            // before reading these). Includes target +
+                            // last solved + iteration sparkline data.
+                            targetRaHours = polarAlign.CurrentJob.TargetRaHours,
+                            targetDecDeg = polarAlign.CurrentJob.TargetDecDeg,
+                            targetName = polarAlign.CurrentJob.TargetName,
+                            solvedRaHours = polarAlign.CurrentJob.SolvedRaHours,
+                            solvedDecDeg = polarAlign.CurrentJob.SolvedDecDeg,
+                            iterationCount = polarAlign.CurrentJob.History.Count,
+                            history = polarAlign.CurrentJob.History
                         },
                         // DBGLOG-5: ship new log entries since last tick
                         // (max 50 per tick). truncated=true if the

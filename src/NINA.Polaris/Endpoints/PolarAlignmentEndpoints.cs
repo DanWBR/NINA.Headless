@@ -109,6 +109,65 @@ public static class PolarAlignmentEndpoints {
         group.MapGet("/best-targets",
             (PolarTppaTargetService svc, int? limit) =>
                 Results.Ok(svc.Suggest(limit.GetValueOrDefault(5))));
+
+        // ─── RDPA-2: rudimentary single-target alignment routes ─────
+
+        // POST /api/polar/rudimentary/start
+        // Body: RudimentaryStartRequest. Fresh session: target +
+        // optional slew + capture + solve. Returns the first
+        // iteration's error vector. CurrentJob lives on so
+        // subsequent /resolve calls iterate against the same target.
+        group.MapPost("/rudimentary/start", async (
+            PolarAlignmentService svc,
+            ProfileService profiles,
+            RudimentaryStartRequest? request,
+            HttpContext ctx) => {
+
+            if (request == null) {
+                return Results.BadRequest(new { error = "missing body" });
+            }
+            // Defaults from active rig so the UI can post a minimal
+            // body (just target + slew flag) and inherit exposure
+            // settings.
+            var rig = profiles.ActiveEquipmentProfile;
+            var req = request with {
+                ExposureSeconds = request.ExposureSeconds > 0
+                    ? request.ExposureSeconds : rig.PolarAlignExposureSec,
+                Gain = request.Gain > 0
+                    ? request.Gain : rig.PolarAlignGain,
+                SettleSeconds = request.SettleSeconds > 0
+                    ? request.SettleSeconds : rig.PolarAlignSettleSeconds,
+            };
+            try {
+                var result = await svc.StartRudimentaryAsync(req, ctx.RequestAborted);
+                return Results.Ok(result);
+            } catch (InvalidOperationException ex) {
+                return Results.Conflict(new { error = ex.Message });
+            }
+        });
+
+        // POST /api/polar/rudimentary/resolve
+        // No body. Re-captures + solves at the current mount pointing
+        // (no slew). Use this after the operator nudged the knobs.
+        group.MapPost("/rudimentary/resolve", async (
+            PolarAlignmentService svc,
+            HttpContext ctx) => {
+            try {
+                var result = await svc.RudimentaryReSolveAsync(ctx.RequestAborted);
+                return Results.Ok(result);
+            } catch (InvalidOperationException ex) {
+                // No active session — UI should disable the button.
+                return Results.Conflict(new { error = ex.Message });
+            }
+        });
+
+        // POST /api/polar/rudimentary/abort
+        // Alias for the generic /abort so the UI can be explicit
+        // about which workflow is being cancelled. Identical effect.
+        group.MapPost("/rudimentary/abort", (PolarAlignmentService svc) => {
+            svc.AbortCurrent();
+            return Results.Ok(new { aborted = true });
+        });
     }
 }
 

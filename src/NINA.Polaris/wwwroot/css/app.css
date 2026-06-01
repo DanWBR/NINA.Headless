@@ -741,7 +741,10 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 12px;
+    /* Extra padding-left reserves room for the full-height toggle
+       handle that lives at the inside-left edge of the panel
+       (28px wide handle + 8px gap before content starts). */
+    padding: 12px 12px 12px 44px;
     overflow-y: auto;
     background: rgba(15, 23, 42, 0.88);
     backdrop-filter: blur(10px);
@@ -779,23 +782,26 @@ body {
    chevron flips when collapsed so it always points the direction the
    panel would slide if clicked. tap-friendly 32×40 px. */
 .quick-controls-toggle {
-    /* Vertical handle pinned to the inside-left edge of the floating
-       panel. Lives INSIDE .quick-controls (the panel has overflow-y:auto
-       which implicitly clips X-overflow per spec, so the handle can't
-       poke out the panel — it has to live within the panel bounds).
+    /* Full-height vertical handle on the inside-left edge of the
+       floating panel. Lives INSIDE .quick-controls (the panel has
+       overflow-y:auto which per CSS spec implicitly clips X-overflow
+       too, so the handle has to live within the panel bounds).
+       Spans top:0 → bottom:0 so the operator can grab it from any
+       vertical position. The .quick-controls panel has padding-left:
+       44px to reserve room so this handle never overlaps content.
        When the panel is collapsed (transform translateX(100% - 28px)),
-       only its leftmost 28 px stays visible, which is exactly where
-       this handle sits → operator can always grab it. */
+       only its leftmost 28 px stays visible — exactly where this
+       handle sits. */
     position: absolute;
-    top: 12px;
+    top: 0;
+    bottom: 0;
     left: 0;
     width: 28px;
-    height: 56px;
     padding: 0;
-    background: rgba(56, 189, 248, 0.18);   /* tinted so it stands out
-                                               against the dark panel
-                                               background */
+    background: rgba(56, 189, 248, 0.18);
     border: 1px solid rgba(103, 232, 249, 0.45);
+    border-top: none;
+    border-bottom: none;
     border-left: none;
     border-radius: 0 var(--radius) var(--radius) 0;
     color: #67e8f9;
@@ -8460,7 +8466,9 @@ label select.input-sm {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 12px;
+    /* Reserve 44px on the left so the full-height toggle handle
+       (28px wide + 8px gap) doesn't overlap content. */
+    padding: 12px 12px 12px 44px;
     overflow-y: auto;
     background: rgba(15, 23, 42, 0.88);
     backdrop-filter: blur(10px);

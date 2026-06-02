@@ -99,6 +99,13 @@ public static class EquipmentEndpoints {
                 // tries to parse it to BayerPatternEnum.
                 r.BayerPatternOverride = string.IsNullOrWhiteSpace(update.BayerPatternOverride)
                     ? null : update.BayerPatternOverride.Trim().ToUpperInvariant();
+                // FIELD3-2: vertical-flip companion to the Bayer
+                // override. Boolean copies through cleanly (default
+                // false). Together with the Bayer override they cover
+                // both SVBONY family symptoms: completely-wrong mosaic
+                // (Bayer override) vs row-offset mosaic / checkerboard
+                // (vertical flip).
+                r.VerticalFlipImage = update.VerticalFlipImage;
                 r.FocuserStepSize = update.FocuserStepSize;
                 r.FocuserBacklashSteps = update.FocuserBacklashSteps;
                 // Polar alignment (TPPA) tunables. Defensive: zero from

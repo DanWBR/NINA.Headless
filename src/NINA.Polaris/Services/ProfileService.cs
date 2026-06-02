@@ -207,6 +207,7 @@ public class ProfileService {
             DefaultGain = src.DefaultGain, DefaultOffset = src.DefaultOffset,
             DefaultBinning = src.DefaultBinning,
             BayerPatternOverride = src.BayerPatternOverride,
+            VerticalFlipImage = src.VerticalFlipImage,
             FocuserStepSize = src.FocuserStepSize,
             FocuserBacklashSteps = src.FocuserBacklashSteps,
             FocalLengthMm = src.FocalLengthMm,
@@ -582,6 +583,18 @@ public class EquipmentProfile {
     /// wrong BAYERPAT keyword or omit it entirely, which collapses the
     /// stacked frame to greyscale.</summary>
     public string? BayerPatternOverride { get; set; }
+
+    /// <summary>FIELD3-2: vertically flip the pixel array on receive.
+    /// FITS stores pixel rows BOTTOM-UP per the spec, but some drivers
+    /// (the SVBONY SV405CC indi_svbony_ccd notably) deliver buffers
+    /// TOP-DOWN without the corresponding header axis flip. Our reader
+    /// loads sequentially, so the buffer downstream is "wrong-handed"
+    /// for one half of the camera population. The visible symptom is a
+    /// red-green checkerboard after debayer -- the Bayer pattern is
+    /// correct enum-wise but offset by 1 row. Setting this true flips
+    /// the array Y-direction after decode so RGGB stays RGGB. Default
+    /// false (most cameras need no flip).</summary>
+    public bool VerticalFlipImage { get; set; }
 
     // Polar alignment (TPPA) tunables. Per-rig because exposure /
     // gain that work for a fast OSC don't necessarily work for a

@@ -9694,7 +9694,23 @@ function ninaApp() {
                 return;
             }
             const w = this.fov.width, h = this.fov.height;
-            const rot = (this.fov.rotationDeg || this.solveRotationDeg || 0);
+            // FIELD3-4: two separate rotations now, not the previous
+            // single shared `rot`. Blue (mount) wants the actual
+            // camera angle on sky, which is the solved rotation when
+            // available -- that's what the mount is physically holding
+            // right now. Red (target) wants the user's desired
+            // framing rotation (defaults to 0; can be set per-rig
+            // via fov.rotationDeg). When the operator slews + solves
+            // + recenters, the two rectangles converge in position
+            // AND rotation, which is the ASIAIR mental model "I'm
+            // framed correctly when red and blue overlap". With a
+            // single shared rot the rectangles always trivially had
+            // the same angle and the operator couldn't tell whether
+            // the solve had actually nailed the requested rotation.
+            const mountRot  = Number.isFinite(this.solveRotationDeg)
+                ? this.solveRotationDeg
+                : (this.fov.rotationDeg || 0);
+            const targetRot = (this.fov.rotationDeg || 0);
 
             let mount = null;
             if (this.mount?.connected
@@ -9703,7 +9719,7 @@ function ninaApp() {
                 mount = {
                     raDeg: this.mount.ra * 15,
                     decDeg: this.mount.dec,
-                    widthDeg: w, heightDeg: h, rotationDeg: rot
+                    widthDeg: w, heightDeg: h, rotationDeg: mountRot
                 };
             }
 
@@ -9713,7 +9729,7 @@ function ninaApp() {
             // needed; the rectangle's "celestial position" IS the
             // current map centre, which the user is dragging around.
             const target = {
-                widthDeg: w, heightDeg: h, rotationDeg: rot
+                widthDeg: w, heightDeg: h, rotationDeg: targetRot
             };
 
             // Skip when nothing actually changed since last push.
@@ -9729,7 +9745,12 @@ function ninaApp() {
                               w: mount.widthDeg.toFixed(3), rot: (mount.rotationDeg||0).toFixed(2) },
                 t: target && { w: target.widthDeg.toFixed(3),
                               h: target.heightDeg.toFixed(3),
-                              rot: (target.rotationDeg||0).toFixed(2) }
+                              rot: (target.rotationDeg||0).toFixed(2) },
+                // FIELD3-4: include solveRotationDeg in the key so a
+                // post-solve rotation update re-pushes the mount
+                // rectangle even when ra/dec haven't moved.
+                sr: Number.isFinite(this.solveRotationDeg)
+                    ? this.solveRotationDeg.toFixed(2) : null
             });
             if (key === this._lastFovOverlayKey) return;
             this._lastFovOverlayKey = key;
@@ -11032,6 +11053,15 @@ function ninaApp() {
         // the relay broadcasts (no reconnect needed).
         setBayerOverride(rig, value) {
             rig.bayerPatternOverride = value && value.trim() ? value.trim() : null;
+            this.saveRig(rig);
+        },
+
+        // FIELD3-2: per-rig vertical-flip override. Mirrors the
+        // pixel array Y-direction server-side so RGGB stays RGGB on
+        // drivers that deliver top-down data without flipping the
+        // FITS axis (SV405CC indi_svbony_ccd notably).
+        setVerticalFlipImage(rig, value) {
+            rig.verticalFlipImage = !!value;
             this.saveRig(rig);
         },
 
@@ -17420,7 +17450,12 @@ function ninaApp() {
 
         startSlewCenterPolling() {
             this.stopSlewCenterPolling();
-            this._slewCenterTimer = setInterval(() => this.pollSlewCenter(), 2000);
+            // FIELD3-3: poll at 1Hz (was 2s). At 2s the operator
+            // could miss whole "Solving" phases on a fast solver and
+            // see the iteration counter jump in big gaps. 1Hz keeps
+            // the activity-bar phase icon honest without putting
+            // real load on the server.
+            this._slewCenterTimer = setInterval(() => this.pollSlewCenter(), 1000);
         },
 
         stopSlewCenterPolling() {
@@ -17437,6 +17472,22 @@ function ninaApp() {
                     `/api/sky/slew-and-center/${this.slewCenterJobId}/status`);
                 this.slewCenterStatus = data;
 
+                // FIELD3-4: as soon as a solve produces a rotation,
+                // push it into solveRotationDeg and re-render the
+                // sky FOV overlays. The red (target) rectangle then
+                // lands on the actual solved orientation; the blue
+                // (mount) rectangle stays anchored to fov.rotationDeg
+                // (the rig's expected camera angle). When the two
+                // match the solve is on; when they diverge by more
+                // than a few degrees the camera was rotated since
+                // the rig was calibrated.
+                if (Number.isFinite(data?.rotation)
+                        && this.solveRotationDeg !== data.rotation) {
+                    this.solveRotationDeg = data.rotation;
+                    try { this._pushSkyFovOverlays && this._pushSkyFovOverlays(); }
+                    catch (e) { /* iframe not mounted; harmless */ }
+                }
+
                 if (data.state === 'centered') {
                     this.stopSlewCenterPolling();
                     this.toast(`Centered! Error: ${data.errorArcsec?.toFixed(1)}"`, 'ok', 6000);
@@ -17450,6 +17501,37 @@ function ninaApp() {
                     this.slewCenterJobId = null;
                 }
             } catch (e) { }
+        },
+
+        // FIELD3-3: phase-label helpers for the slew progress block.
+        // Maps SlewCenterState enum values to a one-glyph icon + a
+        // plain-English label. Keeps the operator-facing string in
+        // one place rather than hardcoded in the template.
+        slewPhaseIcon(state) {
+            switch ((state || '').toLowerCase()) {
+                case 'pending':    return '⏳';
+                case 'slewing':    return '🛰️';
+                case 'capturing':  return '📷';
+                case 'solving':    return '🧭';
+                case 'syncing':    return '🔄';
+                case 'centered':   return '✅';
+                case 'failed':     return '❌';
+                case 'cancelled':  return '⏹';
+                default:           return '·';
+            }
+        },
+        slewPhaseLabel(state) {
+            switch ((state || '').toLowerCase()) {
+                case 'pending':    return 'Queued';
+                case 'slewing':    return 'Slewing to target';
+                case 'capturing':  return 'Capturing solve frame';
+                case 'solving':    return 'Plate solving';
+                case 'syncing':    return 'Syncing mount';
+                case 'centered':   return 'Centered';
+                case 'failed':     return 'Failed';
+                case 'cancelled':  return 'Cancelled';
+                default:           return (state || '').toUpperCase();
+            }
         },
 
         // Unified panic-stop: kills whatever mount motion is in
@@ -17755,6 +17837,34 @@ function ninaApp() {
                     label: 'Pi was under-voltage since boot — use a powered USB hub',
                     href: 'docs/user-guide/troubleshooting.md#usb-device-crashes-mid-operation-under-voltage',
                     dismissable: true
+                });
+            }
+
+            // FIELD3-3: Slew & Center progress chip. Surfaces the
+            // current phase + iteration + last error on the always-
+            // visible activity bar so the operator can stay on any
+            // tab (FOCUS, LIVE, ...) and still know whether the run
+            // is alive. Disappears the moment slewCenterJobId clears
+            // (centered / failed / cancelled all clear it).
+            if (this.slewCenterJobId && this.slewCenterStatus) {
+                const st = this.slewCenterStatus;
+                const phase = (st.state || '').toLowerCase();
+                let kind = 'info';
+                if (phase === 'failed' || phase === 'cancelled') kind = 'error';
+                else if (phase === 'centered') kind = 'success';
+                else if (phase === 'solving' || phase === 'syncing') kind = 'warn';
+                const parts = [this.slewPhaseIcon(phase),
+                               this.slewPhaseLabel(phase)];
+                if ((st.iteration | 0) > 0) parts.push('iter ' + st.iteration);
+                if (Number.isFinite(st.errorArcsec)) {
+                    parts.push(st.errorArcsec.toFixed(1) + '"');
+                }
+                out.push({
+                    id: 'slew-center',
+                    icon: '',
+                    kind: kind,
+                    label: parts.join(' '),
+                    onClick: () => { this.tab = 'sky'; }
                 });
             }
 

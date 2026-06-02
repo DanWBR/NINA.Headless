@@ -3331,20 +3331,20 @@
                                  authoritative second signal -- if the
                                  client is talking PHD2 protocol, PHD2
                                  is definitely up. -->
-                            <span x-show="phd2GuiSession?.phd2Running || phd2?.connected"
+                            <span x-show="phd2GuiSession?.phd2Running || guider?.connected"
                                   class="text-ok" style="margin-left:14px">
                                 · PHD2 running
                             </span>
                             <span x-show="phd2GuiSession && phd2GuiSession.running
                                           && !phd2GuiSession.phd2Running
-                                          && !phd2?.connected"
+                                          && !guider?.connected"
                                   class="text-warn" style="margin-left:14px">
                                 · PHD2 not running inside session
                             </span>
                             <span style="flex:1"></span>
                             <button x-show="phd2GuiSession && phd2GuiSession.running
                                             && !phd2GuiSession.phd2Running
-                                            && !phd2?.connected"
+                                            && !guider?.connected"
                                     class="btn btn-sm btn-warn" @click="phd2GuiRelaunchPhd2()"
                                     :disabled="phd2GuiBusy"
                                     title="Spawn a new phd2 process inside the running xpra session">
@@ -5554,15 +5554,36 @@
                     </span>
                 </div>
 
-                <!-- Slew & Center progress -->
+                <!-- Slew & Center progress. FIELD3-3 makes the
+                     readout much chattier: phase icon + plain-English
+                     phase label, then a metrics grid that surfaces
+                     iteration count, current pointing error, and
+                     (after a solve lands) the solved scale +
+                     rotation. Operators reported only seeing the
+                     iteration counter on ASIAIR-class hardware made
+                     them anxious about whether the run was actually
+                     making progress; this brings it inline with
+                     the ASIAIR pattern. -->
                 <div class="sky-slew-progress" x-show="slewCenterStatus && slewCenterJobId">
                     <div class="slew-progress-row">
-                        <span class="slew-state" x-text="slewCenterStatus?.state?.toUpperCase()"></span>
-                        <span>Iteration: <strong x-text="slewCenterStatus?.iteration || 0"></strong></span>
+                        <span class="slew-phase-icon"
+                              x-text="slewPhaseIcon(slewCenterStatus?.state)"></span>
+                        <span class="slew-state"
+                              x-text="slewPhaseLabel(slewCenterStatus?.state)"></span>
+                        <span x-show="(slewCenterStatus?.iteration || 0) > 0">
+                            Iteration: <strong x-text="slewCenterStatus?.iteration"></strong>
+                        </span>
                         <span x-show="slewCenterStatus?.errorArcsec">
                             Error: <strong x-text="(slewCenterStatus?.errorArcsec || 0).toFixed(1) + '&quot;'"></strong>
                         </span>
-                        <button class="btn btn-sm btn-danger" @click="cancelSlewCenter()">Cancel</button>
+                        <span x-show="slewCenterStatus?.scale">
+                            Scale: <strong x-text="(slewCenterStatus?.scale || 0).toFixed(2) + '\"/px'"></strong>
+                        </span>
+                        <span x-show="slewCenterStatus?.rotation != null">
+                            Rotation: <strong x-text="(slewCenterStatus?.rotation || 0).toFixed(1) + '°'"></strong>
+                        </span>
+                        <button class="btn btn-sm btn-danger" @click="cancelSlewCenter()"
+                                style="margin-left:auto">Cancel</button>
                     </div>
                 </div>
 
@@ -10455,6 +10476,30 @@ certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n "polaris-root" \
                                 </select>
                                 <span class="text-muted" style="font-size:11px">
                                     Override only if the live stack comes out grey or with swapped colours.
+                                </span>
+                            </div>
+
+                            <!-- FIELD3-2: vertical flip companion to
+                                 the Bayer override. When the live
+                                 stack comes out as a red/green
+                                 checkerboard (not the same as wrong
+                                 colours -- a checkerboard means the
+                                 Bayer pattern is offset by one row),
+                                 the driver delivered TOP-DOWN data
+                                 without flipping the FITS axis. Tick
+                                 this to mirror the buffer Y-direction
+                                 on receive so RGGB stays RGGB.
+                                 SVBONY SV405CC (indi_svbony_ccd) is
+                                 the known case as of 2026-06. -->
+                            <div class="rig-vflip-override" style="margin-top:6px;display:flex;align-items:center;gap:8px;font-size:12px">
+                                <label style="display:flex;align-items:center;gap:6px">
+                                    <input type="checkbox"
+                                           :checked="!!r.verticalFlipImage"
+                                           @change="setVerticalFlipImage(r, $event.target.checked)">
+                                    <span style="text-transform:uppercase;font-size:11px;color:var(--text-muted);letter-spacing:0.3px">Flip vertically</span>
+                                </label>
+                                <span class="text-muted" style="font-size:11px">
+                                    Enable if the live stack is a red/green checkerboard despite the correct Bayer pattern.
                                 </span>
                             </div>
                         </div>

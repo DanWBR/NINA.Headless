@@ -63,6 +63,27 @@ public class ImageRelayService : IDisposable {
         _profiles = profiles;
     }
 
+    /// <summary>FIELD3-2: build a new IImageData with rows reversed
+    /// when the active rig's VerticalFlipImage toggle is true. Returns
+    /// the original IImageData unchanged when off / no profile
+    /// resolved. The flip is a simple row-by-row reversal of the
+    /// ushort[] buffer; ImageProperties + MetaData are shared by
+    /// reference because nothing downstream mutates them. Cheap on a
+    /// modern CPU (4096x4096 @ 16 bit ~ 32 MB row swap, ~5 ms).</summary>
+    private IImageData ApplyVerticalFlipIfEnabled(IImageData source) {
+        if (!(_profiles?.ActiveEquipmentProfile?.VerticalFlipImage ?? false)) return source;
+        var w = source.Properties.Width;
+        var h = source.Properties.Height;
+        if (w <= 0 || h <= 0 || source.Data == null || source.Data.Length != w * h) return source;
+        var flipped = new ushort[source.Data.Length];
+        for (int y = 0; y < h; y++) {
+            var srcRow = y * w;
+            var dstRow = (h - 1 - y) * w;
+            Array.Copy(source.Data, srcRow, flipped, dstRow, w);
+        }
+        return new NINA.Image.ImageData.BaseImageData(flipped, source.Properties, source.MetaData);
+    }
+
     /// <summary>Resolve the active rig's Bayer override (if any) to a
     /// concrete enum value. Returns null when:
     ///   - No ProfileService injected (legacy ctor path / tests)
@@ -119,6 +140,17 @@ public class ImageRelayService : IDisposable {
 
     public async Task RelayImageAsync(IImageData imageData, FrameKind kind, CancellationToken ct = default) {
         var frameKind = (int)kind;
+        // FIELD3-2: optional vertical flip. Some camera drivers
+        // (SV405CC indi_svbony_ccd notably) deliver TOP-DOWN buffers
+        // without the corresponding FITS-spec axis flip; our reader
+        // loads sequentially, so the downstream Bayer pattern is
+        // offset by one row -> red/green checkerboard after debayer.
+        // The per-rig VerticalFlipImage profile toggle (FIELD3-2)
+        // mirrors the buffer Y-direction here so RGGB stays RGGB
+        // through the rest of the pipeline (live preview AND server-
+        // side accumulator, since LiveStackingService's integrated
+        // output re-enters this method).
+        var sourceData = ApplyVerticalFlipIfEnabled(imageData);
         // FIELD-2: apply the active rig's Bayer pattern override (if
         // any) before we hand the buffer to the JPEG encoder / raw
         // header writer. Drivers that emit a wrong or missing
@@ -127,7 +159,7 @@ public class ImageRelayService : IDisposable {
         // client-side debayer and the live stack comes out grey. The
         // override is the operator's "I know better than the driver"
         // escape hatch.
-        var buffer = ImageBuffer.FromImageData(imageData, ResolveBayerOverride());
+        var buffer = ImageBuffer.FromImageData(sourceData, ResolveBayerOverride());
         _latestImage = buffer;
         _latestJpeg = null;
 
